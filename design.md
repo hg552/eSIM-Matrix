@@ -1,0 +1,170 @@
+# eUICC-Nexus 架构设计与技术规范 (design.md)
+
+## 1. 项目背景与设计目标
+
+当前方案是在普通、非 Root Android 备用机上运行 `m`（Multi）APK；不要求 KernelSU、Magisk、OTBridge 或 LSPosed。SIM 2 可安装实体可插拔 eUICC 芯片（如 ESTKme / 9eSIM / esim.gg），内部预存多国漫游 eSIM Profile。切卡复用现有 LPA，通过卡片／固件已授权的 OMAPI 或外接读卡器访问；三签名不保证任意卡或固件放行，尚未在目标手机实测的能力不能视为已支持。
+
+单卡槽非 MEP 场景同一时刻只能激活一个 Profile。目标是在普通应用权限下提供远程指令、基带状态监听与短信转发；`m` 的持久选卡会话需用户 `/back` 或停止网关才返回默认卡。网络状态与短信接收使用运行时权限，不以 Root 桥接作为前提。只有底层读卡器已获访问授权时，才能执行 Profile 操作。
+
+---
+
+## 2. 历史技术路线评估（不是当前非 Root 部署步骤）
+
+以下保留初期 Root 候选方案的比较；当前非 Root 交付不采用其中的 OTBridge、Root Shell 或 Hook 路线，也不要求安装其模块。复用既有 LPA 不等于必须使用 Root：卡片和系统允许的本地 OMAPI，以及获准的外接读卡器，都可以承载既有 LPA 命令。
+
+| 评估维度 | 方案 A：基于 OTBridge / RemoCard | 方案 B：直接集成 `lpac` + Android OMAPI | 方案 C：Root Shell (`cmd phone`) / Hook 系统服务 |
+| :--- | :--- | :--- | :--- |
+| **底层通信机制** | 通过 ContentProvider / Socket 暴露底层 OMAPI/TMAPI 通道，由上层 LPA 组织 SGP.22 APDU | 在 Android 端交叉编译 `lpac` (C 原生程序)，通过 libomapi 或 JNI 封装接入 Smartcard API | 调用隐藏系统命令 `cmd phone euicc`，或通过 LSPosed Hook `EuiccManager` / 系统 LPA |
+| **实际接口约束** | **OTBridge** 实质为 ContentProvider (`ee.nekoko.nbridge.provider`)，仅传输原始 APDU，未暴露高阶切卡 IPC；**RemoCard** 则是 TCP Socket 远程读卡器，不含切卡业务逻辑 | `lpac` 依赖原生 SGP.22 状态机；但在 Android 环境下无标准 PC/SC，需自行对接 Android OMAPI / SE HAL，引入额外 JNI 与 C/Rust 动态库打包开销 | Android 原生 `EuiccManager` 强校验运营商特权证书（Carrier Privileges Rules / ARA-M）与特权签名；MIUI/HyperOS 的 `cmd phone` 对外置 eUICC 支持极不稳定 |
+| **NVRAM 磨损与卡顿恢复** | 依赖上层状态机防抖，缺少对 eUICC 芯片重置期间（`6881` / `6985`）的瞬态重试捕获 | 需要自行在 C 层实现针对物理卡片 reset、REFRESH 主动命令的等待重试机制 | 强行切卡可能因基带与卡片状态脱节导致 RIL 挂死，需重启基带或手机 |
+| **选型结论** | **最佳路径：复用本地既有 LPA 引擎（NekokoLPA2 核心）**。由应用内直接持有 `CompositeAdapter` 与 `ProfileManager`，不经外层 Socket 走弯路，直接控制 `ISD-R` 通道。 | **不采用作为主方案**：重复引入一套 C 语言 ASN.1 栈，增加构建链复杂度，收益与直接复用 Dart/Kotlin LPA 一致。 | **坚决废弃**：非公开命令行及系统 Hook 严重受制于厂商 ROM 版本与 SELinux 策略，稳定性无法达到长期无人值守要求。 |
+
+---
+
+## 3. 系统架构与模块边界
+
+系统分为 **Android 原生宿主层**、**Headless 状态机引擎** 以及 **远端交互控制面**：
+
+```mermaid
+flowchart TD
+    subgraph 远端控制面 [Control Plane via Tailscale LAN]
+        Client[curl / Tern / Web Dashboard] -->|HTTP Bearer Token| RestAPI[REST API :8787]
+        TGUser[Telegram App] -->|Private Command Whitelist| TGBot[Telegram Bot Poller]
+    end
+
+    subgraph 守护网关核心 [eUICC-Nexus Engine: Dart Headless Runtime]
+        RestAPI --> GatewayService[RemoteGatewayService]
+        TGBot --> GatewayService
+        GatewayService --> ProfileCtrl[RemoteProfileControl]
+        GatewayService --> AlarmMgr[Exact Alarm Fallback Scheduler]
+    end
+
+    subgraph Android 原生与基带监控 [Android Native / Telephony]
+        ProfileCtrl -->|ProfileStateTransition| LpaCore[NekokoLPA2 LPA Core]
+        LpaCore -->|获准的 OMAPI / 外接读卡器| EuiccChip[SIM 2 eUICC Card]
+        TelephonyCallback[TelephonyCallback / ServiceState] -->|EventChannel| NetService[NetworkStatusService]
+        NetService -->|Baseband Updates| GatewayService
+        SMSBroadcast[SMS_RECEIVED Broadcast] -->|goAsync + Keystore| SmsRelay[SmsRelayReceiver]
+        SmsRelay -->|HTTPS Webhook / TG API| PushDest[TG Chat / Webhook]
+    end
+```
+
+### 3.1 核心组件职责划分
+
+1. **常驻宿主服务 (`RemoteGatewayForegroundService`)**：
+   - 采用 Android 前台服务（FGS，`foregroundServiceType="specialUse"`），防止常驻后台被 MIUI 杀进程；
+   - 在 `MainApplication` 中常驻初始化预热 Flutter Engine (`nlpa2_multi_engine`)，保持 Headless 模式运行。
+2. **硬件交互与容错层 (`RemoteProfileController`)**：
+   - 包装 `ProfileManager`，执行 Profile 枚举与启用；
+   - 针对可插拔 eUICC 在切卡瞬间可能出现的通道重置与芯片繁忙异常（`CardBusyException`、`ProactiveRefreshException`、`6999` 等），通过 `ProfileStateTransition` 状态机执行重试与状态校验。
+3. **基带状态监听器 (`NetworkStatusPlugin`)**：
+   - 基于 Android 12+ (API 31+) `SubscriptionManager` 与 `TelephonyCallback`；
+   - 监听 `ServiceState` 变化，精准捕获 `VoiceRegistrationState.inService`、漫游标记 (`roaming`) 以及小区信号强度 (`signalDbm`)。
+4. **短信截获推送器 (`SmsRelayReceiver`)**：
+   - 静态声明 `BROADCAST_SMS` 广播接收器；
+   - 收到下行短信后使用 Android Keystore 加密存储的 Bot Token，直接异步 POST 转发至 Telegram 私聊或指定 Webhook，正文绝不落盘缓存。
+5. **硬件熔断兜底 (`GatewayAlarmReceiver` + `AlarmManager`)**：
+   - 每次切换目标 Profile 前，向系统注册 5 分钟后的 `RTC_WAKEUP` 精确唤醒闹钟（`setExactAndAllowWhileIdle`）；
+   - 即使 Dart 引擎崩溃或主进程意外退出，底层硬件闹钟到期仍能触发广播唤醒 FGS 执行 Profile 强制回滚。
+
+---
+
+## 4. 核心状态机流转设计
+
+```mermaid
+stateDiagram-v2
+    [*] --> IDLE: 系统启动 / 载入默认 Profile
+
+    IDLE --> SWITCHING: 收到 /use <iccid_or_alias> 或 API POST /switch
+    
+    state SWITCHING {
+        [*] --> CooldownCheck
+        CooldownCheck --> SaveSession: 冷却时间 >= 30s
+        CooldownCheck --> SwitchRejected: 处于冷却锁中
+        SaveSession --> InvokeLPA: 保存持久会话 (deadlineEpochMillis=0)，不注册回切闹钟
+        InvokeLPA --> StateVerified: ProfileStateTransition 校验成功
+        InvokeLPA --> SwitchFailed: 重试超限
+    }
+
+    SWITCHING --> WAITING_BASEBAND: 状态确认已启用
+    SWITCHING --> IDLE: 切换被拒或切换失败
+
+    WAITING_BASEBAND --> READY_FOR_OTP: TelephonyManager 报告 STATE_IN_SERVICE (带漫游/信号强度)
+    WAITING_BASEBAND --> MANUAL_REVERT: 用户提前发送 /back
+
+    READY_FOR_OTP --> LISTENING_SMS: 推送 Telegram 就绪就绪通知
+    
+    state LISTENING_SMS {
+        [*] --> AwaitSms
+        AwaitSms --> SmsForwarded: 收到系统 SMS_RECEIVED 广播
+        SmsForwarded --> AwaitSms: 成功转发至 TG / Webhook
+    }
+
+    LISTENING_SMS --> MANUAL_REVERT: 用户收到验证码后手动 /back
+
+    MANUAL_REVERT --> REVERTING: 触发切回流程
+
+    state REVERTING {
+        [*] --> SwitchToDefault: 调用 LPA 启用默认常驻 Profile
+        SwitchToDefault --> ClearSession: 恢复默认 Profile
+        ClearSession --> NotifyUser: 清除会话并返回操作结果
+    }
+
+    REVERTING --> IDLE: 会话结束，重置就绪标记
+```
+
+### 状态详细契约
+
+1. **`[IDLE]` 待机状态**：
+   - 当前激活预设的默认 Profile（如国内主卡或常驻低资费卡）。
+   - 允许查询 `/status`、`/list`，允许设置 `/default`。
+2. **`[SWITCHING]` 切换中状态**：
+   - **磨损防抖（Flash NVRAM Wear Levelling Protection）**：两次切卡请求必须满足至少 30 秒硬性冷却锁，杜绝突发重复触发。
+   - 锁定执行队列，预存目标 ICCID、默认卡 ICCID 与 `deadlineEpochMillis=0`（永久选择，无自动回切截止时间）。
+   - 提交底层 APDU 命令切换，并反复轮询确认卡片内部启用标记变为 true。
+3. **`[WAITING_BASEBAND]` 等待基带驻网**：
+   - 卡片逻辑切换完毕后，基带将经历 SIM 掉线重识、搜网握手与鉴权漫游（通常耗时 15~40 秒）。
+   - `RemoteGatewayService` 持续监听 `NetworkStatusService` 广播。
+4. **`[READY_FOR_OTP]` 就绪通知**：
+   - 判定基带成功处于 `STATE_IN_SERVICE` 后，立即向 Telegram 发送格式化推送：
+     > `[Target Profile] is registered (roaming) on [Carrier], -85 dBm. Selection persists; send /back to return.`
+5. **`[MANUAL_REVERT]` 回切与恢复**：
+   - 接码完成后用户可通过 Telegram `/back` 或 `POST /api/v1/back` 恢复本次会话的默认 Profile；显式停止网关同样执行回切。
+   - 进程恢复不能把 `deadlineEpochMillis=0` 当作过期时间；永久选择不恢复回切计时器，并取消残留闹钟。仅磁盘中已有正数截止时间的限时会话按原截止时间恢复。
+   - 删除 Profile 在请求和确认阶段都保护当前默认卡与活动会话回切目标，防止确认期间默认卡变化导致误删。
+
+---
+
+## 5. 控制面协议与安全模型
+
+### 5.1 鉴权与网络暴露面
+- **网络绑定**：REST HTTP 服务默认探测并**仅绑定 Tailscale / Headscale CGNAT 私网地址**（`100.64.0.0/10` 或 `fd7a:115c:a1e0::/48`），禁止监听公共网络。
+- **Token 校验**：所有 API 请求必须携带 `Authorization: Bearer <token>` 请求头。Token 为 256 位安全伪随机生成（Base64URL 43 字符），使用**恒定时间算法（Constant-time Equality）**比对，防范时序侧信道攻击。
+- **Telegram 限制**：严格比对 `chat.type == private` 以及发送者 ID 是否精确匹配配置的私聊白名单 ID，忽略群组及任何非授权用户的消息。
+
+### 5.2 交互指令规范
+
+#### Telegram Bot 交互
+- `/list`：列出当前芯片内所有 Profile 别名及 ICCID 后四位，标记当前激活项。
+- `/status`：查看网关、会话与基带状态；永久选择的 `remainingSeconds` 为 null，不显示虚假的零秒倒计时。
+- `/default`：将当前已激活的 Profile 设定为默认回滚卡。
+- `/use <alias|iccid>`：切换至目标卡，等待驻网并保持选择，直到明确回切。
+- `/back`：提前结束接码会话，立刻切回默认卡。
+
+#### REST API 接口定义
+- `GET /`：内置轻量暗色系 Web 控制台（无外网静态资源依赖）。
+- `GET /api/v1/status`：获取当前网关状态与 SIM 卡注册详情 JSON。
+- `GET /api/v1/profiles`：枚举当前卡片 Profile 清单。
+- `POST /api/v1/default`：锁定当前卡为回滚卡。
+- `POST /api/v1/switch`（JSON: `{"profile": "alias_or_iccid"}`）：发起切卡。
+- `POST /api/v1/back`：强制回滚至默认卡。
+
+---
+
+## 6. 关于保号引擎（Keep-Alive）的工程决策说明
+
+在当前架构中，**周期性定时切卡保号引擎（Cron Keep-Alive）在首期 MVP 中明确不做自动化执行**，原因如下：
+1. **基带与漫游握手不确定性**：跨国实体卡在境外漫游搜网时，部分运营商要求手动触发网络注册或甚至由于基带兼容性无法建立漫游上下文；若在无人值守时后台自动轮巡多张卡，单卡搜网超时会导致整体轮巡堵塞。
+2. **NVRAM 寿命损耗与锁卡风险**：高频周期性轮换 Profile 会剧烈磨损可插拔 eUICC 闪存；个别漫游卡（如英国/爱沙尼亚部分虚拟运营商）频繁重置可能触发运营商风控封锁漫游连接。
+3. **短信上行与扣费边界**：通过 Root 直接发送短信涉及移动运营商资费与发送权限，若未严格限制易产生高额漫游资费。
+因此，保号策略采用**按需远程切卡**：当需要保号时，通过 Telegram `/use <profile>` 激活目标卡，确认驻网并手动接收一条保号验证码或触发交互后，立即 `/back` 切回。

@@ -1,0 +1,97 @@
+name: Publish web release
+
+on:
+  release:
+    types: [published]
+  # Releases created with GITHUB_TOKEN do not emit another release workflow.
+  # Successful completion of the public build covers that publishing path.
+  workflow_run:
+    workflows: [Build NekokoLPA2]
+    types: [completed]
+    branches: [release]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Published stable app tag; leave empty for latest
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-production
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: cloudflare-pages
+      url: https://web.lpa.ee
+    steps:
+      - name: Check out publishing tools
+        uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Select the published release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/resolve_web_release.py >> "$GITHUB_OUTPUT"
+
+      - name: Check out the exact release source
+        if: steps.release.outputs.deploy == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.release.outputs.sha }}
+          path: release-app
+
+      - name: Set up Flutter
+        if: steps.release.outputs.deploy == 'true'
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.2'
+          cache: true
+
+      - name: Build the web app
+        if: steps.release.outputs.deploy == 'true'
+        working-directory: release-app
+        env:
+          GM_PSK_URL: https://key.9esim.com/psk
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          flutter pub get
+          flutter build web --release --no-pub \
+            --base-href / \
+            --dart-define=APP_VARIANT=std \
+            --dart-define=GM_PSK_URL="$GM_PSK_URL"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          manifest = json.loads(Path('build/web/version.json').read_text())
+          actual = manifest['version'] + '+' + manifest['build_number']
+          if actual != os.environ['RELEASE_VERSION']:
+              raise SystemExit('Web version does not match the selected release')
+          PY
+
+      - name: Deploy to KosmoNeko Cloudflare Pages
+        if: steps.release.outputs.deploy == 'true'
+        id: deployment
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
+          accountId: a14f6861a9473561d8ca8d164c9dba74
+          wranglerVersion: '4.103.0'
+          command: >-
+            pages deploy release-app/build/web --project-name weblpa
+            --branch release --commit-hash ${{ steps.release.outputs.sha }}
+            --commit-message "Release ${{ steps.release.outputs.version }}"

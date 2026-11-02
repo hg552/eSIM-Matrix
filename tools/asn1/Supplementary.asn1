@@ -1,0 +1,40 @@
+Supplementary {joint-iso-itu-t (2) international-organizations (23) gsma (146) rsp (1) asn1modules (1) supplementary (99)}
+DEFINITIONS AUTOMATIC TAGS EXTENSIBILITY IMPLIED ::= BEGIN
+
+-- Types referenced by RSPDefinitions but defined in other specifications.
+-- They are declared here so the Dart generator has a complete type graph;
+-- previously they only existed inside a pre-compiled intermediate, which
+-- meant they could not be regenerated from the ASN.1 sources.
+
+-- ETSI TS 102 226, Extended Card Resource Information, carried inside
+-- EUICCInfo2.extCardResource.
+--
+-- ETSI makes all three mandatory, but they are marked OPTIONAL here on
+-- purpose: a mandatory component is decoded by position, so a card that omits
+-- one shifts every following value into the wrong field -- free non-volatile
+-- memory gets reported as the installed-application count, and so on. OPTIONAL
+-- makes the generator check tag '81'/'82'/'83' before consuming an element, so
+-- anything unexpected reads as absent rather than as a plausible wrong number.
+ExtendedCardResource ::= SEQUENCE {
+    installedApplication [1] INTEGER OPTIONAL,
+    freeNonVolatileMemory [2] INTEGER OPTIONAL,
+    freeVolatileMemory [3] INTEGER OPTIONAL
+}
+
+-- GlobalPlatform Secure Element Access Control (SEAC), REF-AR-DO. Used when
+-- reading ARA-M access rules from the eUICC.
+RefArDo ::= [PRIVATE 2] SEQUENCE { -- Tag 'E2'
+    refDo          [PRIVATE 1] SEQUENCE { -- Tag 'E1'
+        deviceAppIdRefDo [PRIVATE 1] OCTET STRING (SIZE (20 | 32)), -- Tag 'C1'
+        pkgRefDo       [PRIVATE 10] OCTET STRING (SIZE (0..127)) OPTIONAL -- Tag 'CA'
+    },
+    arDo           [PRIVATE 3] SEQUENCE { -- Tag 'E3'
+        permArDo       [PRIVATE 27] OCTET STRING (SIZE (8)) -- Tag 'DB'
+    }
+}
+
+ProprietaryTag ::= [118] SEQUENCE { -- Tag 'BF76'
+    refArDo        [PRIVATE 2] RefArDo -- Tag 'E2'
+}
+
+END

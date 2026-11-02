@@ -1,0 +1,18 @@
+# Common
+.DS_Store
+*.iml
+.idea/
+.gradle/
+build/
+app/build/
+local.properties
+.kotlin/
+
+# Android
+*.apk
+*.apks
+*.zip
+*.aab
+
+# Specific to this project
+module_template/system/priv-app/ee.nekoko.nbridge/NBridge.apk

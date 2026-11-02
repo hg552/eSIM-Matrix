@@ -1,0 +1,95 @@
+ADB bridge: card access over a one-time shell session
+======================================================
+
+The app cannot open a logical channel to the ISD-R applet itself; the platform
+grants that only to callers it trusts. The `shell` user is one, and a person
+with a computer can start a process as `shell` over ADB. The ADB bridge is that
+process: it does the privileged card work and hands the result back to the app.
+
+It sits alongside the other Android card transports — OMAPI, Telephony, the
+OTBridge root provider (NBridgePlugin) and the Shizuku QRTR reader — and drives
+the same reader operations as NBridgeAdapter, so most of the app is unchanged.
+The difference is only where the privilege comes from: a Magisk module for
+OTBridge, the Shizuku server for QRTR, an ADB session here.
+
+It deliberately uses only the documented privileged telephony path. Where a
+release or a device declines `shell` that access, a call fails and says so; the
+bridge does not reach the card another way and carries no framework-quirk
+workaround.
+
+Pieces
+------
+
+Native (android/app/src/main):
+
+- aidl/ee/nekoko/nlpa2/IAdbBridge.aidl
+    The interface the helper exposes: ping, listSlots, openLogicalChannel,
+    transmitLogical, transmitBasic, closeLogicalChannel, shutdown. Structured
+    answers are JSON so the wire never needs a Parcelable loadable in both
+    processes; every answer carries `ok`.
+
+- kotlin/ee/nekoko/nlpa2/AdbBridgeStarter.kt
+    The `main` a person runs over ADB. It builds a system context, asks the
+    app's provider for the open window's nonce, and registers an
+    AdbBridgeServer with it. Then it serves the app's calls until the app stops
+    it or the terminal closes.
+
+- kotlin/ee/nekoko/nlpa2/AdbBridgeServer.kt
+    The privileged half, running as `shell`. It reaches the hidden
+    iccOpenLogicalChannel* / iccTransmitApdu* family on TelephonyManager, whose
+    signatures drift between releases, so each is resolved reflectively against
+    a few known shapes. A connection id is `slotIndex:channel`.
+
+- kotlin/ee/nekoko/nlpa2/AdbBridgeProvider.kt
+    The exported door the helper reaches the app through. `acquire` reveals the
+    current window nonce; `register` takes the helper's binder, and is refused
+    unless the caller is the `shell` user. The nonce ties a registration to a
+    window the user opened; the uid check is the real gate.
+
+- kotlin/ee/nekoko/nlpa2/AdbBridgeHub.kt
+    Where the provider and the plugin, created independently in the app
+    process, meet: the open window and its nonce, the live binder, and a death
+    link that clears it when the helper ends.
+
+- kotlin/ee/nekoko/nlpa2/AdbBridgePlugin.kt
+    The MethodChannel `nlpa2/adb_bridge` and event channel
+    `nlpa2/adb_bridge/events`. It builds the ADB command for whichever flavour
+    is installed, opens the window, reports connect/disconnect, and forwards the
+    card operations to the helper off the UI thread.
+
+Dart (lib):
+
+- services/adb_bridge_service.dart   the channel wrapper and the connect flow.
+- adapter/adb_bridge/adb_bridge_adapter.dart   NBridgeAdapter with this transport.
+- pages/adb_bridge_connect_page.dart   the "Connect using computer" screen.
+
+The command
+-----------
+
+The connect screen shows, for the installed package <pkg>:
+
+    adb shell "CLASSPATH=\$(pm path <pkg> | sed -n 's/^package://p' | head -n1) \
+        app_process / ee.nekoko.nlpa2.AdbBridgeStarter <pkg>"
+
+It carries no secret and downloads nothing; it resolves the installed APK by
+package each time. The one argument names the app's provider. The helper lives
+as long as that terminal stays open; reconnect after a reboot or an app update.
+
+Security
+--------
+
+- Only the `shell` user can register a helper; the provider checks the caller's
+  uid before taking the binder.
+- A registration is accepted only inside a window the user opened from the
+  connect screen, and only with that window's one-time nonce.
+- The class is reached by name on the command line and over the AIDL stub, so a
+  keep rule retains it if minification is ever enabled.
+
+Bring-up
+--------
+
+The pieces compile and the handoff follows the same shape the Shizuku QRTR
+reader uses in this app. The privileged telephony calls depend on the release
+and the device granting `shell` the access; that has to be confirmed on real
+hardware per Android version, and the reflective signature set extended where a
+version exposes a shape not yet listed.

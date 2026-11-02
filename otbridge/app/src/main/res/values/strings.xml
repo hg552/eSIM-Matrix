@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">NBridge</string>
+    <string name="main_title">NBridge</string>
+    <string name="main_subtitle">Secure-element bridge and slot control for Nekoko apps</string>
+    <string name="transport_section_title">Transports</string>
+    <string name="transport_status">%1$s (%2$d/%3$d)</string>
+    <string name="transport_open_mobile">Open Mobile</string>
+    <string name="transport_telephony">Telephony</string>
+    <string name="slot_section_title">Slot Access</string>
+    <string name="slot_section_subtitle">Disable any slot you do not want exposed through the content provider.</string>
+    <string name="slot_section_subtitle_tmapi_only">Only TMAPI slots are available right now. OMAPI did not come up on this device state.</string>
+    <string name="slot_section_subtitle_empty">No readable slots were returned. Check SIM state and OMAPI service availability.</string>
+    <string name="active_connections_title">Open Channels</string>
+    <string name="active_connections_empty">No logical channels are currently open.</string>
+    <string name="active_connection_item">%1$s  •  CH %2$d  •  %3$s</string>
+    <string name="slot_position">SIM %1$d Port %2$d</string>
+    <string name="slot_state_present">Present</string>
+    <string name="slot_state_absent">Absent</string>
+    <string name="slot_state_euicc">eUICC</string>
+    <string name="access_warning">External apps are blocked until you approve them here. Approved apps can send SIM/eUICC commands. Grant access only to apps you trust; unchecking revokes access and closes their channels. ADB shell and root remain trusted administrative callers.</string>
+    <string name="access_manage">Manage app access</string>
+    <string name="access_dialog_title">Trusted apps — SIM/eUICC access</string>
+    <string name="access_apply">Apply permissions</string>
+    <string name="access_no_apps">No installed launcher apps are available for approval.</string>
+    <string name="access_uninstalled">Uninstalled app (inactive permission)</string>
+    <string name="access_update_failed">Could not apply all changes or close every revoked channel. Reopen app access to inspect permissions; restart the bridge if channel cleanup failed.</string>
+</resources>

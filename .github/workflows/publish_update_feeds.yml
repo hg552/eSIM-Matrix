@@ -1,0 +1,69 @@
+name: Publish update feeds
+
+on:
+  release:
+    types: [published]
+  workflow_run:
+    workflows: [Build NekokoLPA2]
+    types: [completed]
+    branches: [release]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Published stable app tag; leave empty for latest
+        type: string
+        required: false
+      migrate_standard_desktop:
+        description: Publish the shared NekokoLPA2 Windows/Linux builds to legacy standard channels
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: community-update-feeds
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify feed representation
+        run: node --experimental-strip-types --test test/scripts/update_feed_entry.test.mjs
+      - name: Select the published release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/resolve_web_release.py >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-java@v4
+        if: steps.release.outputs.deploy == 'true'
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Publish verified public artifacts
+        if: steps.release.outputs.deploy == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          MIGRATE_STANDARD_DESKTOP: ${{ github.event_name != 'workflow_dispatch' || inputs.migrate_standard_desktop }}
+          UPDATE_WORKER_URL: ${{ secrets.UPDATE_WORKER_URL }}
+          UPDATE_WORKER_KEY: ${{ secrets.UPDATE_WORKER_KEY }}
+        run: |
+          args=(--release-tag "$RELEASE_TAG")
+          if [ "$MIGRATE_STANDARD_DESKTOP" = true ]; then
+            args+=(--migrate-standard-desktop)
+          fi
+          python3 scripts/publish_update_feeds.py "${args[@]}"

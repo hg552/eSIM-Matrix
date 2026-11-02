@@ -1,0 +1,28 @@
+PODS:
+  - ble (0.0.1):
+    - FlutterMacOS
+  - ccid (0.1.1):
+    - FlutterMacOS
+  - FlutterMacOS (1.0.0)
+
+DEPENDENCIES:
+  - ble (from `Flutter/ephemeral/.symlinks/plugins/ble/macos`)
+  - ccid (from `Flutter/ephemeral/.symlinks/plugins/ccid/macos`)
+  - FlutterMacOS (from `Flutter/ephemeral`)
+
+EXTERNAL SOURCES:
+  ble:
+    :path: Flutter/ephemeral/.symlinks/plugins/ble/macos
+  ccid:
+    :path: Flutter/ephemeral/.symlinks/plugins/ccid/macos
+  FlutterMacOS:
+    :path: Flutter/ephemeral
+
+SPEC CHECKSUMS:
+  ble: 5cfd4345217b40bd2ea8b33a48dd6c9d01d23a66
+  ccid: 0124ca9e80410729ff40cb0b4278c61defee7f0d
+  FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
+
+PODFILE CHECKSUM: 2ef5caa70d9cf4a180c45080e0aee36843899eb9
+
+COCOAPODS: 1.16.2

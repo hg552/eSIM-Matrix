@@ -1,0 +1,2607 @@
+import 'dart:typed_data';
+import 'dart:convert';
+import '../plugins/session_plugin.dart';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import '../utils/profile_tag_utils.dart';
+import '../adapter/euicc_adapter.dart';
+import '../adapter/se_hal_adapter.dart';
+import '../adapter/se_hal_host.dart';
+import '../adapter/omapi/omapi_safety.dart';
+import '../models/euicc_profile.dart';
+import '../models/asn1/rsp_definitions.g.dart';
+import '../models/asn1/simple_reader.dart';
+import '../utils/hex_utils.dart';
+import '../utils/iccid_formatter.dart';
+import '../utils/imei_codec.dart';
+import '../utils/notification_address.dart';
+import '../utils/apdu_exception.dart';
+import '../utils/error_codes.dart';
+
+import '../settings/app_settings.dart';
+import '../services/database_service.dart';
+import 'package:logging/logging.dart';
+
+class InstallationException implements Exception {
+  final String message;
+  final PendingNotification? notification;
+  InstallationException(this.message, {this.notification});
+  @override
+  String toString() => message;
+}
+
+class NxpMemoryInfo {
+  final int availableBytes;
+  final int totalOrUnknownBytes;
+  final int volatileBytes;
+  final int reservedBlocks;
+  final String firmwareVersion;
+  final String? osInformation;
+
+  NxpMemoryInfo({
+    required this.availableBytes,
+    required this.totalOrUnknownBytes,
+    required this.volatileBytes,
+    required this.reservedBlocks,
+    required this.firmwareVersion,
+    this.osInformation,
+  });
+
+  String get modelName {
+    if (firmwareVersion.startsWith('84.')) return 'SN110U';
+    if (firmwareVersion.startsWith('98.86.')) return 'SN220E';
+    if (firmwareVersion.startsWith('98.')) return 'SN220U';
+    if (firmwareVersion.startsWith('5.')) return 'NXP v1 (Hubble)';
+    if (firmwareVersion.startsWith('82.')) return 'NXP v2';
+    if (firmwareVersion.startsWith('83.')) return 'NXP v3';
+    return 'Unknown NXP Chip';
+  }
+}
+
+class ProfileManager {
+  static final Logger _log = Logger('ProfileManager');
+  final Adapter adapter;
+  final List<SessionPlugin> _sessionPlugins = [];
+
+  /// EID per open channel.
+  ///
+  /// The EID cannot change under a channel, but it was re-read from the card on
+  /// every request — nine times over a single profile download, each one a
+  /// STORE DATA plus a GET RESPONSE. Keyed on the channel rather than held in a
+  /// field so a different card, which necessarily gets a different channel,
+  /// cannot see another card's EID; the entry goes away with the channel.
+  final Expando<String> _eidByChannel = Expando<String>('eid');
+
+  final Map<String, NxpMemoryInfo> nxpInfos = {};
+
+  ProfileManager(this.adapter);
+
+  void addSessionPlugin(SessionPlugin plugin) {
+    if (!_sessionPlugins.any((p) => p.id == plugin.id)) {
+      _sessionPlugins.add(plugin);
+    }
+  }
+
+  void removeSessionPlugin(String id) {
+    _sessionPlugins.removeWhere((p) => p.id == id);
+  }
+
+  // Cache working AID per reader ID: ReaderID -> {aid, atr}
+  final Map<String, Map<String, String>> _workingAidCache = {};
+
+  String? getWorkingAid(String readerId) {
+    final cached = _workingAidCache[readerId];
+    // Return if exists. Validation happens on connect mainly, but we can return raw pending value too.
+    // If user wants to toggle, they just toggle what's there.
+    return cached?['aid'];
+  }
+
+  void setWorkingAid(String readerId, String aid) {
+    // Force update. Binds to whatever current ATR is or empty if not yet connected (will be validated/discarded on connect if mismatch)
+    // Actually, if we are switching, we are likely connected.
+    _workingAidCache[readerId] = {'aid': aid, 'atr': adapter.lastAtr ?? ''};
+  }
+
+  void _logAsn1Request(dynamic request) {
+    if (AppSettings().decodeAsn1) {
+      _log.info("ASN.1 >>\n$request");
+    }
+  }
+
+  void _logAsn1Response(dynamic response) {
+    if (AppSettings().decodeAsn1) {
+      _log.info("ASN.1 <<\n$response");
+    }
+  }
+
+  Future<Channel> openSession() async {
+    // User configured AIDs from settings
+    final aidStrings = AppSettings().aids;
+    final aids = <List<int>>[];
+
+    final currentAtr = adapter.lastAtr?.toUpperCase() ?? "";
+    final allAidStrings = List<String>.from(aidStrings);
+
+    // Get extra AIDs from plugins (e.g. EstkPlugin)
+    for (final plugin in _sessionPlugins) {
+      allAidStrings.addAll(plugin.getExtraAids(currentAtr));
+    }
+
+    for (final s in allAidStrings) {
+      try {
+        final clean = s.replaceAll(RegExp(r'[^0-9a-fA-F]'), '').toUpperCase();
+        if (clean.length % 2 == 0 && clean.isNotEmpty) {
+          // eSTKme-specific AID check: skip if ATR doesn't match
+          final isEstkAid = clean.startsWith("A06573746B");
+          final isEstkAtr = RegExp(
+            r'6573746B',
+            caseSensitive: false,
+          ).hasMatch(currentAtr);
+          if (isEstkAid && !isEstkAtr) {
+            continue;
+          }
+          aids.add(HexUtils.hexToBytes(clean).toList());
+        }
+      } catch (e) {
+        _log.warning("Skipping invalid AID: $s");
+      }
+    }
+
+    // Fallback if empty
+    if (aids.isEmpty) {
+      _log.warning("No valid AIDs in settings, using minimal fallback.");
+      aids.add([
+        0xA0,
+        0x00,
+        0x00,
+        0x05,
+        0x59,
+        0x10,
+        0x10,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0x89,
+        0x00,
+        0x00,
+        0x01,
+        0x00,
+      ]);
+    }
+
+    final readerName = adapter.connectedReader;
+    // Prioritize the persisted AID when a saved eSTKme preference is found.(Persistent, tied to ATR)
+    if (readerName != null) {
+      final persistedAid = currentAtr.isEmpty
+          ? null
+          : AppSettings().getPreferredEstkAid(readerName.id, currentAtr)?.toUpperCase();
+      if (persistedAid != null) {
+        final persistedBytes = HexUtils.hexToBytes(persistedAid);
+        aids.removeWhere((aid) => listEquals(aid, persistedBytes));
+        aids.insert(0, persistedBytes.toList());
+        _log.info(
+          "Prioritizing persisted eSTKme AID for $readerName: $persistedAid",
+        );
+      }
+    }
+
+    // Prioritize working AID for this reader (Ephemeral, tied to ATR)
+    if (readerName != null) {
+      final cached = _workingAidCache[readerName.id];
+      final currentAtr = adapter.lastAtr;
+
+      final cachedAtr = cached?['atr'] ?? '';
+      final atrMatches = currentAtr != null
+          ? cachedAtr == currentAtr
+          : cachedAtr.isEmpty;
+      if (cached != null && atrMatches) {
+        final workingAidHex = cached['aid'];
+        if (workingAidHex != null) {
+          try {
+            final workingBytes = HexUtils.hexToBytes(workingAidHex);
+            // Move to front if exists, or add to front
+            int index = -1;
+            for (int i = 0; i < aids.length; i++) {
+              if (listEquals(aids[i], workingBytes)) {
+                index = i;
+                break;
+              }
+            }
+            if (index != -1) {
+              aids.removeAt(index);
+            }
+            _log.info(
+              "Prioritizing cached working AID for $readerName: $workingAidHex",
+            );
+            aids.insert(0, workingBytes.toList());
+          } catch (e) {
+            _log.warning("Invalid cached working AID ignored: $workingAidHex");
+          }
+        }
+      } else {
+        // Discard if ATR changed or disconnected (cached ATR mismatch)
+        if (cached != null) {
+          _log.info(
+            "Discarding cached working AID for $readerName (ATR mismatch or reset)",
+          );
+          _workingAidCache.remove(readerName.id);
+        }
+      }
+    }
+
+    return _retrySafeCommand(() async {
+      Channel ch;
+      try {
+        final aidHexList = aids
+            .map((a) => HexUtils.bytesToHex(Uint8List.fromList(a)))
+            .toList();
+        ch = await adapter.openChannel(aids: aidHexList);
+        if (ch.aid != null) {
+          final aid = ch.aid!;
+          _log.info("Channel opened with AID: $aid");
+          if (readerName != null) {
+            readerName.aid = aid;
+            adapter.updateConnectedReader(readerName);
+
+            _workingAidCache[readerName.id] = {
+              "aid": aid,
+              "atr": adapter.lastAtr ?? "",
+            };
+          }
+          return ch;
+        }
+
+        if (aids.isNotEmpty) {
+          _log.warning("Adapter returned channel without AID despite request.");
+          await ch.close();
+          throw Exception("AID not selected");
+        }
+        return ch;
+      } catch (e) {
+        _log.severe("Failed to open logical channel: $e");
+        rethrow;
+      }
+    }, desc: "openSession");
+  }
+
+  Future<List<EuiccProfile>> listProfiles({
+    Channel? useChannel,
+    bool requireKnownState = false,
+  }) async {
+    // Conditionally include icon tags based on setting
+    final loadIcons = AppSettings().loadProfileIcons;
+    final tagList = loadIcons
+        ? Uint8List.fromList([
+            0x5A,
+            0x4F,
+            0x9F,
+            0x70,
+            0x90,
+            0x91,
+            0x92,
+            0x93,
+            0x94,
+            0x95,
+            0xB6,
+            0xB7,
+          ])
+        : Uint8List.fromList([
+            0x5A,
+            0x4F,
+            0x9F,
+            0x70,
+            0x90,
+            0x91,
+            0x92,
+            0x95,
+            0xB6,
+            0xB7, // Omit 0x93, 0x94
+          ]);
+
+    return _retrySafeCommand(
+      () async {
+        return await _runOnChannel(useChannel, (channel) async {
+          final request = ProfileInfoListRequest(tagList: tagList);
+          _logAsn1Request(request);
+          final requestData = request.encode();
+
+          final responseData = await transmitLogicalApdu(channel, requestData);
+
+          final responseObj = await compute((data) {
+            final resp = ProfileInfoListResponse.decode(data);
+            return resp;
+          }, responseData);
+          _logAsn1Response(responseObj);
+
+          if (responseObj.profileInfoListError != null) {
+            final err = responseObj.profileInfoListError!;
+            throw Exception(
+              'GetProfilesInfo failed with error code: ${err.name} (${err.value})',
+            );
+          }
+
+          final profilesRaw = responseObj.profileInfoListOk ?? [];
+          if (requireKnownState &&
+              profilesRaw.any(
+                (p) => p.profileState?.value != 0 && p.profileState?.value != 1,
+              )) {
+            throw StateError(
+              'Profile state missing or unknown; switch cannot be verified',
+            );
+          }
+          return await compute(_mapProfiles, profilesRaw);
+        });
+      },
+      desc: "listProfiles",
+      retryAidErrors: useChannel == null,
+    );
+  }
+
+  void _checkHalResult(Uint8List response, int tag) {
+    final data = _checkSwAndGetData(response);
+    final node = SimpleAsn1Reader(data).readNext();
+    if (node?.tag != tag ||
+        node!.encodedBytes.length != data.length ||
+        node.children.length != 1 ||
+        node.children.first.tag != 0x80 ||
+        node.children.first.value.length != 1) {
+      throw StateError('SE HAL: invalid management response');
+    }
+    final result = node.children.first.value.first;
+    if (result != 0) {
+      throw StateError(
+        'SE HAL: card rejected ${tag.toRadixString(16)} with result $result',
+      );
+    }
+  }
+
+  static const _halSwitchUnconfirmed = 'SE HAL: profile switch not confirmed';
+  static const _halCardChanged =
+      'Card changed; profile switch cannot be verified';
+
+  /// How many times a switch is read back before its state is reported unknown.
+  @visibleForTesting
+  static const halVerifyAttempts = 5;
+
+  /// The wait before each read-back: 1.5 s, 3 s, 4.5 s, then 5 s each, about
+  /// 19 s in all.
+  @visibleForTesting
+  static Duration Function(int attempt) halVerifyDelay = (attempt) =>
+      Duration(milliseconds: attempt < 3 ? 1500 * (attempt + 1) : 5000);
+
+  // Reading back never touches the switch, so a failure while the card resets
+  // is worth another look. Stop only when another look cannot help: the card
+  // is a different one, or the reader may no longer be used.
+  static bool _isHalVerifyFatal(Object e) {
+    if (e is StateError) {
+      return e.message == _halCardChanged ||
+          e.message == 'SE HAL connector is disabled' ||
+          e.message == 'Shizuku permission is required' ||
+          e.message.startsWith('SE HAL ownership setting changed');
+    }
+    if (e is PlatformException) {
+      return e.code == 'NO_PERMISSION' || e.code == 'NO_STATE_MONITOR';
+    }
+    return e is AppException;
+  }
+
+  Future<bool> _switchHalProfile(
+    String iccid,
+    HalDownloadChannel useChannel,
+    bool enable,
+  ) async {
+    if (!RegExp(r'^89[0-9]{17,18}$').hasMatch(iccid)) {
+      throw ArgumentError('Invalid ICCID');
+    }
+    final eid = await getEid(useChannel: useChannel);
+    final padded = iccid.length.isOdd ? '${iccid}F' : iccid;
+    final response = await SeHalHost.halSwitchProfile(
+      useChannel.slot,
+      HexUtils.hexToBytes(HexUtils.swapNibbles(padded)),
+      HexUtils.hexToBytes(eid),
+      enable,
+    );
+    final data = _checkSwAndGetData(response);
+    // Unlike the generated decoder, reject missing/unknown result tags.
+    final node = SimpleAsn1Reader(data).readNext();
+    if (node?.tag != (enable ? 0xBF31 : 0xBF32) ||
+        node!.encodedBytes.length != data.length ||
+        node.children.isEmpty ||
+        node.children.first.tag != 0x80 ||
+        node.children.first.value.length != 1) {
+      throw StateError(_halSwitchUnconfirmed);
+    }
+    final result = node.children.first.value.first;
+    if (result != 0) {
+      // The card answered and refused, so nothing changed: report it like the
+      // other readers do rather than as an unknown outcome.
+      final name = enable
+          ? EnableProfileResponse.decode(data).enableResult?.name
+          : DisableProfileResponse.decode(data).disableResult?.name;
+      _log.warning(
+        'SE HAL switch rejected: result=$result (${name ?? 'unknown'}) '
+        'tag=${node.tag.toRadixString(16).toUpperCase()} sw=9000',
+      );
+      throw Exception(
+        '${enable ? 'ENABLE' : 'DISABLE'}_FAILED:${name ?? result}',
+      );
+    }
+    return true;
+  }
+
+  Future<List<EuiccProfile>> switchHalProfileAndVerify(
+    String iccid,
+    bool enable,
+  ) async {
+    return adapter.runExclusive(() async {
+      final reader = adapter.connectedReader;
+      if (reader == null || reader.source is! SeHalAdapter) {
+        throw StateError('SE HAL reader is required');
+      }
+      var channel = await openSession();
+      try {
+        final eid = await getEid(useChannel: channel);
+        try {
+          if (enable) {
+            await enableProfile(iccid, useChannel: channel);
+          } else {
+            await disableProfile(iccid, useChannel: channel);
+          }
+        } on ProactiveRefreshException {
+          _log.info(
+            'HAL switch requested REFRESH; verifying without resending',
+          );
+        } on PlatformException catch (e) {
+          if (e.code != 'HAL_SWITCH_UNCERTAIN' &&
+              (e.code != 'SERVICE_ERROR' ||
+                  !(e.message ?? '').contains('reply uncertain'))) {
+            rethrow;
+          }
+          _log.warning('HAL switch reply lost; verifying without resending');
+        }
+        // REFRESH may produce several delayed SIM broadcasts, and the card can
+        // stay unreachable while it resets. Only the read-back is retried; the
+        // switch above is never sent again.
+        for (var attempt = 0; ; attempt++) {
+          await Future.delayed(halVerifyDelay(attempt));
+          try {
+            await channel.close();
+            await adapter.disconnect();
+            await adapter.connect(reader);
+            channel = await openSession();
+            if (await getEid(useChannel: channel) != eid) {
+              throw StateError(_halCardChanged);
+            }
+            final profiles = await listProfiles(
+              useChannel: channel,
+              requireKnownState: true,
+            );
+            if (!profiles.any((p) => p.iccid == iccid && p.enabled == enable)) {
+              throw StateError(_halSwitchUnconfirmed);
+            }
+            reader.eid = eid;
+            adapter.updateConnectedReader(reader);
+            return profiles;
+          } catch (e) {
+            if (attempt >= halVerifyAttempts - 1 || _isHalVerifyFatal(e)) {
+              rethrow;
+            }
+            _log.info('HAL read-back failed; reopening to verify: $e');
+          }
+        }
+      } finally {
+        await channel.close();
+      }
+    });
+  }
+
+  Future<bool> enableProfile(String iccid, {Channel? useChannel}) async {
+    if (useChannel is HalDownloadChannel ||
+        (useChannel == null &&
+            adapter.connectedReader?.source is SeHalAdapter)) {
+      return _runOnChannel(
+        useChannel,
+        (channel) =>
+            _switchHalProfile(iccid, channel as HalDownloadChannel, true),
+      );
+    }
+    const int maxAttempts = 10;
+    int attempt = 1;
+    bool commandSubmitted = false;
+    final managesSwitchMarker = useChannel == null;
+
+    if (managesSwitchMarker) {
+      await adapter.setProfileSwitchInProgress(true);
+    }
+    try {
+      while (true) {
+        try {
+          return await _runOnChannel(useChannel, (channel) async {
+            bool isRefresh = false;
+            String iccidHex = iccid;
+            if (iccidHex.length % 2 != 0) iccidHex += 'F';
+            final iccidBytes = HexUtils.hexToBytes(
+              HexUtils.swapNibbles(iccidHex),
+            );
+
+            final wantsRefresh = AppSettings().disableRefreshFlags
+                ? false
+                : adapter.requiresRefresh;
+            await _waitForIdleWindow(wantsRefresh, 'enable this profile');
+
+            final request = EnableProfileRequest(
+              profileIdentifier: EnableProfileRequest_profileIdentifier(
+                iccid: iccidBytes,
+              ),
+              refreshFlag: wantsRefresh,
+            );
+            _logAsn1Request(request);
+            var requestData = request.encode();
+
+            try {
+              commandSubmitted = true;
+              final responseData = await transmitLogicalApdu(
+                channel,
+                requestData,
+              );
+              final resp = EnableProfileResponse.decode(responseData);
+              _logAsn1Response(resp);
+              if (resp.enableResult == null) {
+                throw Exception('ENABLE_FAILED:missingResult');
+              }
+              if (resp.enableResult != EnableProfileResponse_enableResult.ok &&
+                  resp.enableResult !=
+                      EnableProfileResponse_enableResult
+                          .profileNotInDisabledState) {
+                throw Exception('ENABLE_FAILED:${resp.enableResult?.name}');
+              }
+              if (request.refreshFlag == true) {
+                await _handleRefresh(channel);
+              } else {
+                await _resetAfterProfileSwitch(channel, 'Enable');
+              }
+              isRefresh = true;
+              await _warnIfNotServingProfile('Enable');
+              return isRefresh;
+            } catch (e) {
+              if (e is ProactiveRefreshException) {
+                if (request.refreshFlag != true) {
+                  _log.warning(
+                    'Unexpected proactive status after a no-refresh enable; '
+                    'the caller must recover on a fresh session.',
+                  );
+                  rethrow;
+                }
+                _markRefreshing();
+                _log.info(
+                  "Got 91xx status; deferring recovery to the next fresh session.",
+                );
+                return true;
+              }
+              rethrow;
+            }
+          });
+        } catch (e) {
+          if (e is CardBusyException &&
+              useChannel == null &&
+              attempt < maxAttempts &&
+              canAutomaticallyRetryProfileSwitch(
+                e,
+                commandSubmitted: commandSubmitted,
+              )) {
+            attempt++;
+            _log.info(
+              "enableProfile: Card busy (6881), retry attempt $attempt/$maxAttempts...",
+            );
+            await Future.delayed(const Duration(milliseconds: 500));
+            continue;
+          }
+          rethrow;
+        }
+      }
+    } finally {
+      if (managesSwitchMarker) {
+        await adapter.setProfileSwitchInProgress(false);
+      }
+    }
+  }
+
+  Future<bool> disableProfile(String iccid, {Channel? useChannel}) async {
+    if (useChannel is HalDownloadChannel ||
+        (useChannel == null &&
+            adapter.connectedReader?.source is SeHalAdapter)) {
+      return _runOnChannel(
+        useChannel,
+        (channel) =>
+            _switchHalProfile(iccid, channel as HalDownloadChannel, false),
+      );
+    }
+    const int maxAttempts = 10;
+    int attempt = 1;
+    bool commandSubmitted = false;
+    final managesSwitchMarker = useChannel == null;
+
+    if (managesSwitchMarker) {
+      await adapter.setProfileSwitchInProgress(true);
+    }
+    try {
+      while (true) {
+        try {
+          return await _runOnChannel(useChannel, (channel) async {
+            bool isRefresh = false;
+            String iccidHex = iccid;
+            if (iccidHex.length % 2 != 0) iccidHex += 'F';
+            final iccidBytes = HexUtils.hexToBytes(
+              HexUtils.swapNibbles(iccidHex),
+            );
+
+            final wantsRefresh = AppSettings().disableRefreshFlags
+                ? false
+                : adapter.requiresRefresh;
+            await _waitForIdleWindow(wantsRefresh, 'disable this profile');
+
+            final request = DisableProfileRequest(
+              profileIdentifier: DisableProfileRequest_profileIdentifier(
+                iccid: iccidBytes,
+              ),
+              refreshFlag: wantsRefresh,
+            );
+            _logAsn1Request(request);
+            final requestData = request.encode();
+
+            try {
+              commandSubmitted = true;
+              final responseData = await transmitLogicalApdu(
+                channel,
+                requestData,
+              );
+              final resp = DisableProfileResponse.decode(responseData);
+              _logAsn1Response(resp);
+              if (resp.disableResult == null) {
+                throw Exception('DISABLE_FAILED:missingResult');
+              }
+              if (resp.disableResult !=
+                      DisableProfileResponse_disableResult.ok &&
+                  resp.disableResult !=
+                      DisableProfileResponse_disableResult
+                          .profileNotInEnabledState) {
+                throw Exception('DISABLE_FAILED:${resp.disableResult?.name}');
+              }
+              if (request.refreshFlag == true) {
+                await _handleRefresh(channel);
+              } else {
+                await _resetAfterProfileSwitch(channel, 'Disable');
+              }
+              isRefresh = true;
+              await _warnIfNotServingProfile('Disable');
+              return isRefresh;
+            } catch (e) {
+              if (e is ProactiveRefreshException) {
+                if (request.refreshFlag != true) {
+                  _log.warning(
+                    'Unexpected proactive status after a no-refresh disable; '
+                    'the caller must recover on a fresh session.',
+                  );
+                  rethrow;
+                }
+                _markRefreshing();
+                _log.info(
+                  "Got 91xx status; deferring recovery to the next fresh session.",
+                );
+                return true;
+              }
+              rethrow;
+            }
+          });
+        } catch (e) {
+          if (e is CardBusyException &&
+              useChannel == null &&
+              attempt < maxAttempts &&
+              canAutomaticallyRetryProfileSwitch(
+                e,
+                commandSubmitted: commandSubmitted,
+              )) {
+            attempt++;
+            _log.info(
+              "disableProfile: Card busy (6881), retry attempt $attempt/$maxAttempts...",
+            );
+            await Future.delayed(const Duration(milliseconds: 500));
+            continue;
+          }
+          rethrow;
+        }
+      }
+    } finally {
+      if (managesSwitchMarker) {
+        await adapter.setProfileSwitchInProgress(false);
+      }
+    }
+  }
+
+  Future<void> renameProfile(
+    String iccid,
+    String nickname, {
+    Channel? useChannel,
+  }) async {
+    return _runOnChannel(useChannel, (channel) async {
+      String iccidHex = iccid;
+      if (iccidHex.length % 2 != 0) iccidHex += 'F';
+      final iccidBytes = HexUtils.hexToBytes(HexUtils.swapNibbles(iccidHex));
+
+      final requestData = _encodeNicknameRequestUtf8(iccidBytes, nickname);
+
+      if (channel is HalDownloadChannel) {
+        final eid = await getEid(useChannel: channel);
+        final response = await SeHalHost.halRenameProfile(
+          channel.slot,
+          iccidBytes,
+          HexUtils.hexToBytes(eid),
+          nickname,
+        );
+        _checkHalResult(response, 0xBF29);
+        final profiles = await listProfiles(useChannel: channel);
+        if (!profiles.any(
+          (p) => p.iccid == iccid && (p.nickname ?? '') == nickname,
+        )) {
+          throw StateError('SE HAL: nickname change not verified');
+        }
+        return;
+      }
+
+      if (AppSettings().decodeAsn1) {
+        try {
+          final node = SimpleAsn1Reader(requestData).readNext();
+          if (node != null) _logAsn1Request(node);
+        } catch (_) {}
+      }
+
+      try {
+        await transmitLogicalApdu(channel, requestData);
+      } catch (e) {
+        if (e is ProactiveRefreshException) {
+          await _handleSoftRefresh(channel);
+          return;
+        }
+        rethrow;
+      }
+    });
+  }
+
+  Future<void> deleteProfile(String iccid, {Channel? useChannel}) async {
+    return _runOnChannel(useChannel, (channel) async {
+      String iccidHex = iccid;
+      if (iccidHex.length % 2 != 0) iccidHex += 'F';
+      final iccidBytes = HexUtils.hexToBytes(HexUtils.swapNibbles(iccidHex));
+
+      if (channel is HalDownloadChannel) {
+        final eid = await getEid(useChannel: channel);
+        _checkHalResult(
+          await SeHalHost.halDeleteProfile(
+            channel.slot,
+            iccidBytes,
+            HexUtils.hexToBytes(eid),
+          ),
+          0xBF33,
+        );
+        return;
+      }
+
+      final request = DeleteProfileRequest(iccid: iccidBytes);
+      _logAsn1Request(request);
+      final requestData = request.encode();
+
+      try {
+        final responseData = await transmitLogicalApdu(channel, requestData);
+        final resp = DeleteProfileResponse.decode(responseData);
+        _logAsn1Response(resp);
+        if (resp.deleteResult != null &&
+            resp.deleteResult != DeleteProfileResponse_deleteResult.ok) {
+          throw Exception('DELETE_FAILED:${resp.deleteResult?.name}');
+        }
+      } catch (e) {
+        if (e is ProactiveRefreshException) {
+          await _handleSoftRefresh(channel);
+          return;
+        }
+        rethrow;
+      }
+    });
+  }
+
+  /// The `resetOptions` BIT STRING in the form [EuiccMemoryResetRequest] wants.
+  ///
+  /// The generated model types `resetOptions` as an int and encodes it with
+  /// `_asn1EncodeInt`, so the value has to be the BIT STRING *contents* --
+  /// leading unused-bit octet included -- rather than a named-bit mask. The
+  /// constants on [EuiccMemoryResetRequest_resetOptions] count from the least
+  /// significant bit, and passing those would encode `82 01 07`: an unused-bit
+  /// count of 7 and no data octet at all.
+  ///
+  /// DER puts bit 0 in the most significant bit of the first data octet and
+  /// drops trailing zero bits, so bits 0..2 are `E0` with five unused.
+  static int _resetOptionsValue({
+    required bool deleteOperationalProfiles,
+    required bool deleteFieldLoadedTestProfiles,
+    required bool resetDefaultSmdpAddress,
+    bool deletePreLoadedTestProfiles = false,
+    bool deleteProvisioningProfiles = false,
+  }) {
+    var bits = 0;
+    if (deleteOperationalProfiles) bits |= 0x80;
+    if (deleteFieldLoadedTestProfiles) bits |= 0x40;
+    if (resetDefaultSmdpAddress) bits |= 0x20;
+    if (deletePreLoadedTestProfiles) bits |= 0x10;
+    if (deleteProvisioningProfiles) bits |= 0x08;
+    if (bits == 0) return 0;
+    var unusedBits = 0;
+    while (unusedBits < 8 && (bits & (1 << unusedBits)) == 0) {
+      unusedBits++;
+    }
+    return (unusedBits << 8) | bits;
+  }
+
+  /// ES10c EuiccMemoryReset -- erases the card's profiles.
+  ///
+  /// The defaults reproduce lpac's `chip purge` byte for byte --
+  /// `BF34 04 82 02 05 E0`, see `euicc/es10c.c` -- deleting operational and
+  /// field-loaded test profiles and resetting the default SM-DP+ address.
+  ///
+  /// Returns the card's result so the caller can tell an empty card
+  /// ([EuiccMemoryResetResponse_resetResult.nothingToDelete]) from a refusal.
+  Future<EuiccMemoryResetResponse_resetResult> resetEuiccMemory({
+    bool deleteOperationalProfiles = true,
+    bool deleteFieldLoadedTestProfiles = true,
+    bool resetDefaultSmdpAddress = true,
+    bool deletePreLoadedTestProfiles = false,
+    bool deleteProvisioningProfiles = false,
+    Channel? useChannel,
+  }) async {
+    return _runOnChannel(useChannel, (channel) async {
+      final resetOptions = _resetOptionsValue(
+        deleteOperationalProfiles: deleteOperationalProfiles,
+        deleteFieldLoadedTestProfiles: deleteFieldLoadedTestProfiles,
+        resetDefaultSmdpAddress: resetDefaultSmdpAddress,
+        deletePreLoadedTestProfiles: deletePreLoadedTestProfiles,
+        deleteProvisioningProfiles: deleteProvisioningProfiles,
+      );
+      if (resetOptions == 0) {
+        throw Exception('MEMORY_RESET_FAILED:noResetOptionsSelected');
+      }
+
+      final request = EuiccMemoryResetRequest(resetOptions: resetOptions);
+      _logAsn1Request(request);
+      final requestData = request.encode();
+      _log.warning(
+        'ES10c EuiccMemoryReset: erasing profiles '
+        '(operational=$deleteOperationalProfiles, '
+        'fieldLoadedTest=$deleteFieldLoadedTestProfiles, '
+        'resetDefaultSmdpAddress=$resetDefaultSmdpAddress, '
+        'preLoadedTest=$deletePreLoadedTestProfiles, '
+        'provisioning=$deleteProvisioningProfiles) '
+        'apdu=${HexUtils.bytesToHex(requestData)}',
+      );
+
+      final responseData = await transmitLogicalApdu(channel, requestData);
+      final resp = EuiccMemoryResetResponse.decode(responseData);
+      _logAsn1Response(resp);
+      final result = resp.resetResult;
+      if (result == null) {
+        throw Exception('MEMORY_RESET_FAILED:noResult');
+      }
+      if (result != EuiccMemoryResetResponse_resetResult.ok &&
+          result != EuiccMemoryResetResponse_resetResult.nothingToDelete) {
+        throw Exception('MEMORY_RESET_FAILED:${result.name}');
+      }
+      return result;
+    });
+  }
+
+  Future<String> getEid({Channel? useChannel}) async {
+    return _retrySafeCommand(
+      () async {
+        return await _runOnChannel(useChannel, (channel) async {
+          final cached = _eidByChannel[channel];
+          if (cached != null) {
+            // Plugins still see the call, so only the card round trip is saved.
+            for (final p in _sessionPlugins) {
+              await p.afterCommand('getEid', {}, cached, channel);
+            }
+            return cached;
+          }
+
+          final request = GetEuiccDataRequest(
+            tagList: Uint8List.fromList([0x5A]),
+          );
+          _logAsn1Request(request);
+          final requestData = request.encode();
+
+          try {
+            final responseData = await transmitLogicalApdu(
+              channel,
+              requestData,
+            );
+
+            final responseObj = GetEuiccDataResponse.decode(responseData);
+            _logAsn1Response(responseObj);
+            if (responseObj.eidValue == null) {
+              throw Exception("EID not returned by eUICC");
+            }
+            final eid = HexUtils.bytesToHex(responseObj.eidValue!);
+            _eidByChannel[channel] = eid;
+            for (final p in _sessionPlugins) {
+              await p.afterCommand('getEid', {}, eid, channel);
+            }
+            return eid;
+          } catch (e) {
+            for (final p in _sessionPlugins) {
+              await p.afterCommand('getEid', {}, e, channel);
+            }
+            rethrow;
+          }
+        });
+      },
+      desc: "getEid",
+      retryAidErrors: useChannel == null,
+    );
+  }
+
+  /// ES10a GetEuiccConfiguredAddresses: the default SM-DP+ and root SM-DS the
+  /// card is configured with.
+  ///
+  /// Read-only, and tolerated as optional by callers: a card that does not
+  /// answer it is not a failure, it just has nothing to show.
+  Future<EuiccConfiguredDataResponse> getEuiccConfiguredData({
+    Channel? useChannel,
+  }) async {
+    return _retrySafeCommand(
+      () async {
+        return await _runOnChannel(useChannel, (channel) async {
+          final request = EuiccConfiguredDataRequest();
+          _logAsn1Request(request);
+          final responseData = await transmitLogicalApdu(
+            channel,
+            request.encode(),
+          );
+          final resp = EuiccConfiguredDataResponse.decode(responseData);
+          _logAsn1Response(resp);
+          return resp;
+        });
+      },
+      desc: "getEuiccConfiguredData",
+      retryAidErrors: useChannel == null,
+    );
+  }
+
+  Future<EUICCInfo2> getEuiccInfo2({Channel? useChannel}) async {
+    return _retrySafeCommand(
+      () async {
+        return await _runOnChannel(useChannel, (channel) async {
+          final request = GetEuiccInfo2Request();
+          _logAsn1Request(request);
+          final requestData = request.encode();
+
+          final responseData = await transmitLogicalApdu(channel, requestData);
+          final resp = EUICCInfo2.decode(responseData);
+
+          _log.info(
+            "Standard eUICCInfo2 extCardResource: ${resp.extCardResource}",
+          );
+
+          try {
+            final currentEid = channel.adapter.currentEid;
+            if (currentEid != null && currentEid.startsWith("89043051")) {
+              // Attempt to fetch NXP proprietary memory info
+              // GET DATA (NXP_PROPRIETARY = 0xFE), Data = 0xDF25 (MEMORY_INFORMATION)
+              final nxpRawResp = await _transmitApdu(
+                channel,
+                0x80,
+                0xCA,
+                0x00,
+                0xFE,
+                Uint8List.fromList([0xDF, 0x25]),
+              );
+              final nxpResp = _checkSwAndGetData(nxpRawResp);
+
+              if (nxpResp.length >= 5) {
+                int nxpAvailable = 0;
+                int nxpTotal = 0;
+                int nxpVolatile = 0;
+                int b3Value = 0;
+                int b14Value = 0;
+                // The data consists of 6-byte chunks starting at index 5.
+                for (int i = 5; i + 5 < nxpResp.length; i += 6) {
+                  int b = nxpResp[i];
+                  // 4-byte integer (big-endian) at i+2 to i+5
+                  int val =
+                      (nxpResp[i + 2] << 24) |
+                      (nxpResp[i + 3] << 16) |
+                      (nxpResp[i + 4] << 8) |
+                      nxpResp[i + 5];
+                  if (b == 0) {
+                    nxpAvailable += val;
+                  } else if (b == 1) {
+                    nxpVolatile = val;
+                  } else if (b == 2) {
+                    nxpTotal = val;
+                  } else if (b == 3) {
+                    b3Value = val;
+                  } else if (b == 14) {
+                    b14Value = val;
+                  }
+                }
+
+                String fwVersion =
+                    resp.euiccFirmwareVersion
+                        ?.map((b) => b.toString())
+                        .join('.') ??
+                    "";
+
+                int overheadBytes = b14Value;
+                if (fwVersion != "98.0.22" && fwVersion != "98.16.25") {
+                  overheadBytes = b3Value * 16;
+                }
+
+                String? osInfoParsed;
+                try {
+                  Uint8List? lastOsInfoResp;
+                  for (int attempt = 1; attempt <= 3; attempt++) {
+                    final osInfoRawResp = await _transmitApdu(
+                      channel,
+                      0x80,
+                      0xCA,
+                      0x00,
+                      0xFE,
+                      Uint8List.fromList([0xDF, 0x31]),
+                    );
+                    lastOsInfoResp = _checkSwAndGetData(osInfoRawResp);
+                    _log.info(
+                      "OS_INFORMATION fetch attempt $attempt: ${HexUtils.bytesToHex(lastOsInfoResp)}",
+                    );
+                  }
+                  final osInfoResp = lastOsInfoResp!;
+
+                  // Parse the DF31 TLV
+                  int idx = 0;
+                  if (idx < osInfoResp.length && osInfoResp[idx] == 0xFE) {
+                    idx += 2; // Skip FE and length
+                  }
+                  if (idx < osInfoResp.length - 1 &&
+                      osInfoResp[idx] == 0xDF &&
+                      osInfoResp[idx + 1] == 0x31) {
+                    idx += 3; // Skip DF 31 and length
+                  }
+
+                  List<String> parts = [];
+                  while (idx < osInfoResp.length) {
+                    int tag = osInfoResp[idx++];
+                    if (idx >= osInfoResp.length) break;
+                    int len = osInfoResp[idx++];
+                    if (idx + len > osInfoResp.length) break;
+
+                    List<int> valBytes = osInfoResp.sublist(idx, idx + len);
+                    String strVal = valBytes
+                        .where((b) => b > 0 && b >= 32 && b <= 126)
+                        .map((b) => String.fromCharCode(b))
+                        .join('');
+                    bool isPrintable = valBytes.every(
+                      (b) => b == 0 || (b >= 32 && b <= 126),
+                    );
+
+                    String displayVal = (isPrintable && strVal.isNotEmpty)
+                        ? strVal
+                        : "0x${HexUtils.bytesToHex(Uint8List.fromList(valBytes)).toUpperCase()}";
+
+                    String tagLabel;
+                    switch (tag) {
+                      case 0x81:
+                        tagLabel = "ROM Version";
+                        break;
+                      case 0x82:
+                        tagLabel = "Platform Build";
+                        break;
+                      case 0x83:
+                        tagLabel = "OS Version";
+                        break;
+                      case 0x84:
+                        tagLabel = "OS Build";
+                        break;
+                      case 0x85:
+                        tagLabel = "Patch Version";
+                        break;
+                      case 0x86:
+                        tagLabel = "Patch Build";
+                        break;
+                      default:
+                        tagLabel = "Tag ${tag.toRadixString(16).toUpperCase()}";
+                    }
+                    parts.add("$tagLabel: $displayVal");
+                    idx += len;
+                  }
+
+                  if (parts.isNotEmpty) {
+                    osInfoParsed = parts.join('\n');
+                  } else {
+                    osInfoParsed =
+                        "Raw Data: ${HexUtils.bytesToHex(osInfoResp).toUpperCase()}";
+                  }
+                } catch (e) {
+                  _log.warning("Could not fetch OS_INFORMATION: $e");
+                }
+
+                nxpInfos[currentEid] = NxpMemoryInfo(
+                  availableBytes: nxpAvailable,
+                  totalOrUnknownBytes: nxpTotal,
+                  volatileBytes: nxpVolatile,
+                  reservedBlocks: overheadBytes ~/ 16,
+                  firmwareVersion: fwVersion,
+                  osInformation: osInfoParsed,
+                );
+
+                // Deduplicate overhead
+                nxpAvailable -= overheadBytes;
+                if (nxpAvailable < 0) nxpAvailable = 0;
+
+                final newExt = ExtendedCardResource(
+                  installedApplication:
+                      resp.extCardResource?.installedApplication,
+                  freeNonVolatileMemory: nxpAvailable,
+                  freeVolatileMemory: resp.extCardResource?.freeVolatileMemory,
+                );
+
+                final modifiedResp = EUICCInfo2(
+                  baseProfilePackageVersion: resp.baseProfilePackageVersion,
+                  lowestSvn: resp.lowestSvn,
+                  euiccFirmwareVersion: resp.euiccFirmwareVersion,
+                  extCardResource: newExt,
+                  uiccCapability: resp.uiccCapability,
+                  ts102241Version: resp.ts102241Version,
+                  globalplatformVersion: resp.globalplatformVersion,
+                  euiccRspCapability: resp.euiccRspCapability,
+                  euiccCiPKIdListForVerification:
+                      resp.euiccCiPKIdListForVerification,
+                  euiccCiPKIdListForSigning: resp.euiccCiPKIdListForSigning,
+                  euiccCategory: resp.euiccCategory,
+                  forbiddenProfilePolicyRules: resp.forbiddenProfilePolicyRules,
+                  ppVersion: resp.ppVersion,
+                  sasAcreditationNumber: resp.sasAcreditationNumber,
+                  certificationDataObject: resp.certificationDataObject,
+                  treProperties: resp.treProperties,
+                  treProductReference: resp.treProductReference,
+                  additionalProfilePackageVersions:
+                      resp.additionalProfilePackageVersions,
+                  lpaMode: resp.lpaMode,
+                  euiccCiPKIdListForSigningV3: resp.euiccCiPKIdListForSigningV3,
+                  additionalEuiccInfo: resp.additionalEuiccInfo,
+                  highestSvn: resp.highestSvn,
+                  iotSpecificInfo: resp.iotSpecificInfo,
+                );
+
+                _log.info("NXP memory info applied: $nxpAvailable bytes free.");
+                _logAsn1Response(modifiedResp);
+                return modifiedResp;
+              }
+            }
+          } catch (e) {
+            _log.info("NXP memory info not available or failed: $e");
+          }
+
+          _logAsn1Response(resp);
+          return resp;
+        });
+      },
+      desc: "getEuiccInfo2",
+      retryAidErrors: useChannel == null,
+    );
+  }
+
+  Future<List<PendingNotification>> retrieveNotifications({
+    Channel? useChannel,
+  }) async {
+    return _retrySafeCommand(
+      () async {
+        return await _runOnChannel(useChannel, (channel) async {
+          _log.info("Notification strategy: ${adapter.notificationStrategy}");
+          if (adapter.notificationStrategy == NotificationStrategy.twoStep) {
+            _log.info("Using two-step notification listing (skeletons)...");
+            final metadatas = await listNotifications(useChannel: channel);
+            final notifications = <PendingNotification>[];
+            for (final metadata in metadatas) {
+              final skeleton = createSkeleton(metadata);
+              if (isValidNotificationAddress(metadata.notificationAddress) ||
+                  metadata.seqNumber == null) {
+                notifications.add(skeleton);
+                continue;
+              }
+
+              final seqNumber = metadata.seqNumber!;
+              _log.warning(
+                "Notification $seqNumber has a malformed address in the "
+                "list response; retrieving the full signed notification.",
+              );
+              try {
+                final resolved = await retrieveNotification(
+                  seqNumber,
+                  useChannel: channel,
+                );
+                final resolvedAddress = extractMetadata(
+                  resolved,
+                )?.notificationAddress;
+                if (isValidNotificationAddress(resolvedAddress)) {
+                  _log.info(
+                    "Recovered notification $seqNumber address from the "
+                    "signed notification.",
+                  );
+                } else {
+                  _log.warning(
+                    "Notification $seqNumber also has a malformed address in "
+                    "the signed notification.",
+                  );
+                }
+                notifications.add(resolved);
+              } catch (error) {
+                _log.warning(
+                  "Could not resolve notification $seqNumber after malformed "
+                  "list metadata: $error",
+                );
+                notifications.add(skeleton);
+              }
+            }
+            return notifications;
+          }
+
+          // Combined strategy (default)
+          final request = RetrieveNotificationsListRequest(
+            searchCriteria: null,
+          );
+          _logAsn1Request(request);
+          final requestData = request.encode();
+
+          final responseData = await transmitLogicalApdu(channel, requestData);
+          final resp = RetrieveNotificationsListResponse.decode(responseData);
+          _logAsn1Response(resp);
+          if (resp.notificationsListResultError != null) {
+            final err = resp.notificationsListResultError!;
+            throw Exception(
+              "RetrieveNotificationsList failed: ${err.name} (${err.value})",
+            );
+          }
+          return resp.notificationList ?? [];
+        });
+      },
+      desc: "retrieveNotifications",
+      retryAidErrors: useChannel == null,
+    );
+  }
+
+  static PendingNotification createSkeleton(NotificationMetadata meta) {
+    if ((meta.profileManagementOperation?.value ?? 0) &
+            NotificationEvent.notificationInstall !=
+        0) {
+      return PendingNotification(
+        profileInstallationResult: ProfileInstallationResult(
+          profileInstallationResultData: ProfileInstallationResultData(
+            notificationMetadata: meta,
+          ),
+        ),
+      );
+    } else {
+      return PendingNotification(
+        otherSignedNotification: OtherSignedNotification(
+          tbsOtherNotification: meta,
+        ),
+      );
+    }
+  }
+
+  static NotificationMetadata? extractMetadata(PendingNotification n) {
+    if (n.profileInstallationResult != null) {
+      return n
+          .profileInstallationResult
+          ?.profileInstallationResultData
+          ?.notificationMetadata;
+    }
+    if (n.otherSignedNotification != null) {
+      return n.otherSignedNotification?.tbsOtherNotification;
+    }
+    return null;
+  }
+
+  Future<PendingNotification> resolveNotification(
+    PendingNotification n, {
+    Channel? useChannel,
+  }) async {
+    if (n.asn1 != null) return n; // Already resolved
+
+    final meta = extractMetadata(n);
+    if (meta == null || meta.seqNumber == null) return n;
+
+    _log.info("Resolving skeleton notification ${meta.seqNumber}...");
+    return await retrieveNotification(meta.seqNumber!, useChannel: useChannel);
+  }
+
+  Future<List<NotificationMetadata>> listNotifications({
+    Channel? useChannel,
+  }) async {
+    return _retrySafeCommand(() async {
+      return await _runOnChannel(useChannel, (channel) async {
+        final request = ListNotificationRequest();
+        _logAsn1Request(request);
+        final requestData = request.encode();
+
+        final responseData = await transmitLogicalApdu(channel, requestData);
+        final resp = ListNotificationResponse.decode(responseData);
+        _logAsn1Response(resp);
+        if (resp.listNotificationsResultError != null) {
+          final err = resp.listNotificationsResultError!;
+          throw Exception(
+            "ListNotification failed: ${err.name} (${err.value})",
+          );
+        }
+        return resp.notificationMetadataList ?? [];
+      });
+    }, desc: "listNotifications");
+  }
+
+  Future<PendingNotification> retrieveNotification(
+    int seqNumber, {
+    Channel? useChannel,
+  }) async {
+    return _retrySafeCommand(() async {
+      return await _runOnChannel(useChannel, (channel) async {
+        final request = RetrieveNotificationsListRequest(
+          searchCriteria: RetrieveNotificationsListRequest_searchCriteria(
+            seqNumber: seqNumber,
+          ),
+        );
+        _logAsn1Request(request);
+        final requestData = request.encode();
+
+        final responseData = await transmitLogicalApdu(channel, requestData);
+        final resp = RetrieveNotificationsListResponse.decode(responseData);
+        _logAsn1Response(resp);
+        if (resp.notificationsListResultError != null) {
+          final err = resp.notificationsListResultError!;
+          throw Exception(
+            "RetrieveNotification failed for $seqNumber: ${err.name} (${err.value})",
+          );
+        }
+        if (resp.notificationList == null || resp.notificationList!.isEmpty) {
+          throw Exception("Notification $seqNumber not found");
+        }
+        return resp.notificationList!.first;
+      });
+    }, desc: "retrieveNotification");
+  }
+
+  Future<NotificationSentResponse_deleteNotificationStatus?> removeNotification(
+    int seqNumber, {
+    Channel? useChannel,
+  }) async {
+    final results = await removeNotifications([
+      seqNumber,
+    ], useChannel: useChannel);
+    return results.isNotEmpty ? results.first : null;
+  }
+
+  Future<List<NotificationSentResponse_deleteNotificationStatus?>>
+  removeNotifications(List<int> seqNumbers, {Channel? useChannel}) async {
+    return _runOnChannel(useChannel, (channel) async {
+      final results = <NotificationSentResponse_deleteNotificationStatus?>[];
+      for (final seq in seqNumbers) {
+        if (channel is HalDownloadChannel) {
+          if (seq < 0 || seq > 0x7fffffff) {
+            throw ArgumentError('Invalid notification sequence');
+          }
+          final eid = await getEid(useChannel: channel);
+          final snapshot = await transmitLogicalApdu(
+            channel,
+            RetrieveNotificationsListRequest(
+              searchCriteria: RetrieveNotificationsListRequest_searchCriteria(
+                seqNumber: seq,
+              ),
+            ).encode(),
+          );
+          final notification = RetrieveNotificationsListResponse.decode(
+            snapshot,
+          ).notificationList?.single;
+          if (notification == null) throw StateError('Notification missing');
+          final metadata = extractMetadata(notification);
+          if (metadata?.seqNumber != seq) {
+            throw StateError('Notification identity mismatch');
+          }
+          final iccid = metadata?.iccid != null
+              ? HexUtils.swapNibbles(HexUtils.bytesToHex(metadata!.iccid!))
+              : 'Unknown';
+          final record = await DatabaseService().getNotification(
+            eid,
+            seq,
+            iccid,
+          );
+          validateHalNotificationBackup(
+            record,
+            seq,
+            base64Encode(notification.encode()),
+            metadata?.notificationAddress,
+          );
+          _checkHalResult(
+            await SeHalHost.halRemoveNotification(
+              channel.slot,
+              seq,
+              HexUtils.hexToBytes(eid),
+              snapshot,
+            ),
+            0xBF30,
+          );
+          final remaining = await retrieveNotifications(useChannel: channel);
+          if (remaining.any((n) => extractMetadata(n)?.seqNumber == seq)) {
+            throw StateError('SE HAL: notification removal not verified');
+          }
+          results.add(NotificationSentResponse_deleteNotificationStatus.ok);
+          continue;
+        }
+        final request = NotificationSentRequest(seqNumber: seq);
+        _logAsn1Request(request);
+        final requestData = request.encode();
+
+        final responseData = await transmitLogicalApdu(channel, requestData);
+        final resp = NotificationSentResponse.decode(responseData);
+        _logAsn1Response(resp);
+
+        results.add(resp.deleteNotificationStatus);
+        _log.info(
+          "Notification removed (Seq: $seq) Status: ${resp.deleteNotificationStatus?.name}",
+        );
+      }
+      return results;
+    });
+  }
+
+  Future<Uint8List> getEuiccChallenge({Channel? useChannel}) async {
+    return _runOnChannel(useChannel, (channel) async {
+      final eid = await getEid(useChannel: channel);
+      _log.info(
+        "getEuiccChallenge: evaluate plugins (total: ${_sessionPlugins.length})",
+      );
+      final activePlugins = <SessionPlugin>[];
+      for (final p in _sessionPlugins) {
+        final interested = await p.isInterested(adapter, eid);
+        _log.info(
+          "Plugin ${p.id} interested in getEuiccChallenge: $interested",
+        );
+        if (interested) {
+          activePlugins.add(p);
+        }
+      }
+
+      final params = <String, dynamic>{};
+      for (final p in activePlugins) {
+        await p.beforeCommand('getEuiccChallenge', params, channel);
+      }
+
+      final request = GetEuiccChallengeRequest();
+      _logAsn1Request(request);
+      final requestData = request.encode();
+
+      final responseData = await transmitLogicalApdu(channel, requestData);
+      final resp = GetEuiccChallengeResponse.decode(responseData);
+      _logAsn1Response(resp);
+      if (resp.euiccChallenge == null) throw Exception("No challenge returned");
+
+      final result = resp.euiccChallenge!;
+      for (final p in activePlugins) {
+        await p.afterCommand('getEuiccChallenge', params, result, channel);
+      }
+      return result;
+    });
+  }
+
+  Future<Uint8List> getEuiccInfo1({Channel? useChannel}) async {
+    return _runOnChannel(useChannel, (channel) async {
+      final request = GetEuiccInfo1Request();
+      _logAsn1Request(request);
+      final requestData = request.encode();
+
+      final responseData = await transmitLogicalApdu(channel, requestData);
+      final resp = EUICCInfo1.decode(responseData); // Validate structure
+      _logAsn1Response(resp);
+      return responseData;
+    });
+  }
+
+  /// Reads MSISDN from the active profile on the basic channel.
+  /// Tricky function: selects MF, USIM ADF, and reads EF_MSISDN.
+  Future<String?> readActiveMsisdn() async {
+    // try {
+    //   _log.info("Attempting to read active MSISDN from basic channel...");
+
+    //   // 1. Select MF (3F00)
+    //   await adapter.sendApdu(Uint8List.fromList([0x00, 0xA4, 0x00, 0x04, 0x02, 0x3F, 0x00]));
+
+    //   // 2. Select DF_TELECOM (7F10)
+    //   // Check if successful, if not try USIM ADF
+    //   bool parentSelected = false;
+    //   Uint8List resp = await adapter.sendApdu(Uint8List.fromList([0x00, 0xA4, 0x00, 0x04, 0x02, 0x7F, 0x10]));
+    //   if (_isSuccessSw(resp)) {
+    //      parentSelected = true;
+    //   } else {
+    //      _log.info("DF_TELECOM select failed (${HexUtils.bytesToHex(resp)}), trying USIM ADF...");
+    //      // Fallback to USIM ADF
+    //      final selectUsim = Uint8List.fromList([0x00, 0xA4, 0x04, 0x00, 0x07, 0xA0, 0x00, 0x00, 0x00, 0x87, 0x10, 0x02]);
+    //      resp = await adapter.sendApdu(selectUsim);
+    //      if (_isSuccessSw(resp)) {
+    //        parentSelected = true;
+    //      } else {
+    //        _log.warning("USIM ADF select also failed: ${HexUtils.bytesToHex(resp)}");
+    //      }
+    //   }
+
+    //   if (!parentSelected) {
+    //      _log.warning("Could not select DF_TELECOM or USIM ADF. Aborting MSISDN read.");
+    //      return null;
+    //   }
+
+    //   // 3. Select EF_MSISDN (6F40)
+    //   final selectResp = await adapter.sendApdu(Uint8List.fromList([0x00, 0xA4, 0x00, 0x04, 0x02, 0x6F, 0x40]));
+    //   if (!_isSuccessSw(selectResp)) {
+    //      _log.info("EF.MSISDN not found or select failed: ${HexUtils.bytesToHex(selectResp)}");
+    //      return null;
+    //   }
+
+    //   int recordLength = 0;
+    //   // Parse FCP/Header for record length
+    //   // ... same parsing logic ...
+    //   final fcp = selectResp.sublist(0, selectResp.length - 2);
+
+    //   // Try to find record length in FCP (Tag 82)
+    //   for (int i = 0; i < fcp.length - 2; i++) {
+    //     if (fcp[i] == 0x82) {
+    //       int len = fcp[i+1];
+    //       // 82 02 41 21 (Transparent) or 82 05 42 21 00 1C 01 (Linear Fixed)
+    //       // Byte 1: File descriptor byte (42 = Linear Fixed, 41 = Transparent)
+    //       // Byte 2: Data coding byte (21 generally)
+    //       // Byte 3,4: Record length (2 bytes for Linear Fixed)
+    //       // Byte 5: Number of records
+
+    //       // Looking at provided hex: 82 05 42 21 00 1C 01
+    //       // i+0: 82 (Tag)
+    //       // i+1: 05 (Length)
+    //       // i+2: 42 (File Type: Linear Fixed)
+    //       // i+3: 21 (Data coding)
+    //       // i+4: 00 (Rec Len High)
+    //       // i+5: 1C (Rec Len Low) -> This is what we want!
+    //       // i+6: 01 (Num Recs)
+
+    //       if (len >= 5 && i + 1 + len <= fcp.length) {
+    //           // Check if Linear Fixed (0x42) or Cyclic (0x46)
+    //           // Actually ISO/IEC 7816-4 says:
+    //           // Tag 82 (File Descriptor)
+    //           // 1st byte: File descriptor byte.
+    //           //    - Bit 7=0: Working EF
+    //           //         Bits 3-1: Structure (001=Transp, 010=Linear Fixed, 110=Cyclic)
+    //           //         0x42 (0100 0010) => Linear Fixed.
+    //           //         0x46 (0100 0110) => Cyclic.
+    //           // 2nd byte: Data coding byte.
+    //           // 3rd & 4th byte: Record length (16 bit big endian)
+    //           // 5th byte: Number of records
+
+    //          if (len >= 5) {
+    //              int rLenHigh = fcp[i+4];
+    //              int rLenLow = fcp[i+5];
+    //              recordLength = (rLenHigh << 8) | rLenLow;
+    //          }
+    //          break;
+    //       }
+    //     }
+    //   }
+    //   // Old SIM fallback
+    //   if (recordLength == 0 && fcp.length >= 14) {
+    //     // In old GSM response, byte 13 (index 13?) is file length?
+    //     // byte 14 is record length in some specs?
+    //     // Let's stick to Safe default if FCP parse fails, effectively 0x1C or user standard.
+    //   }
+
+    //   if (recordLength == 0) {
+    //     _log.warning("Could not determine record length, falling back to 0x1C");
+    //     recordLength = 0x1C;
+    //   } else {
+    //     _log.info("Detected record length: $recordLength");
+    //   }
+
+    //   // 4. Read Record 1
+    //   final readResp = await adapter.sendApdu(Uint8List.fromList([0x00, 0xB2, 0x01, 0x04, recordLength]));
+
+    //   if (readResp.length < 2) return null;
+    //   final sw1 = readResp[readResp.length - 2];
+    //   final sw2 = readResp[readResp.length - 1];
+
+    //   if (sw1 == 0x90 && sw2 == 0x00) {
+    //     final data = readResp.sublist(0, readResp.length - 2);
+    //     return _decodeMsisdn(data);
+    //   } else {
+    //     _log.info("Read EF.MSISDN failed: ${HexUtils.bytesToHex(readResp)}");
+    //   }
+    // } catch (e) {
+    //   _log.warning("Failed to read MSISDN: $e");
+    // }
+    return null;
+  }
+
+  Future<Uint8List> authenticateServerRaw({
+    required Uint8List serverSigned1,
+    required Uint8List serverSignature1,
+    required Uint8List euiccCiPKIdToBeUsed,
+    required Uint8List serverCertificate,
+    required String matchingId,
+    Uint8List? tac,
+    Uint8List? imei,
+    Channel? useChannel,
+  }) async {
+    return _runOnChannel(useChannel, (channel) async {
+      // TAC-only remains the default. A full IMEI is sent when explicitly
+      // supplied by the caller or when the user entered 15 digits in settings.
+      final settings = AppSettings();
+      final actualTac = tac ?? await settings.getTac();
+      final actualImei = imei == null
+          ? await settings.getDeviceInfoImei()
+          : encodeDeviceInfoImei(imei);
+
+      // Construct DeviceInfo
+      final deviceInfo = DeviceInfo(
+        tac: actualTac,
+        deviceCapabilities: DeviceCapabilities(),
+        imei: actualImei,
+      );
+
+      // Build AuthenticateServerRequest using generated model
+
+      final request = AuthenticateServerRequest(
+        serverSigned1: ServerSigned1.decode(serverSigned1),
+        // Strip tag from serverSignature1 as generated code adds it
+        serverSignature1: SimpleAsn1Reader(serverSignature1).readNext()?.value,
+        // euiccCiPKIdToBeUsed and serverCertificate are now properly typed
+        euiccCiPKIdToBeUsed: SimpleAsn1Reader(
+          euiccCiPKIdToBeUsed,
+        ).readNext()?.value,
+        serverCertificate: Certificate.decode(serverCertificate),
+        ctxParams1: CtxParams1(
+          ctxParamsForCommonAuthentication: CtxParamsForCommonAuthentication(
+            matchingId: matchingId,
+            deviceInfo: deviceInfo,
+          ),
+        ),
+      );
+      _logAsn1Request(request);
+      final requestData = request.encode();
+      _log.info(
+        "Sending AuthenticateServerRequest (${requestData.length} bytes)",
+      );
+
+      return await transmitLogicalApdu(channel, requestData);
+    });
+  }
+
+  Future<AuthenticateResponseOk> authenticateServer({
+    required Uint8List serverSigned1,
+    required Uint8List serverSignature1,
+    required Uint8List euiccCiPKIdToBeUsed,
+    required Uint8List serverCertificate,
+    required String matchingId,
+    Uint8List? tac,
+    Uint8List? imei,
+    Channel? useChannel,
+  }) async {
+    return _runOnChannel(useChannel, (channel) async {
+      final eid = await getEid(useChannel: channel);
+      _log.info(
+        "authenticateServer: evaluate plugins (total: ${_sessionPlugins.length})",
+      );
+      final activePlugins = <SessionPlugin>[];
+      for (final p in _sessionPlugins) {
+        final interested = await p.isInterested(adapter, eid);
+        _log.info(
+          "Plugin ${p.id} interested in authenticateServer: $interested",
+        );
+        if (interested) {
+          activePlugins.add(p);
+        }
+      }
+
+      final params = {
+        'serverSigned1': serverSigned1,
+        'serverSignature1': serverSignature1,
+        'euiccCiPKIdToBeUsed': euiccCiPKIdToBeUsed,
+        'serverCertificate': serverCertificate,
+        'matchingId': matchingId,
+        'tac': tac,
+        'imei': imei,
+      };
+
+      for (final p in activePlugins) {
+        await p.beforeCommand('authenticateServer', params, channel);
+      }
+
+      try {
+        final responseData = await authenticateServerRaw(
+          serverSigned1: serverSigned1,
+          serverSignature1: serverSignature1,
+          euiccCiPKIdToBeUsed: euiccCiPKIdToBeUsed,
+          serverCertificate: serverCertificate,
+          matchingId: matchingId,
+          tac: tac,
+          imei: imei,
+          useChannel: channel,
+        );
+
+        final resp = AuthenticateServerResponse.decode(responseData);
+        _logAsn1Response(resp);
+
+        if (resp.authenticateResponseError != null) {
+          final err = resp.authenticateResponseError!;
+          final errorCode = err.authenticateErrorCode;
+          final errorMsg = errorCode != null
+              ? "${errorCode.name} (${errorCode.value})"
+              : "Unknown";
+          _log.severe("AuthenticateServer error: $errorMsg");
+          throw Exception("AuthenticateServer failed: $errorMsg");
+        }
+        if (resp.authenticateResponseOk == null) {
+          _log.severe("AuthenticateServer returned no OK response");
+          throw Exception("AuthenticateServer returned no OK response");
+        }
+
+        _log.info("AuthenticateServer succeeded");
+        final authOk = resp.authenticateResponseOk!;
+        for (final p in activePlugins) {
+          await p.afterCommand('authenticateServer', params, authOk, channel);
+        }
+        return authOk;
+      } catch (e, stackTrace) {
+        if (e is ApduException && e.sw1 == 0x6F && e.sw2 == 0x00) {
+          _log.warning(
+            "eUICC returned 6F00 for authenticateServer. This might be normal for some cards but usually indicates a parameter error.",
+          );
+        }
+        _log.severe("AuthenticateServer exception: $e", e, stackTrace);
+        for (final p in activePlugins) {
+          await p.afterCommand('authenticateServer', params, e, channel);
+        }
+        rethrow;
+      }
+    });
+  }
+
+  Future<PrepareDownloadResponse> prepareDownload({
+    required Uint8List smdpSigned2,
+    required Uint8List smdpSignature2,
+    required Uint8List smdpCertificate,
+    Uint8List? hashCc,
+    Channel? useChannel,
+  }) async {
+    return _runOnChannel(useChannel, (channel) async {
+      final request = PrepareDownloadRequest(
+        smdpSigned2: SmdpSigned2.decode(smdpSigned2),
+        smdpSignature2: SimpleAsn1Reader(smdpSignature2).readNext()?.value,
+        smdpCertificate: Certificate.decode(smdpCertificate),
+        hashCc: hashCc,
+      );
+      _logAsn1Request(request);
+      final requestData = request.encode();
+      _log.info("Sending PrepareDownloadRequest (${requestData.length} bytes)");
+
+      final responseData = await transmitLogicalApdu(channel, requestData);
+      final resp = PrepareDownloadResponse.decode(responseData);
+      _logAsn1Response(resp);
+
+      if (resp.downloadResponseError != null) {
+        final err = resp.downloadResponseError!;
+        final errorCode = err.downloadErrorCode;
+        final errorMsg = errorCode != null
+            ? "${errorCode.name} (${errorCode.value})"
+            : "Unknown";
+        _log.severe("PrepareDownload error: $errorMsg");
+        throw Exception("PrepareDownload failed: $errorMsg");
+      }
+      if (resp.downloadResponseOk == null) {
+        throw Exception("PrepareDownload returned no OK response");
+      }
+
+      _log.info("PrepareDownload succeeded");
+      return resp;
+    });
+  }
+
+  /// ES10b.CancelSession — tells the eUICC to drop the RSP session opened by
+  /// AuthenticateServer and returns the signed response the SM-DP+ needs.
+  ///
+  /// [transactionId] must be the raw octets the SM-DP+ issued, not their hex
+  /// text. Without this the eUICC keeps session state until the next
+  /// AuthenticateServer.
+  Future<CancelSessionResponse> cancelSession({
+    required Uint8List transactionId,
+    CancelSessionReason reason = CancelSessionReason.endUserRejection,
+    Channel? useChannel,
+  }) async {
+    return _runOnChannel(useChannel, (channel) async {
+      final request = CancelSessionRequest(
+        transactionId: transactionId,
+        reason: reason,
+      );
+      _logAsn1Request(request);
+      final requestData = request.encode();
+      _log.info(
+        "Sending CancelSessionRequest (reason=${reason.name}, "
+        "${requestData.length} bytes)",
+      );
+
+      final responseData = await transmitLogicalApdu(channel, requestData);
+      final resp = CancelSessionResponse.decode(responseData);
+      _logAsn1Response(resp);
+
+      if (resp.cancelSessionResponseError != null) {
+        throw Exception(
+          "CancelSession failed: ${resp.cancelSessionResponseError}",
+        );
+      }
+      if (resp.cancelSessionResponseOk == null) {
+        throw Exception("CancelSession returned no OK response");
+      }
+
+      _log.info("CancelSession succeeded");
+      return resp;
+    });
+  }
+
+  Future<void> loadBoundProfilePackage(
+    Uint8List bpp, {
+    Channel? useChannel,
+    void Function(int sent, int total)? onProgress,
+    void Function(String message)? onStatusMessage,
+  }) async {
+    return _runOnChannel(useChannel, (channel) async {
+      final segments = _decomposeBpp(bpp);
+      if (channel is HalDownloadChannel) {
+        // The whole package goes over in one call, so nothing the app sends
+        // can come between its blocks.
+        final response = await channel.loadBpp(
+          bpp,
+          segments.map((s) => s.length).toList(),
+        );
+        _checkSwAndGetData(response);
+        onProgress?.call(bpp.length, bpp.length);
+        return;
+      }
+      final totalSize = bpp.length;
+      int totalSentBytes = 0;
+
+      final mss = AppSettings().mss;
+      _log.info(
+        "Loading BoundProfilePackage: totalBytes=$totalSize, "
+        "segments=${segments.length}, mss=$mss",
+      );
+
+      try {
+        for (int i = 0; i < segments.length; i++) {
+          final segment = segments[i];
+          _log.fine(
+            "BPP segment ${i + 1}/${segments.length}: "
+            "${segment.length} bytes",
+          );
+
+          int offset = 0;
+          int blockNumber = 0; // Reset for each segment, 0-based as in lpac
+
+          while (offset < segment.length) {
+            int chunkSize = mss;
+            if (offset + chunkSize > segment.length) {
+              chunkSize = segment.length - offset;
+            }
+
+            final chunk = segment.sublist(offset, offset + chunkSize);
+            final isLastBlockOfSegment = (offset + chunkSize == segment.length);
+
+            // Following lpac/SGP.22 STORE DATA: P1=0x11 for more, 0x91 for last. P2=sequence.
+            final p1 = isLastBlockOfSegment ? 0x91 : 0x11;
+            final p2 = blockNumber & 0xFF;
+
+            // Send chunk RAW without any extra wrapping.
+            // The segments from _decomposeBpp already have the necessary tags (BF36, 87, 88, etc.)
+            final response = await _transmitApdu(
+              channel,
+              0x80,
+              0xE2,
+              p1,
+              p2,
+              chunk,
+            );
+
+            _checkSwAndGetData(response);
+
+            offset += chunkSize;
+            totalSentBytes += chunkSize;
+            blockNumber++;
+
+            if (onProgress != null) {
+              onProgress(totalSentBytes, totalSize);
+            }
+          }
+        }
+      } catch (e) {
+        if (e is ApduException) {
+          _log.warning(
+            "BPP Load failed with APDU error: ${e.message} (SW=${e.sw1.toRadixString(16)}${e.sw2.toRadixString(16)}). searching for detailed error...",
+          );
+          _log.warning(
+            "BPP progress at failure: sentBytes=$totalSentBytes, "
+            "totalBytes=$totalSize",
+          );
+          onStatusMessage?.call("Analyzing installation failure...");
+          await _handleInstallationFailure(channel);
+        }
+        rethrow;
+      }
+    });
+  }
+
+  /// The newest install notification, fetched one notification at a time.
+  ///
+  /// Searching by `profileManagementOperation` returns *every* install
+  /// notification the card still holds, each carrying its own certificate
+  /// chain. On a card whose notifications have not been sent that response
+  /// grows without bound -- measured at 9,455 bytes on a BeeSIM, which is 37
+  /// GET RESPONSE round trips over BLE and corrupted partway through, so the
+  /// failure this exists to explain went unexplained. ES10b.ListNotification
+  /// returns metadata only, so the sequence number can be picked from a small
+  /// response and exactly one notification retrieved.
+  Future<PendingNotification?> getLatestInstallNotification({
+    Channel? useChannel,
+  }) async {
+    return _runOnChannel(useChannel, (channel) async {
+      final metadata = await listNotifications(useChannel: channel);
+
+      int? latestSeq;
+      for (final entry in metadata) {
+        final seq = entry.seqNumber;
+        final operation = entry.profileManagementOperation?.value ?? 0;
+        if (seq == null) continue;
+        if (operation & NotificationEvent.notificationInstall == 0) continue;
+        if (latestSeq == null || seq > latestSeq) latestSeq = seq;
+      }
+
+      if (latestSeq == null) {
+        _log.info("No install notification is present on the card");
+        return null;
+      }
+
+      _log.info("Retrieving install notification $latestSeq");
+      return await retrieveNotification(latestSeq, useChannel: channel);
+    });
+  }
+
+  Future<void> _handleInstallationFailure(Channel channel) async {
+    try {
+      final notification = await getLatestInstallNotification(
+        useChannel: channel,
+      );
+      if (notification != null) {
+        final result = notification
+            .profileInstallationResult
+            ?.profileInstallationResultData
+            ?.finalResult;
+        if (result?.errorResult != null) {
+          final err = result!.errorResult!;
+          final cmdId = err.bppCommandId;
+          final reason = err.errorReason;
+
+          final cmdStr = cmdId != null ? cmdId.name : "Unknown Cmd";
+          final reasonStr = reason != null ? reason.name : "Unknown Reason";
+
+          _log.info("Found detailed failure: $reasonStr (Cmd: $cmdStr)");
+          throw InstallationException(
+            "Installation Failed: $reasonStr\n(Cmd: $cmdStr)",
+            notification: notification,
+          );
+        }
+      }
+    } catch (e) {
+      if (e is InstallationException) rethrow;
+      _log.warning("Failed to retrieve installation failure details: $e");
+    }
+  }
+
+  List<Uint8List> _decomposeBpp(Uint8List bpp) {
+    final reader = SimpleAsn1Reader(bpp);
+    final root = reader.readNext();
+    if (root == null || root.tag != 0xBF36) {
+      _log.warning("BPP does not start with BF36, sending as single segment");
+      return [bpp];
+    }
+
+    final segments = <Uint8List>[];
+
+    // root.encodedBytes contains T+L+V. root.value is V.
+    final rootTl = root.encodedBytes.sublist(
+      0,
+      root.encodedBytes.length - root.value.length,
+    );
+    final children = root.children;
+
+    // Segment 1: Tag and length fields of the BoundProfilePackage TLV plus the initialiseSecureChannelRequest TLV
+    if (children.isNotEmpty && children[0].tag == 0xBF23) {
+      final b = BytesBuilder();
+      b.add(rootTl);
+      b.add(children[0].encodedBytes);
+      segments.add(b.toBytes());
+    } else {
+      segments.add(rootTl);
+    }
+
+    // Remaining segments based on sequences
+    for (int i = 1; i < children.length; i++) {
+      final seq = children[i];
+      final seqTl = seq.encodedBytes.sublist(
+        0,
+        seq.encodedBytes.length - seq.value.length,
+      );
+      final elements = seq.children;
+
+      if (elements.isEmpty) {
+        segments.add(seq.encodedBytes);
+        continue;
+      }
+
+      if (seq.tag == 0xA0 || seq.tag == 0xA2) {
+        // sequences of 87
+        // Tag and length fields of the sequence TLV plus the first element
+        final b = BytesBuilder();
+        b.add(seqTl);
+        b.add(elements[0].encodedBytes);
+        segments.add(b.toBytes());
+        // Each of the remaining elements
+        for (int j = 1; j < elements.length; j++) {
+          segments.add(elements[j].encodedBytes);
+        }
+      } else if (seq.tag == 0xA1 || seq.tag == 0xA3) {
+        // sequenceOf88 or sequenceOf86
+        // Tag and length fields of the sequence TLV
+        segments.add(seqTl);
+        // Each of the contained TLVs
+        for (final e in elements) {
+          segments.add(e.encodedBytes);
+        }
+      } else {
+        segments.add(seq.encodedBytes);
+      }
+    }
+
+    return segments;
+  }
+
+  Future<Uint8List> transmitLogicalApdu(
+    Channel channel,
+    Uint8List requestData,
+  ) async {
+    // Rely on BaseChannel's internal logging and CLA mapping
+    final response = await channel.transmit(
+      0x80,
+      0xE2,
+      0x91,
+      0x00,
+      requestData,
+    );
+    return _checkSwAndGetData(response);
+  }
+
+  Future<T> _runOnChannel<T>(
+    Channel? channel,
+    Future<T> Function(Channel channel) action,
+  ) async {
+    if (channel != null) {
+      return await action(channel);
+    }
+    return _withChannel(action);
+  }
+
+  Future<T> _withChannel<T>(Future<T> Function(Channel channel) action) async {
+    final channel = await openSession();
+    try {
+      return await action(channel);
+    } finally {
+      await channel.close();
+    }
+  }
+
+  Future<Uint8List> _transmitApdu(
+    Channel channel,
+    int cla,
+    int ins,
+    int p1,
+    int p2,
+    Uint8List? data,
+  ) async {
+    // BaseChannel now handles logging if enableApduLogging is on
+    return await channel.transmit(cla, ins, p1, p2, data);
+  }
+
+  Future<void> _handleSoftRefresh(Channel channel) async {
+    _log.info("Performing soft recovery sequence (no reconnect)...");
+    try {
+      // Lightly sync state to clear proactive status and update UI caches
+      await listProfiles(useChannel: channel);
+      await retrieveNotifications(useChannel: channel);
+    } catch (e) {
+      _log.warning("Soft recovery command failed: $e");
+    }
+  }
+
+  /// Declines a refresh-flagged state change while the card is mid proactive
+  /// command.
+  ///
+  /// Asking an eUICC to defer a profile switch until a REFRESH only works if
+  /// the terminal can finish the toolkit exchange. A card that already has a
+  /// proactive session outstanding cannot be relied on for that, and starting
+  /// the switch anyway is what leaves it rejecting every later command. The
+  /// operation is refused while the card is still healthy instead.
+  ///
+  /// A reader that cannot tell (null) is not treated as busy: that would block
+  /// every switch on transports with no toolkit visibility.
+  /// Waits for a gap in which the card owes its terminal nothing.
+  ///
+  /// A card in a handset raises toolkit commands constantly and its modem
+  /// answers them within seconds, so this polls for one of those gaps and does
+  /// nothing else. It must never answer a command (that takes it from the
+  /// modem) and must never drop the link (the switch has not been sent yet).
+  /// How long to look for an idle window before giving up.
+  @visibleForTesting
+  static Duration idleWindowTimeout = const Duration(seconds: 45);
+
+  Future<void> _waitForIdleWindow(bool wantsRefresh, String operation) async {
+    final deadline = DateTime.now().add(idleWindowTimeout);
+    var waited = false;
+    while (DateTime.now().isBefore(deadline)) {
+      final bool? busy;
+      try {
+        busy = await adapter.isCatBusy();
+      } catch (e) {
+        _log.warning('Could not check whether the card is busy: $e');
+        return;
+      }
+      // Idle, or a reader that cannot tell: either way, proceed.
+      if (busy != true) {
+        if (waited) _log.info('Card reached an idle window.');
+        return;
+      }
+      if (!waited) {
+        _log.info('Card is mid proactive command; waiting for an idle window.');
+        waited = true;
+      }
+      await Future.delayed(const Duration(milliseconds: 500));
+    }
+
+    // Only a refresh-flagged switch depends on the card being able to finish a
+    // toolkit exchange, so only that one is refused when no gap ever appears.
+    if (!wantsRefresh) return;
+    _log.warning(
+      'Refusing to $operation: the card never stopped working through '
+      'proactive commands.',
+    );
+    throw CatBusyException(operation);
+  }
+
+  /// Settles the card after a profile state change that was committed without
+  /// asking the eUICC to defer it to a proactive REFRESH.
+  ///
+  /// Committing first and resetting afterwards is what keeps a reader that
+  /// cannot answer proactive commands from wedging: the eUICC never waits on a
+  /// terminal it will not hear from, so a reset that fails costs a stale
+  /// session rather than a card that rejects every later command.
+  Future<void> _resetAfterProfileSwitch(
+    Channel channel,
+    String operation,
+  ) async {
+    _log.info(
+      '$operation committed without a proactive refresh; resetting the card '
+      'so it starts serving the new state.',
+    );
+    _markRefreshing();
+
+    // The reset invalidates this channel, so closing it first only avoids
+    // leaving a logical channel open on a card that survives the restart.
+    try {
+      await channel.close();
+    } catch (e) {
+      _log.fine('Channel close before the reset failed: $e');
+    }
+
+    try {
+      await adapter.resetAfterProfileSwitch();
+    } catch (e) {
+      // The state change is already committed. A reset that does not complete
+      // must not be reported as a failed switch; the caller verifies the real
+      // state on a fresh session.
+      _log.warning('$operation reset did not complete cleanly: $e');
+    }
+  }
+
+  /// Reports a reader that ended a switch without serving any profile.
+  ///
+  /// Some readers fall back to a different card when nothing usable is
+  /// enabled. That looks fine over the management interface -- the profile
+  /// list is correct and every command succeeds -- but the host sees no
+  /// subscription at all, so it has to be surfaced here rather than left to
+  /// show up later as a SIM failure.
+  Future<void> _warnIfNotServingProfile(String operation) async {
+    final bool? serving;
+    try {
+      serving = await adapter.isServingProfile();
+    } catch (e) {
+      _log.fine('Could not check whether a profile is being served: $e');
+      return;
+    }
+    if (serving != false) return;
+
+    _log.severe(
+      '$operation finished but the reader is not serving any profile: it fell '
+      'back to its substitute card. The host will show no subscription even '
+      'though the profile list looks correct.',
+    );
+  }
+
+  Future<void> _handleRefresh(Channel channel) async {
+    _log.info("Performing recovery sequence...");
+    _markRefreshing();
+
+    // Close the channel straight away and stop touching the card. The eUICC
+    // raised a REFRESH and the host's modem is the terminal that performs it;
+    // anything sent meanwhile only keeps the card bound to this session.
+    try {
+      await channel.close();
+    } catch (e) {
+      if (isOmapiSessionCorruptedError(e)) rethrow;
+      /* ignore */
+    }
+
+    await adapter.proactiveRefresh();
+
+    // The host's reset takes tens of seconds and the card is unreachable for
+    // most of it, so give the reopen enough runway to outlast it. Reopening a
+    // session is the only reliable proof the card is usable again.
+    int backoff = 2;
+
+    for (int attempt = 0; attempt < 9; attempt++) {
+      try {
+        _log.info("Attempting to reopen session (attempt ${attempt + 1})...");
+        final ch = await openSession();
+        await ch.close();
+        _log.info("Reopen success.");
+        return; // Success!
+      } catch (e) {
+        // A card mid state change refuses the ISD-R with 6985/6999 and raises
+        // 91xx while the modem works through its commands. All of that is
+        // expected here and clears once the reset completes.
+        if (e is ProactiveRefreshException ||
+            e is ConditionOfUseNotSatisfiedException ||
+            e is CardBusyException) {
+          _log.info(
+            "Reopen not ready yet ($e); waiting ${backoff}s and retrying...",
+          );
+          await Future.delayed(Duration(seconds: backoff));
+          backoff = (backoff * 2).clamp(2, 20);
+          continue; // Retry
+        }
+
+        _log.warning("Reopen failed with non-refresh error: $e");
+        rethrow;
+      }
+    }
+
+    _log.warning("Reopen sequence failed, reconnecting device...");
+    if (adapter.connectedReader != null) {
+      final reader = adapter.connectedReader!;
+      try {
+        await adapter.disconnect();
+      } catch (_) {}
+
+      try {
+        await adapter.connect(reader);
+        _log.info("Reconnect success.");
+      } catch (e2) {
+        _log.severe("Reconnect failed: $e2");
+      }
+    }
+  }
+
+  void _markRefreshing() {
+    final until = DateTime.now().add(const Duration(seconds: 90));
+    if (adapter.refreshingUntil == null ||
+        adapter.refreshingUntil!.isBefore(until)) {
+      adapter.refreshingUntil = until;
+    }
+  }
+
+  Uint8List _checkSwAndGetData(Uint8List response) {
+    if (response.length < 2) {
+      throw Exception(
+        "Invalid response length: ${response.length}, data: ${HexUtils.bytesToHex(response)}",
+      );
+    }
+    final sw1 = response[response.length - 2];
+    final sw2 = response[response.length - 1];
+
+    if (sw1 == 0x91) {
+      throw ProactiveRefreshException(sw1, sw2);
+    }
+
+    // Use centralized validator
+    try {
+      ApduValidator.validate(sw1, sw2);
+    } catch (e) {
+      if (sw1 == 0x61 || sw1 == 0x6C) {
+        // Should be handled by adapter, if we see it here, it's an error in adapter logic or unhandled residue
+      }
+      rethrow;
+    }
+
+    return response.sublist(0, response.length - 2);
+  }
+
+  Future<T> _retrySafeCommand<T>(
+    Future<T> Function() action, {
+    String desc = "command",
+    bool retryAidErrors = true,
+  }) async {
+    const int maxAttempts = 10;
+    int attempt = 0;
+    // A card that refuses commands is settled at most once per command; a
+    // second refusal means the reset did not help and must be reported.
+    var settleAttempted = false;
+    while (true) {
+      try {
+        return await action();
+      } catch (e) {
+        if (isOmapiSessionCorruptedError(e)) rethrow;
+        attempt++;
+        if (attempt >= maxAttempts) {
+          _log.severe("$desc failed after $maxAttempts attempts: $e");
+          rethrow;
+        }
+
+        bool isRefresh = (e is ProactiveRefreshException);
+        bool isConditionsNotSatisfied =
+            (e is ConditionOfUseNotSatisfiedException);
+        bool isAidNotSelected =
+            (e is AppException &&
+            (e.code == AppErrorCode.ERROR_APPLICATION_NOT_FOUND ||
+                e.code == AppErrorCode.ERROR_CHANNEL_OPEN_FAILED));
+
+        final isRefreshing =
+            adapter.refreshingUntil != null &&
+            DateTime.now().isBefore(adapter.refreshingUntil!);
+
+        if (!retryAidErrors && e is CardBusyException) {
+          _log.info(
+            "$desc got card-busy on caller-owned channel: $e. Letting caller reopen a fresh session.",
+          );
+          rethrow;
+        }
+
+        if (isConditionsNotSatisfied) {
+          if (settleAttempted) {
+            _log.info("$desc: card still refuses the command after a reset.");
+            rethrow;
+          }
+          settleAttempted = true;
+          _log.info("$desc: card refused the command ($e); settling it.");
+          try {
+            await adapter.proactiveRefresh();
+          } catch (e2) {
+            _log.warning("Settling the card failed: $e2");
+            rethrow;
+          }
+          if (!retryAidErrors) {
+            // The caller owns the channel and the reset just invalidated it,
+            // so only the caller can safely reopen and replay.
+            rethrow;
+          }
+          _log.info("$desc: retrying on the settled card.");
+          continue;
+        }
+
+        if (isRefresh || isAidNotSelected) {
+          if (!retryAidErrors) {
+            _log.info(
+              "$desc failed on caller-owned channel: $e. Letting caller reopen a fresh session.",
+            );
+            rethrow;
+          }
+          if (!isRefreshing && isAidNotSelected) {
+            _log.info("$desc failed: $e. No retry (not in refreshing state).");
+            rethrow;
+          }
+
+          if (isRefresh) {
+            _log.info(
+              "$desc: Got 91xx, skipping hard proactive refresh (recovery sequence).",
+            );
+          }
+
+          final sleepSecs = 1 + attempt;
+          _log.info(
+            "$desc: Got ${isRefresh ? '91xx' : 'AID not selected'}, retry $attempt/$maxAttempts after ${sleepSecs}s...",
+          );
+          await Future.delayed(Duration(seconds: sleepSecs));
+        } else {
+          final bool isNotConnected =
+              e is AppException &&
+              e.code == AppErrorCode.ERROR_BLUETOOTH_NOT_CONNECTED;
+
+          if (!isRefreshing && !isNotConnected) {
+            _log.info(
+              "$desc: Unexpected error $e. No retry (not in refreshing state).",
+            );
+            rethrow;
+          }
+
+          _log.warning(
+            "$desc: ${isNotConnected ? 'Disconnected' : 'Unexpected error'} $e, attempt $attempt/$maxAttempts. Reconnecting reader...",
+          );
+          try {
+            await adapter.reconnect();
+          } catch (re2) {
+            _log.warning("$desc: Reconnect failed: $re2");
+          }
+          await Future.delayed(const Duration(milliseconds: 1000));
+        }
+      }
+    }
+  }
+}
+
+// Top-level functions for compute
+List<EuiccProfile> _mapProfiles(List<ProfileInfo> profilesRaw) {
+  return profilesRaw.map((p) {
+    String? iccid;
+    String? rawIccid;
+    if (p.iccid != null) {
+      // Keep the card's own value alongside the printed one: the filler has to
+      // survive for ES10c to address the profile.
+      rawIccid = HexUtils.swapNibbles(HexUtils.bytesToHex(p.iccid!));
+      iccid = IccidFormatter.forDisplay(rawIccid);
+    }
+
+    String? mcc;
+    String? mnc;
+    if (p.profileOwner?.mccMnc != null) {
+      final b = p.profileOwner!.mccMnc!;
+      if (b.length >= 3) {
+        final digits = b.map((e) => e.toRadixString(16).padLeft(2, '0')).join();
+        if (digits.length >= 5) {
+          mcc = "${digits[1]}${digits[0]}${digits[3]}";
+          if (digits[2].toUpperCase() == 'F') {
+            mnc = "${digits[5]}${digits[4]}";
+          } else {
+            mnc = "${digits[5]}${digits[4]}${digits[2]}";
+          }
+        }
+      }
+    }
+
+    String? gid1;
+    String? gid2;
+    if (p.profileOwner?.gid1 != null) {
+      gid1 = HexUtils.bytesToHex(p.profileOwner!.gid1!).toUpperCase();
+    }
+    if (p.profileOwner?.gid2 != null) {
+      gid2 = HexUtils.bytesToHex(p.profileOwner!.gid2!).toUpperCase();
+    }
+
+    final decodedName = _decodeUtf8Safe(p.profileName);
+    final decodedNickname = _decodeUtf8Safe(p.profileNickname);
+    final decodedServiceProviderName = _decodeUtf8Safe(p.serviceProviderName);
+
+    final parsedNickname = ProfileTagUtils.parse(decodedNickname);
+
+    String? smdpAddress;
+    if (p.notificationConfigurationInfo != null &&
+        p.notificationConfigurationInfo!.isNotEmpty) {
+      smdpAddress = p.notificationConfigurationInfo![0].notificationAddress;
+    }
+
+    return EuiccProfile(
+      iccid: iccid ?? "Unknown",
+      rawIccid: rawIccid,
+      name: decodedName,
+      nickname: decodedNickname,
+      serviceProviderName: decodedServiceProviderName,
+      enabled: p.profileState?.value == 1,
+      profileClass: p.profileClass?.value ?? 2,
+      isdpAid: p.isdpAid != null ? HexUtils.bytesToHex(p.isdpAid!) : null,
+      icon: p.icon,
+      mcc: mcc,
+      mnc: mnc,
+      gid1: gid1,
+      gid2: gid2,
+      smdpAddress: smdpAddress,
+      tags: parsedNickname.tags.map((t) => t.raw).toList(),
+    );
+  }).toList();
+}
+
+String? _decodeUtf8Safe(String? input) {
+  if (input == null) return null;
+  try {
+    return utf8.decode(input.codeUnits);
+  } catch (_) {
+    return input;
+  }
+}
+
+Uint8List _encodeNicknameRequestUtf8(Uint8List iccid, String nickname) {
+  // Construct SetNicknameRequest manually with UTF-8 nickname to support non-ASCII characters.
+  final children = <Uint8List>[
+    _asn1EncodeRaw(0x5A, iccid),
+    _asn1EncodeRaw(0x90, Uint8List.fromList(utf8.encode(nickname))),
+  ];
+  // Context-specific constructed tag BF29
+  return _asn1EncodeConstructed(0xBF29, children);
+}
+
+// ASN.1 Helpers
+Uint8List _asn1EncodeRaw(int tag, Uint8List value) {
+  final tagBytes = _encodeTag(tag);
+  final lenBytes = _encodeLength(value.length);
+  final b = BytesBuilder();
+  b.add(tagBytes);
+  b.add(lenBytes);
+  b.add(value);
+  return b.toBytes();
+}
+
+Uint8List _asn1EncodeConstructed(int tag, List<Uint8List> children) {
+  final b = BytesBuilder();
+  for (var c in children) {
+    b.add(c);
+  }
+  final value = b.toBytes();
+  return _asn1EncodeRaw(tag, value);
+}
+
+Uint8List _encodeTag(int tag) {
+  if (tag <= 30) return Uint8List.fromList([tag]);
+  if (tag > 0xFF) {
+    return Uint8List.fromList([(tag >> 8) & 0xFF, tag & 0xFF]);
+  }
+  return Uint8List.fromList([tag]);
+}
+
+Uint8List _encodeLength(int length) {
+  if (length < 128) {
+    return Uint8List.fromList([length]);
+  }
+  final bytes = <int>[];
+  var l = length;
+  while (l > 0) {
+    bytes.insert(0, l & 0xFF);
+    l = l >> 8;
+  }
+  bytes.insert(0, 0x80 | bytes.length);
+  return Uint8List.fromList(bytes);
+}
+
+/// The SE HAL path removes a notification only once it has been delivered and
+/// the delivered copy is backed up.
+void validateHalNotificationBackup(
+  NotificationRecord? record,
+  int sequence,
+  String content,
+  String? address,
+) {
+  if (record == null ||
+      record.status != 1 ||
+      record.seqNumber != sequence ||
+      record.content != content ||
+      record.notificationServer != address) {
+    throw StateError('SE HAL: send the notification before removing it');
+  }
+}
