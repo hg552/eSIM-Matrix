@@ -11,6 +11,7 @@ import '../../utils/platform_adapter.dart';
 import '../common/loading_spinner.dart';
 import 'ble_scan_dialog.dart';
 import '../../adapter/composite_adapter.dart';
+import 'reader_diagnostics_view.dart';
 
 /// Base widget for displaying state messages in the profiles screen.
 class ColumnStateMessage extends StatelessWidget {
@@ -311,7 +312,11 @@ class NoReadersState extends StatelessWidget {
                           height: 1.6,
                         ),
                       ),
-                      const SizedBox(height: 48),
+                      // Detailed Diagnostics Report Card (v1.3)
+                      ReaderDiagnosticsView(
+                        onRescanRequested: onReadersLoaded,
+                      ),
+                      const SizedBox(height: 24),
                       if (PlatformX.supportsBle &&
                           AppSettings().enableBleConnector)
                         _ConnectOptionCard(
@@ -707,6 +712,40 @@ class NoCardDetectedState extends StatelessWidget {
             backgroundColor: theme.colorScheme.primary,
             foregroundColor: Colors.white,
           ),
+        ),
+        const SizedBox(width: 8),
+        OutlinedButton.icon(
+          onPressed: () {
+            showModalBottomSheet(
+              context: context,
+              isScrollControlled: true,
+              backgroundColor: Colors.transparent,
+              builder: (ctx) => DraggableScrollableSheet(
+                initialChildSize: 0.85,
+                maxChildSize: 0.95,
+                minChildSize: 0.5,
+                builder: (_, scroll) => Container(
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).scaffoldBackgroundColor,
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(20),
+                    ),
+                  ),
+                  padding: const EdgeInsets.all(16),
+                  child: ListView(
+                    controller: scroll,
+                    children: [
+                      ReaderDiagnosticsView(
+                        onRescanRequested: () async => onRefresh(),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+          icon: const Icon(Icons.troubleshoot_rounded, size: 18),
+          label: const Text('查看排查报告'),
         ),
       ],
     );

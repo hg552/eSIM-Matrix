@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 import '../utils/platform_adapter.dart';
 import 'euicc_adapter.dart';
+import 'discovery_report.dart';
 import 'ccid/ccid_adapter.dart';
 import 'webcard/web_card_adapter.dart';
 import 'ble/red_ble_adapter.dart';
@@ -127,12 +128,22 @@ class CompositeAdapter extends BaseAdapter {
     }
   }
 
+  ReaderDiscoveryReport? _lastDiscoveryReport;
+
+  /// What the most recent reader scan asked each source and what each answered.
+  ReaderDiscoveryReport? get lastDiscoveryReport => _lastDiscoveryReport;
+
+  String _describeReader(Reader r) => '${r.id} -> ${r.name}';
+
   Future<List<Reader>> _doListReaders({bool force = false}) async {
     Object? omapiDiscoveryFailure;
     if (force) {
       _remoteInitTried.clear();
     }
     final Map<String, Reader> uniqueReaders = {};
+    final sources = <DiscoverySourceResult>[];
+    final scanStart = DateTime.now();
+    _log.info('Reader discovery started (force=$force)');
 
     void addReaders(List<Reader> list) {
       _log.info("Adding ${list.length} readers to uniqueReaders");
@@ -140,32 +151,115 @@ class CompositeAdapter extends BaseAdapter {
         uniqueReaders[r.id] = r;
       }
     }
+
+    void skipped(String source, String reason) {
+      _log.info('Discovery [$source]: skipped ($reason)');
+      sources.add(
+        DiscoverySourceResult(
+          source: source,
+          status: DiscoveryStatus.skipped,
+          detail: reason,
+        ),
+      );
+    }
+
+    /// Runs one reader source. Never throws: a failing source is recorded and
+    /// the scan carries on with the others, as it always did.
+    ///
+    /// [softError] covers adapters that swallow their own failure and answer
+    /// an empty list; [detail] adds context to a source that did answer.
+    Future<void> probe(
+      String source,
+      Future<List<Reader>> Function() list, {
+      required String failureLog,
+      void Function(Object error)? onError,
+      String? Function()? softError,
+      String? Function()? detail,
+    }) async {
+      final timer = Stopwatch()..start();
+      try {
+        final found = await list();
+        addReaders(found);
+        final soft = softError?.call();
+        _log.info(
+          'Discovery [$source]: ${found.length} reader(s) in '
+          '${timer.elapsedMilliseconds} ms${soft == null ? '' : ' (error: $soft)'}',
+        );
+        sources.add(
+          DiscoverySourceResult(
+            source: source,
+            status: soft == null ? DiscoveryStatus.ok : DiscoveryStatus.error,
+            readerNames: found.map(_describeReader).toList(),
+            detail: soft ?? detail?.call(),
+            elapsed: timer.elapsed,
+          ),
+        );
+      } catch (e) {
+        _log.warning('$failureLog: $e');
+        onError?.call(e);
+        sources.add(
+          DiscoverySourceResult(
+            source: source,
+            status: DiscoveryStatus.error,
+            detail: e.toString(),
+            elapsed: timer.elapsed,
+          ),
+        );
+      }
+    }
     // TODO: cache is now removed
 
     // 1. Identify existing non-transient readers to preserve from cache
+    final preserved = <String>[];
     for (final r in _readerCache.values) {
       if (r.source is RemoCardAdapter) {
         uniqueReaders[r.id] = r;
+        preserved.add(_describeReader(r));
       } else if (r.source is BleAdapter) {
         if (AppSettings().enableBleConnector) {
           uniqueReaders[r.id] = r;
+          preserved.add(_describeReader(r));
         }
       }
+    }
+    if (preserved.isNotEmpty) {
+      sources.add(
+        DiscoverySourceResult(
+          source: 'Kept from previous scan (remote/BLE)',
+          status: DiscoveryStatus.ok,
+          readerNames: preserved,
+        ),
+      );
     }
 
     // 2. Load session BLE readers from BleManager
     if (AppSettings().enableBleConnector) {
+      final added = <String>[];
       for (final info in BleManager().sessionReaders) {
         final id = info.readerName;
         if (!uniqueReaders.containsKey(id)) {
           final source = _createBleAdapter(info.type);
-          uniqueReaders[id] = Reader(id: id, name: info.name, source: source);
+          final reader = Reader(id: id, name: info.name, source: source);
+          uniqueReaders[id] = reader;
+          added.add(_describeReader(reader));
         }
       }
+      _log.info('Discovery [BLE session]: ${added.length} reader(s)');
+      sources.add(
+        DiscoverySourceResult(
+          source: 'BLE session readers',
+          status: DiscoveryStatus.ok,
+          readerNames: added,
+        ),
+      );
+    } else {
+      skipped('BLE session readers', 'BLE connector is off in settings');
     }
 
     // 3. Load Remote slots if auto-load is enabled
     if (AppSettings().autoLoadRemoteDevices) {
+      final remoteErrors = <String>[];
+      final remoteNames = <String>[];
       final List<Future<List<Reader>>> futures = [];
       for (final url in AppSettings().remoCardUrls) {
         // Only trigger auto-load discovery ONCE per URL per session
@@ -185,6 +279,7 @@ class CompositeAdapter extends BaseAdapter {
                 .catchError((e) {
                   _log.warning("Failed to auto-load from $url: $e");
                   _remoteInitTried.add(url); // Don't try again if it failed
+                  remoteErrors.add('$url: $e');
                   return <Reader>[];
                 }),
           );
@@ -196,95 +291,131 @@ class CompositeAdapter extends BaseAdapter {
           final results = await Future.wait(futures);
           for (final list in results) {
             addReaders(list);
+            remoteNames.addAll(list.map(_describeReader));
           }
         } catch (e) {
           _log.warning("Auto-load remote failed: $e");
+          remoteErrors.add(e.toString());
         }
       }
+      sources.add(
+        DiscoverySourceResult(
+          source: 'Remote auto-load',
+          status: remoteErrors.isEmpty
+              ? DiscoveryStatus.ok
+              : DiscoveryStatus.error,
+          readerNames: remoteNames,
+          detail: remoteErrors.isNotEmpty
+              ? remoteErrors.join('; ')
+              : (futures.isEmpty
+                    ? 'no URL left to try (each is tried once per session)'
+                    : null),
+        ),
+      );
+    } else {
+      skipped('Remote auto-load', 'auto-load is off in settings');
     }
 
     // The modem's own bus, which needs no cable at all: the card is the
     // handset's, reached through the process Shizuku runs.
     if (PlatformX.isAndroid) {
-      try {
-        addReaders(await _qrtrAdapter.listReaders(force: force));
-      } catch (e) {
-        _log.warning("QRTR modem list failed: $e");
-      }
-      try {
-        addReaders(await _seHalAdapter.listReaders(force: force));
-      } catch (e) {
-        _log.warning("SE HAL reader list failed: $e");
-      }
+      await probe(
+        'QRTR modem',
+        () => _qrtrAdapter.listReaders(force: force),
+        failureLog: 'QRTR modem list failed',
+      );
+      await probe(
+        'SE HAL',
+        () => _seHalAdapter.listReaders(force: force),
+        failureLog: 'SE HAL reader list failed',
+      );
     }
 
     // 4. CCID
     if (AppSettings().enableCcidConnector) {
-      try {
-        addReaders(await _ccidAdapter.listReaders());
-      } catch (e) {
-        _log.warning("CCID list failed: $e");
-      }
+      await probe(
+        'CCID (USB)',
+        () => _ccidAdapter.listReaders(),
+        failureLog: 'CCID list failed',
+      );
+    } else {
+      skipped('CCID (USB)', 'CCID connector is off in settings');
     }
-
-    final useNBridge =
-        PlatformX.isAndroid &&
-        await _nbridgeAdapter.isAvailable(forceRefresh: force);
 
     // 5. NBridge-backed Android secure element access
-    if (useNBridge) {
-      try {
-        addReaders(await _nbridgeAdapter.listReaders(force: force));
-      } catch (e) {
-        _log.warning('Failed to list NBridge readers: $e');
+    if (PlatformX.isAndroid) {
+      final useNBridge = await _nbridgeAdapter.isAvailable(
+        forceRefresh: force,
+      );
+      if (useNBridge) {
+        await probe(
+          'OTBridge',
+          () => _nbridgeAdapter.listReaders(force: force),
+          failureLog: 'Failed to list NBridge readers',
+        );
+      } else {
+        skipped('OTBridge', 'provider not installed or not reachable');
       }
-    }
 
-    // 5b. ADB-bridge-backed access, when a shell helper is connected
-    if (PlatformX.isAndroid && await _adbBridgeAdapter.isAvailable()) {
-      try {
-        addReaders(await _adbBridgeAdapter.listReaders(force: force));
-      } catch (e) {
-        _log.warning('Failed to list ADB bridge readers: $e');
+      // 5b. ADB-bridge-backed access, when a shell helper is connected
+      if (await _adbBridgeAdapter.isAvailable()) {
+        await probe(
+          'ADB bridge',
+          () => _adbBridgeAdapter.listReaders(force: force),
+          failureLog: 'Failed to list ADB bridge readers',
+        );
+      } else {
+        skipped('ADB bridge', 'no shell helper connected');
       }
-    }
 
-    // 6. Built-in OMAPI
-    if (PlatformX.isAndroid && AppSettings().enableOmapiConnector) {
-      try {
-        addReaders(await _omapiAdapter.listReaders(force: force));
-      } catch (e) {
-        _log.warning('Failed to list OMAPI readers: $e');
-        if (isOmapiSessionCorruptedError(e)) omapiDiscoveryFailure = e;
+      // 6. Built-in OMAPI
+      if (AppSettings().enableOmapiConnector) {
+        await probe(
+          'Built-in OMAPI',
+          () => _omapiAdapter.listReaders(force: force),
+          failureLog: 'Failed to list OMAPI readers',
+          onError: (e) {
+            if (isOmapiSessionCorruptedError(e)) omapiDiscoveryFailure = e;
+          },
+          softError: () => _omapiAdapter.lastListError,
+          detail: () => 'native readers: ${_omapiAdapter.lastRawReaders}',
+        );
+      } else {
+        skipped('Built-in OMAPI', 'OMAPI connector is off in settings');
       }
-    }
 
-    // 7. Built-in Telephony
-    if (PlatformX.isAndroid &&
-        kIsPrivileged &&
-        AppSettings().enableTmapiConnector) {
-      try {
-        addReaders(await _telephonyAdapter.listReaders());
-      } catch (e) {
-        _log.warning('Failed to list Telephony readers: $e');
+      // 7. Built-in Telephony
+      if (kIsPrivileged && AppSettings().enableTmapiConnector) {
+        await probe(
+          'Telephony (TMAPI)',
+          () => _telephonyAdapter.listReaders(),
+          failureLog: 'Failed to list Telephony readers',
+        );
+      } else {
+        skipped(
+          'Telephony (TMAPI)',
+          kIsPrivileged
+              ? 'TMAPI connector is off in settings'
+              : 'needs the privileged (system) build',
+        );
       }
     }
 
     // 8. Scrp WebUSB (Web only)
     if (PlatformX.isWeb) {
-      try {
-        addReaders(await _scrpAdapter.listReaders());
-      } catch (e) {
-        _log.warning('Failed to list Scrp readers: $e');
-      }
+      await probe(
+        'WebUSB (SCRP)',
+        () => _scrpAdapter.listReaders(),
+        failureLog: 'Failed to list Scrp readers',
+      );
 
       // 9. WebCard (Web only)
       if (AppSettings().enableCcidConnector) {
-        try {
-          addReaders(await _webCardAdapter.listReaders());
-        } catch (e) {
-          _log.warning('Failed to list WebCard readers: $e');
-        }
+        await probe(
+          'WebCard',
+          () => _webCardAdapter.listReaders(),
+          failureLog: 'Failed to list WebCard readers',
+        );
       }
     }
 
@@ -298,9 +429,23 @@ class CompositeAdapter extends BaseAdapter {
       _readerCache[r.id] = r;
     }
 
-    if (uniqueReaders.isEmpty && omapiDiscoveryFailure != null) {
+    final corruption = omapiDiscoveryFailure;
+    final fatal = uniqueReaders.isEmpty && corruption != null;
+    _log.info(
+      'Reader discovery finished: ${uniqueReaders.length} reader(s)'
+      '${fatal ? ' (OMAPI session corrupted)' : ''}',
+    );
+    _lastDiscoveryReport = ReaderDiscoveryReport(
+      at: scanStart,
+      forced: force,
+      sources: List.unmodifiable(sources),
+      totalReaders: uniqueReaders.length,
+      failure: fatal ? corruption.toString() : null,
+    );
+
+    if (fatal) {
       // Show the reboot-required error instead of the unrelated Bluetooth/empty-reader prompt.
-      throw omapiDiscoveryFailure;
+      throw corruption;
     }
     return uniqueReaders.values.toList();
   }

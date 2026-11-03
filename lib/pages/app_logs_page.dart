@@ -5,6 +5,8 @@ import 'package:logging/logging.dart';
 import '../services/log_buffer.dart';
 import '../widgets/styled_header_scaffold.dart';
 import '../l10n/app_localizations.dart';
+import '../services/diagnostics_service.dart';
+import '../adapter/composite_adapter.dart';
 import '../theme/app_theme.dart';
 
 class AppLogsPage extends StatefulWidget {
@@ -167,8 +169,50 @@ class _AppLogsPageState extends State<AppLogsPage> {
                   tooltip: AppLocalizations.of(context)!.toggleAutoScroll,
                 ),
                 const Spacer(),
+                TextButton.icon(
+                  icon: const Icon(Icons.troubleshoot_rounded, size: 18),
+                  label: const Text('复制排查报告'),
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  onPressed: () async {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('正在收集底层硬件与读卡器诊断信息...'),
+                        duration: Duration(seconds: 1),
+                      ),
+                    );
+                    try {
+                      final snap = await DiagnosticsService.collect(
+                        adapter: CompositeAdapter(),
+                        maxLogLines: 120,
+                      );
+                      await Clipboard.setData(
+                        ClipboardData(text: snap.reportText),
+                      );
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              '✅ 完整硬件与读卡器排查报告已复制到剪贴板！',
+                            ),
+                            duration: Duration(seconds: 4),
+                          ),
+                        );
+                      }
+                    } catch (e) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('生成报告失败: $e')),
+                        );
+                      }
+                    }
+                  },
+                ),
+                const SizedBox(width: 4),
                 IconButton(
                   icon: const Icon(Icons.copy, size: 20),
+                  tooltip: '复制原始日志',
                   onPressed: () {
                     final text = _logs
                         .map(

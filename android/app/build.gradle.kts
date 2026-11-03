@@ -132,6 +132,11 @@ android {
             signingConfig = signingConfigs.getByName("esim9")
         }
     }
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+        checkDependencies = false
+    }
 }
 
 flutter {

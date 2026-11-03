@@ -10,6 +10,10 @@ import android.se.omapi.Reader
 import android.se.omapi.SEService
 import android.se.omapi.Session
 import android.util.Log
+import android.Manifest
+import android.content.pm.PackageManager
+import android.telephony.SubscriptionManager
+import android.telephony.TelephonyManager
 import androidx.annotation.RequiresApi
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
@@ -371,6 +375,13 @@ class OmapiPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
 
     @RequiresApi(Build.VERSION_CODES.P)
     override fun onMethodCall(call: MethodCall, result: Result) {
+        // Diagnostics must work on every Android version and while OMAPI is poisoned, so it is
+        // answered before the API-level gate and the poison probe below.
+        if (call.method == "getDiagnostics") {
+            handleGetDiagnostics(result)
+            return
+        }
+
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
             result.error("UNSUPPORTED", "OMAPI requires Android 9.0 or higher", null)
             return
@@ -452,6 +463,218 @@ class OmapiPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
             }
         } else {
             result.notImplemented()
+        }
+    }
+
+    // ---- Diagnostics -------------------------------------------------------------------------
+    // Read-only snapshot for the in-app "no reader detected" report. Deliberately excludes
+    // ICCID/EID/phone numbers; it never opens a session or channel.
+
+    private fun systemProperty(key: String): String? =
+            try {
+                val cls = Class.forName("android.os.SystemProperties")
+                val value =
+                        cls.getMethod("get", String::class.java, String::class.java)
+                                .invoke(null, key, "") as? String
+                value?.takeIf { it.isNotBlank() }
+            } catch (_: Throwable) {
+                null
+            }
+
+    private fun simStateName(state: Int): String =
+            when (state) {
+                TelephonyManager.SIM_STATE_UNKNOWN -> "UNKNOWN"
+                TelephonyManager.SIM_STATE_ABSENT -> "ABSENT"
+                TelephonyManager.SIM_STATE_PIN_REQUIRED -> "PIN_REQUIRED"
+                TelephonyManager.SIM_STATE_PUK_REQUIRED -> "PUK_REQUIRED"
+                TelephonyManager.SIM_STATE_NETWORK_LOCKED -> "NETWORK_LOCKED"
+                TelephonyManager.SIM_STATE_READY -> "READY"
+                TelephonyManager.SIM_STATE_NOT_READY -> "NOT_READY"
+                TelephonyManager.SIM_STATE_PERM_DISABLED -> "PERM_DISABLED"
+                TelephonyManager.SIM_STATE_CARD_IO_ERROR -> "CARD_IO_ERROR"
+                TelephonyManager.SIM_STATE_CARD_RESTRICTED -> "CARD_RESTRICTED"
+                else -> "STATE_$state"
+            }
+
+    private fun guarded(block: () -> Map<String, Any?>): Map<String, Any?> =
+            try {
+                block()
+            } catch (e: Throwable) {
+                mapOf("error" to "${e.javaClass.simpleName}: ${e.message}")
+            }
+
+    private fun deviceDiagnostics(ctx: Context): Map<String, Any?> {
+        val pm = ctx.packageManager
+        val map = linkedMapOf<String, Any?>()
+        map["sdkInt"] = Build.VERSION.SDK_INT
+        map["release"] = Build.VERSION.RELEASE
+        map["securityPatch"] = Build.VERSION.SECURITY_PATCH
+        map["manufacturer"] = Build.MANUFACTURER
+        map["brand"] = Build.BRAND
+        map["model"] = Build.MODEL
+        map["device"] = Build.DEVICE
+        map["romDisplay"] = Build.DISPLAY
+        map["fingerprint"] = Build.FINGERPRINT
+        map["miuiVersion"] = systemProperty("ro.miui.ui.version.name")
+        map["hyperOsVersion"] = systemProperty("ro.mi.os.version.name")
+        map["featureOmapiUicc"] = pm.hasSystemFeature("android.hardware.se.omapi.uicc")
+        map["featureOmapiEse"] = pm.hasSystemFeature("android.hardware.se.omapi.ese")
+        map["featureOmapiSd"] = pm.hasSystemFeature("android.hardware.se.omapi.sd")
+        map["featureTelephonyEuicc"] =
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    pm.hasSystemFeature(PackageManager.FEATURE_TELEPHONY_EUICC)
+                } else {
+                    null
+                }
+        map["readPhoneStateGranted"] =
+                ctx.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) ==
+                        PackageManager.PERMISSION_GRANTED
+        return map
+    }
+
+    private fun telephonyDiagnostics(ctx: Context): Map<String, Any?> {
+        val map = linkedMapOf<String, Any?>()
+        val tm = ctx.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
+        if (tm == null) {
+            map["error"] = "TelephonyManager unavailable"
+            return map
+        }
+        val modemCount =
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        tm.activeModemCount
+                    } else {
+                        @Suppress("DEPRECATION") tm.phoneCount
+                    }
+                } catch (_: Throwable) {
+                    -1
+                }
+        map["modemCount"] = modemCount
+        map["simState"] = simStateName(tm.simState)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && modemCount > 0) {
+            map["slotSimStates"] =
+                    (0 until modemCount).map { slot ->
+                        "slot$slot=" +
+                                try {
+                                    simStateName(tm.getSimState(slot))
+                                } catch (e: Throwable) {
+                                    "error:${e.javaClass.simpleName}"
+                                }
+                    }
+        }
+        if (ctx.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) ==
+                        PackageManager.PERMISSION_GRANTED
+        ) {
+            try {
+                val sm =
+                        ctx.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as?
+                                SubscriptionManager
+                map["activeSubscriptions"] =
+                        sm?.activeSubscriptionInfoList.orEmpty().map { s ->
+                            buildString {
+                                append("slot=${s.simSlotIndex} sub=${s.subscriptionId}")
+                                append(" carrier=${s.carrierName}")
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                                    append(" embedded=${s.isEmbedded}")
+                                }
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                    append(" plmn=${s.mccString}${s.mncString}")
+                                }
+                            }
+                        }
+            } catch (e: SecurityException) {
+                map["activeSubscriptions"] = "denied: ${e.message}"
+            }
+        } else {
+            map["activeSubscriptions"] = "READ_PHONE_STATE not granted"
+        }
+        return map
+    }
+
+    private fun poisonSummary(): String? =
+            try {
+                cleanupCoordinator.poisonInfo?.let { "reader=${it.readerName} reason=${it.reason}" }
+            } catch (_: UninitializedPropertyAccessException) {
+                null
+            }
+
+    @RequiresApi(Build.VERSION_CODES.P)
+    private fun seDiagnostics(): Map<String, Any?> {
+        val map = linkedMapOf<String, Any?>()
+        val service = seService
+        map["serviceCreated"] = service != null
+        map["lifecycleAccepting"] = lifecycleCoordinator?.isAcceptingHardwareOperations
+        map["poison"] = poisonSummary()
+        if (service == null) return map
+        val connected =
+                try {
+                    service.isConnected
+                } catch (e: Throwable) {
+                    map["connectedError"] = "${e.javaClass.simpleName}: ${e.message}"
+                    false
+                }
+        map["serviceConnected"] = connected
+        // A poisoned session must not be probed any further.
+        if (!connected || map["poison"] != null) return map
+        map["readers"] =
+                service.readers.map { r ->
+                    linkedMapOf<String, Any?>(
+                            "name" to r.name,
+                            "secureElementPresent" to
+                                    try {
+                                        r.isSecureElementPresent
+                                    } catch (e: Throwable) {
+                                        "error: ${e.javaClass.simpleName}: ${e.message}"
+                                    },
+                            "acceptedBySimFilter" to r.name.startsWith("SIM"),
+                            "localSession" to readerSessions.containsKey(r.name),
+                            "openChannels" to
+                                    (readerChannels[r.name]?.keys?.toList() ?: emptyList<String>()),
+                    )
+                }
+        map["cachedStatus"] = readerStatusCache.toMap()
+        return map
+    }
+
+    private fun handleGetDiagnostics(result: Result) {
+        val ctx = context
+        val map = linkedMapOf<String, Any?>()
+        if (ctx != null) {
+            map["device"] = guarded { deviceDiagnostics(ctx) }
+            map["telephony"] = guarded { telephonyDiagnostics(ctx) }
+        } else {
+            map["device"] = mapOf("error" to "no Android context (plugin not attached to an activity)")
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            map["se"] = mapOf("unsupported" to "OMAPI needs Android 9 (API 28) or newer")
+            result.success(map)
+            return
+        }
+        attachSeDiagnostics(map, result)
+    }
+
+    @RequiresApi(Build.VERSION_CODES.P)
+    private fun attachSeDiagnostics(map: MutableMap<String, Any?>, result: Result) {
+        val coordinator = lifecycleCoordinator
+        if (coordinator == null) {
+            map["se"] = mapOf("lifecycle" to "OMAPI lifecycle not started (no activity attached yet)")
+            result.success(map)
+            return
+        }
+        val queued =
+                coordinator.enqueueHardware(
+                        onRejected = {
+                            map["se"] = mapOf("lifecycle" to "OMAPI lifecycle is detached")
+                            runOnUiThread { result.success(map) }
+                        },
+                        operation = {
+                            map["se"] = guarded { seDiagnostics() }
+                            runOnUiThread { result.success(map) }
+                        },
+                )
+        if (!queued) {
+            map["se"] = mapOf("queue" to "background handler unavailable")
+            result.success(map)
         }
     }
 

@@ -129,6 +129,22 @@ class OmapiAdapter extends BaseAdapter {
     _lastListTime = null;
   }
 
+  /// Raw reader strings and the swallowed error from the most recent
+  /// [listReaders] call. [listReaders] answers `[]` on failure, which would
+  /// otherwise hide the cause from the diagnostics report.
+  List<String> lastRawReaders = const [];
+  String? lastListError;
+
+  /// Read-only native snapshot (device, telephony, SEService, raw readers).
+  /// Goes straight to the channel rather than through [_safety]: it must still
+  /// answer when OMAPI is poisoned, which is exactly when it is needed.
+  static Future<Map<String, dynamic>> fetchDiagnostics() async {
+    final raw = await _channel
+        .invokeMapMethod<String, dynamic>('getDiagnostics')
+        .timeout(const Duration(seconds: 6));
+    return raw ?? const <String, dynamic>{};
+  }
+
   /// Flush only released handles before Android can suspend Dart timers.
   /// Live references (including downloads/profile operations) remain untouched.
   Future<void> setAppInBackground(bool value) async {
@@ -161,6 +177,8 @@ class OmapiAdapter extends BaseAdapter {
 
     try {
       final List<dynamic> result = await _invoke('listReaders');
+      lastRawReaders = result.map((e) => e.toString()).toList();
+      lastListError = null;
       final readers = result.map((nameStr) {
         final rawName = nameStr as String;
         final nameParts = rawName.split('|');
@@ -187,6 +205,7 @@ class OmapiAdapter extends BaseAdapter {
       _lastListTime = now;
       return readers;
     } catch (e) {
+      lastListError = e.toString();
       if (isOmapiSessionCorruptedError(e)) rethrow;
       log.warning('Failed to list OMAPI readers: $e');
       return [];

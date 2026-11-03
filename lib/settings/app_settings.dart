@@ -74,6 +74,8 @@ class AppSettings extends ChangeNotifier {
   String get buildNumber => _buildNumber;
   String get commitHash => kCommitHash;
   String get versionDisplay => _version.startsWith('beta') ? _version : 'v$_version b$_buildNumber';
+  String get packageName =>
+      _packageName.isNotEmpty ? _packageName : 'ee.nekoko.nlpa2.multi';
 
   String _flavorFileVariant = '';
 
