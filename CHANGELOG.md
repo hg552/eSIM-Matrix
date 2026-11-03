@@ -1,34 +1,31 @@
-# Changelog
+# Changelog (更新日志)
 
-All notable changes to NekokoLPA2 will be documented in this file.
+All notable changes to **eUICC-Nexus** (and upstream NekokoLPA2) are documented in this file.
 
-## [Unreleased]
+## [v1.1.0] - 2026-11-03 (`1.1.0+110`)
 
-### Fixed
-- Prepare the main Looper before creating the system `ActivityThread` in the one-time ADB helper; Android 16 `app_process` otherwise crashes while constructing its Handler.
-- Use shell-attributed external-provider Binder IPC in the one-time ADB helper; Android 16 rejects `android` as the caller package for shell UID 2000.
+### ✨ 新增功能 (Added)
+- **验证码智能提取与单击复制 (`<code>OTP</code>`)**：自动从多国短信中提取 4~8 位纯数字及 `G-xxxxxx` 验证码置顶展示，使用 Telegram HTML `<code>` 标签包裹（在 Telegram 中轻点验证码即可复制），并在每条转发短信底部附带 **`[ 🏠 已收到码，切回主卡 ]`** 快捷按钮；App 内历史记录卡片同步新增 **`[ 🔑 复制验证码 ]`** 按钮。
+- **5 分钟临时接码模式 (`/use_temp`) 与定时自动保号引擎 (`/keepalive`)**：
+  - `/list` 列表同时提供 **`[ 🔄 启用 ]`**（持久切卡）与 **`[ ⏱️ 5分接码 ]`**（5 分钟倒计时结束后自动切回默认主卡）双模式按钮；
+  - 新增 `/keepalive` 定时保号管理面板，支持为任意卡片配置周期性保号任务（如每 90 天自动切换并驻留漫游基站 3 分钟后自动切回主卡），也支持一键 **`[ ⚡ 立即保号 ]`**。
+- **Telegram 直接发送二维码图片远程下卡 & 远程改备注名 (`/rename`)**：
+  - 支持直接在 Telegram 聊天框发送 **eSIM 二维码截图/照片**，网关自动在内存解码 `LPA:1$...`（含暗色反相二维码容错）并执行 ES9+/ES10b 远程写卡；
+  - 新增 `/rename <序号> <新名称>` 指令与按钮，支持远程修改卡片备注昵称。
+- **芯片剩余闪存空间 (`Free NVRAM KB`) 与 `EID` 实时展示**：在 `/list`、`/status` 与 Web 控制台中直接读取并展示当前 eUICC 芯片剩余可用空间（`KB`）与 `EID`。
+- **宿主机备用机电量 / 断电 / 温度健康监控与告警**：`/status` 实时显示手机电量百分比、充电类型 (`AC`/`USB`)、电池温度 (`°C`) 与网络类型；当检测到外部电源断开、电量 `≤ 20%` 或温度 `≥ 45°C` 时自动向 Telegram 发送告警。
+- **呼入电话 / 来电振铃提醒 (`CallRelayReceiver`)**：监听 `PHONE_STATE` 振铃广播，收到语音验证码呼入或来电时实时推送来电号码与卡槽提醒至 Telegram / Webhook。
+- **双卡槽与多读卡器远程切换 (`/readers`)**：支持在 Telegram 或 REST API 远程查看并切换 `SIM 1`、`SIM 2` 及蓝牙/USB 读卡器。
+- **短信失败离线重试队列 (`/retry_sms`)**：支持指数退避重试、后台定时自动补发未送达短信，以及通过 `/retry_sms` 或 App 历史页 **`[ 🔄 重发 ]`** 按钮一键补发。
 
-### Documentation
-- Correct the fork's deployment instructions to the non-root Multi APK. OTBridge APKs and KernelSU/Magisk modules are not required; profile access still depends on authorized OMAPI or an external reader, not on bypassing card rules with multiple signers.
-
-
-### Added
-- Add an Android-only local network-status tab for active subscriptions, voice registration and signal readings. It uses public Telephony callbacks after a user-granted `READ_PHONE_STATE` permission; the view does not read SMS or change profiles.
-- Add a non-root eUICC-Nexus Android flavor with read-only telephony status and opt-in inbound SMS relay to an HTTPS webhook or confirmed Telegram private chat. Only this flavor requests `RECEIVE_SMS`; the Nexus reader path ignores OTBridge.
-- Encrypt Telegram Bot Tokens with Android Keystore; discover and confirm direct private chats, or explicitly enter and confirm a group/channel destination. No SMS body logging.
-
-
-## [1.1.0+110]
-
-### Added
-- **Smart OTP Extraction & Click-to-Copy (`<code>OTP</code>`)**: Automatically extract 4–8 digit and prefixed (`G-xxxxxx`) verification codes from incoming SMS, format Telegram messages in HTML with one-tap copyable `<code>` tags, and attach quick `[🏠 已收到码，切回主卡]` inline action buttons directly below each forwarded SMS.
-- **Offline SMS Retry Queue & One-Click Redelivery**: Retry failed SMS deliveries with exponential backoff and automatically flush undelivered messages when connectivity returns or via `/retry_sms` and UI retry buttons.
-- **Dual Switching Modes (Permanent vs. 5-Minute Temporary OTP) & Keep-Alive Cron Engine**: Support both permanent switching (`🔄 启用`) and 5-minute auto-revert OTP switching (`⏱️ 5分接码`), plus a configurable periodic Keep-Alive scheduler (`/keepalive`) that automatically switches to target profiles for 3 minutes of roaming registration and reverts to the default card.
-- **Direct QR Image Decoding in Telegram & Remote Profile Renaming (`/rename`)**: Send an eSIM QR code photo/screenshot directly to the Telegram Bot to decode `LPA:1$...` in memory and install the profile; rename any profile remotely via `/rename <index> <new_name>`.
-- **eUICC Free NVRAM & EID Reporting**: Display remaining eUICC non-volatile memory (`KB`) and `EID` directly in `/list`, `/status`, and the Web UI.
-- **Host Standby Device Health Monitoring & Power/Battery Alerts**: Report battery percentage, charging source (`AC`/`USB`), battery temperature (`°C`), and network transport in `/status`, and push automatic Telegram alerts when AC power is unplugged, battery drops below `20%`, or temperature exceeds `45°C`.
-- **Incoming Call Relay (`CallRelayReceiver`)**: Forward incoming call ringing alerts (`PHONE_STATE`) with caller number and SIM slot to Telegram/Webhook and record them in local history.
-- **Multi-Reader / Dual-SIM Slot Switching (`/readers`)**: Remotely list and switch between `SIM 1`, `SIM 2`, and external readers from Telegram or the REST API.
+### 🐛 修复与优化 (Fixed)
+- **修复小米澎湃 OS (HyperOS / MIUI) 拦截通知类/验证码短信广播 (`MIUILOG- Sms Filter`) 问题**：
+  - 声明并动态请求 `READ_SMS` 与 `com.miui.permission.READ_NOTIFICATION_SMS`，提升 `SmsRelayReceiver` 广播优先级至最高 (`2147483647`)；
+  - 在 `RemoteGatewayForegroundService` 常驻服务中新增 **`content://sms/inbox` 数据库 `ContentObserver` + 增量扫描双引擎兜底**（带去重窗口），即使系统底层过滤了 `SMS_RECEIVED` 广播，只要短信写入系统收件箱即可在 1 秒内自动补抓并转发。
+- **修复短时间高频涌入多条短信时的漏转与限流问题**：
+  - `SmsRelayReceiver.onReceive` 改为 `<5ms` 毫秒级落盘至 `SmsRelayStore` 后立即结束广播，避免阻塞系统 `GsmInboundSmsHandler` 有序广播队列；
+  - 后台发送队列扩容至 `256`，新增 `280ms` 突发消息平滑节流锁，并在 `TelegramBotClient` 中支持 `HTTP 429 Too Many Requests` (`retry_after`) 自动退避重发。
+- **修复应用底部导航栏偶发隐藏「短信转发」页面的问题**：在 `MainTabScreen` 中将 Android 端「短信转发」Tab 默认设为常驻可见，并隔离后台预热启动时的权限请求异常，防止异常回调将 Tab 状态重置为隐藏。
 ## [1.0.0+100]
 
 ### Released
