@@ -156,8 +156,8 @@ class EstkPlugin extends ProfilePlugin implements SessionPlugin {
     final normalizedEid = eid.toUpperCase();
     final normalizedAid = aid?.toUpperCase();
 
-    // If we are currently on the second slot (AID ending in 31), it is definitely an ESTK Max device
-    if (normalizedAid == aidChan2) return true;
+    // Any ESTK slot AID (...30 or ...31) allows toggling between SE0 and SE1 on ESTK Max
+    if (normalizedAid == aidChan1 || normalizedAid == aidChan2) return true;
 
     // Check AppSettings first (cached for this device)
     if (AppSettings().isEstkMax(normalizedEid)) return true;
@@ -181,13 +181,13 @@ class EstkPlugin extends ProfilePlugin implements SessionPlugin {
   List<String> getExtraAids(String atr) {
     if (atr.toUpperCase().contains(atrSignature.toUpperCase())) {
       final preferred = _preferredAids[atr];
-      if (preferred == aidChan1) {
-        return [aidChan1, aidChan2];
+      if (preferred == aidChan2) {
+        return [aidChan2, aidChan1];
       }
       return [
-        aidChan2,
         aidChan1,
-      ]; // Default to Chan2 then Chan1? Or whatever order.
+        aidChan2,
+      ]; // Default to SE0 (Chan1: ...30) then SE1 (Chan2: ...31)
     }
     return [];
   }
@@ -565,8 +565,17 @@ class EstkPlugin extends ProfilePlugin implements SessionPlugin {
 
       if (currentAid == aidChan1 || currentAid == aidChan2) {
         _log.info("Opened ESTK channel: $currentAid for EID: $eid");
-
-        // Avoid repeated processing of the same EID in this app session
+        // On Android internal SIM slots (OMAPI), opening a second simultaneous
+        // logical channel (aidMgt / secondary SE) while ISD-R is open fails on
+        // single-channel basebands or strict ARA-M rules. Skip concurrent probes.
+        final readerId =
+            (channel.adapter.connectedReader?.id ?? '').toLowerCase();
+        if (!channel.adapter.supportsRawApdu ||
+            readerId.startsWith('omapi:') ||
+            readerId.startsWith('nbridge:')) {
+          _processedEids.add(eid);
+          return;
+        }
         if (_processedEids.contains(eid)) {
           return;
         }

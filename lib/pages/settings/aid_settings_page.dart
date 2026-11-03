@@ -55,8 +55,8 @@ class _AidSettingsPageState extends State<AidSettingsPage> {
   Future<void> _resetDefaults() async {
     final settings = AppSettings();
     final defaults = [
-      "A06573746B6D65FFFF4953442D522031",
       "A06573746B6D65FFFF4953442D522030",
+      "A06573746B6D65FFFF4953442D522031",
       "A0000005591010FFFFFFFF8900000100",
       "A0000005591010FFFFFFFF8900050500",
       "A0000005591010000000008900000300",

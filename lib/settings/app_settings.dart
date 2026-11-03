@@ -301,9 +301,9 @@ class AppSettings extends ChangeNotifier {
   String? get locale => _locale;
 
   List<String> _aids = [
-    "A06573746B6D65FFFF4953442D522031", // eSTKme-specific AID
-    "A06573746B6D65FFFF4953442D522030", // eSTKme-specific AID
-    "A0000005591010FFFFFFFF8900000100",
+    "A06573746B6D65FFFF4953442D522030", // eSTKme SE0 (Slot 1 - primary)
+    "A06573746B6D65FFFF4953442D522031", // eSTKme SE1 (Slot 2 - ESTK Max)
+    "A0000005591010FFFFFFFF8900000100", // Standard GSMA SGP.22 ISD-R
     "A0000005591010FFFFFFFF8900050500",
     "A0000005591010000000008900000300",
     "A0000005591010FFFFFFFF8900000177",
@@ -687,7 +687,15 @@ class AppSettings extends ChangeNotifier {
         _prefs?.getString('rspReverseProxyUrlPrefix') ?? '';
     _locale = _prefs?.getString('locale');
     _estkMaxEids = (_prefs?.getStringList('estkMaxEids') ?? []).toSet();
-    _aids = _prefs?.getStringList('aids') ?? _aids;
+    final savedAids = _prefs?.getStringList('aids');
+    if (savedAids != null && savedAids.isNotEmpty) {
+      if (savedAids.first.toUpperCase() == "A06573746B6D65FFFF4953442D522031") {
+        // Migrate legacy inverted default order where SE1 (...31) was ahead of ISD-R and SE0 (...30)
+        await _prefs?.setStringList('aids', _aids);
+      } else {
+        _aids = savedAids;
+      }
+    }
     _vowifiEnabled = _prefs?.getBool(_vowifiEnabledKey) ?? false;
     _vowifiConsentVersion = _prefs?.getInt(_vowifiConsentVersionKey);
 

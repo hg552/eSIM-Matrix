@@ -922,19 +922,23 @@ class OmapiPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         }
 
         // If we get here, no AID worked.
-        // Check if we should retry (only if single AID really, or if session looks dead)
-        if (!isRetry && lastError != null) {
+        // Never nuke an existing session if another channel is already open on this reader
+        // (e.g. EstkPlugin probing aidMgt while ISD-R channel is open), or on SecurityException.
+        val hasActiveChannels = readerChannels[readerName]?.isNotEmpty() == true
+        val isSecurityError =
+                lastError is SecurityException ||
+                        (lastError?.message?.let { msg ->
+                            msg.contains("AccessControl", ignoreCase = true) ||
+                                    msg.contains("not allowed", ignoreCase = true) ||
+                                    msg.contains("ARA-M", ignoreCase = true) ||
+                                    msg.contains("SecurityException", ignoreCase = true)
+                        } == true)
+
+        if (!isRetry && lastError != null && !hasActiveChannels && !isSecurityError) {
             val message = lastError!!.message ?: ""
-            // "OpenLogicalChannel() failed" and NoSuchElementException are typically native/driver
-            // state issues.
-            // We should retry these even if we haven't successfully opened a channel before,
-            // because the session might be stale from a previous run or background event.
             val isInfrastructureError =
                     message.contains("OpenLogicalChannel() failed", ignoreCase = true) ||
                             lastError is java.util.NoSuchElementException
-
-            // "Failed to select any valid AID" is generic, maybe just not found?
-            // If we really want to be robust, we retry infrastructure errors always once.
 
             if (isInfrastructureError ||
                             (readersWithSuccessfulChannel.contains(readerName) &&
@@ -947,7 +951,6 @@ class OmapiPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 val cleanup = cleanupReaderSessions(readerName)
                 if (reportCleanupFailure(result, cleanup)) return
                 try {
-                    // Small delay before retry
                     Thread.sleep(150)
                     val reader = seService!!.readers.firstOrNull { it.name == readerName }
                     if (reader != null) {
@@ -963,7 +966,15 @@ class OmapiPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
             }
         }
         runOnUiThread {
-            result.error("CHANNEL_FAILED", lastError?.message ?: "No AID opened", null)
+            if (isSecurityError) {
+                result.error(
+                        "AccessControlException",
+                        "Access denied by ARA-M: ${lastError?.message ?: "no APDU access allowed"}",
+                        null,
+                )
+            } else {
+                result.error("CHANNEL_FAILED", lastError?.message ?: "No AID opened", null)
+            }
         }
     }
 

@@ -423,6 +423,9 @@ class LpaRemoteProfileControl implements RemoteProfileControl {
     }
   }
 
+  static const String _estkAidSe0 = 'A06573746B6D65FFFF4953442D522030';
+  static const String _estkAidSe1 = 'A06573746B6D65FFFF4953442D522031';
+
   @override
   Future<List<RemoteReaderEntry>> listReaders() async {
     final readers = await _adapter.listReaders(force: true);
@@ -434,7 +437,7 @@ class LpaRemoteProfileControl implements RemoteProfileControl {
         selectedId = current.id;
       } catch (_) {}
     }
-    return readers
+    final entries = readers
         .map(
           (r) => RemoteReaderEntry(
             id: r.id,
@@ -442,13 +445,57 @@ class LpaRemoteProfileControl implements RemoteProfileControl {
             selected: r.id == selectedId,
           ),
         )
-        .toList(growable: false);
+        .toList();
+    final atr = (_adapter.lastAtr ?? '').toUpperCase();
+    if (atr.contains('6573746B6D65') && selectedId != null) {
+      final workingAid =
+          (_manager.getWorkingAid(selectedId) ??
+                  AppSettings().getPreferredEstkAid(selectedId, atr) ??
+                  _estkAidSe0)
+              .toUpperCase();
+      entries.add(
+        RemoteReaderEntry(
+          id: 'estk:SE0',
+          name: 'ESTK Max SE0 (主芯片)',
+          selected: workingAid == _estkAidSe0,
+        ),
+      );
+      entries.add(
+        RemoteReaderEntry(
+          id: 'estk:SE1',
+          name: 'ESTK Max SE1 (副芯片)',
+          selected: workingAid == _estkAidSe1,
+        ),
+      );
+    }
+    return entries;
   }
 
   @override
   Future<RemoteReaderEntry> selectReader(String selector) async {
     final normalized = selector.trim();
     if (normalized.isEmpty) throw StateError('reader_not_found');
+    final lower = normalized.toLowerCase();
+    if (lower == 'estk:se0' ||
+        lower == 'se0' ||
+        lower == 'estk:se1' ||
+        lower == 'se1') {
+      final isSe1 = lower.endsWith('se1');
+      final targetAid = isSe1 ? _estkAidSe1 : _estkAidSe0;
+      final current = await _selectedReader();
+      _manager.setWorkingAid(current.id, targetAid);
+      final atr = _adapter.lastAtr;
+      if (atr != null && atr.isNotEmpty) {
+        await AppSettings().setPreferredEstkAid(current.id, atr, targetAid);
+      }
+      _cachedProfiles = null;
+      _cachedResourceInfo = null;
+      return RemoteReaderEntry(
+        id: isSe1 ? 'estk:SE1' : 'estk:SE0',
+        name: isSe1 ? 'ESTK Max SE1 (副芯片)' : 'ESTK Max SE0 (主芯片)',
+        selected: true,
+      );
+    }
     final readers = await _adapter.listReaders(force: true);
     if (readers.isEmpty) throw StateError('selected_reader_unavailable');
     Reader? matched;

@@ -5,8 +5,10 @@ All notable changes to **eUICC-Nexus** (and upstream NekokoLPA2) are documented 
 ## [v1.2.0] - 2026-11-03 (`1.2.0+120`)
 
 ### ✨ 新增与适配 (Added)
-- **全签名合一安装包 (`eUICC-Nexus-v1.2.0.apk`)**：
-  - 单个 APK 同时集成 **ESTK / NekokoLPA Community (`c47350c7ba682b34a3e584a0d58463ea42b1ad73`)**、**9eSIM (`d1c0f48b370e74d4ea4770ed4c3cd70a3198d31f`)** 与 **SakuraSIM (`65d0571854afec519a90f92d7c5d8cf8148da373`)** 三套 ARA-M 签名证书，无需区分版本即可免 Root 兼容 **ESTKme 全系、ESTK 小白卡、9eSIM 全系、9eSIM 小白卡与 SakuraSIM**。
+- **全签名合一安装包 (`eUICC-Nexus-v1.2.0.apk`) & ESTK MAX 双芯片 (`SE0 / SE1`) 深度适配**：
+  - 单个 APK 同时集成 **ESTK / NekokoLPA Community (`c47350c7ba682b34a3e584a0d58463ea42b1ad73`)**、**9eSIM (`d1c0f48b370e74d4ea4770ed4c3cd70a3198d31f`)** 与 **SakuraSIM (`65d0571854afec519a90f92d7c5d8cf8148da373`)** 三套 ARA-M 签名证书；
+  - **修复 ESTK MAX 在手机内置卡槽 (OMAPI) 下无法读取卡片列表的 Bug**：修正默认 AID 优先级为优先连接主芯片 **`SE0` (`A06573746B6D65FFFF4953442D522030`)**（而非副芯片 `SE1 ...31`），禁用 OMAPI 下 `EstkPlugin` 并发探测 `aidMgt` 私有通道，并修复 `OmapiPlugin.kt` 在探测副通道失败时调用 `cleanupReaderSessions` 误杀主通道导致 `CHANNEL_NOT_FOUND` 的缺陷；
+  - **支持 Telegram `/readers` 远程切换 ESTK MAX 主副芯片 (`SE0 ⇄ SE1`)**：检测到 ESTK 卡片时，支持在 App 顶部按钮及 Telegram `/readers` 中一键切换 `ESTK Max SE0 (主芯片)` 与 `ESTK Max SE1 (副芯片)`。
 
 ### 🐛 修复与优化 (Fixed)
 - **修复小米澎湃 OS (HyperOS / MIUI) 拦截通知类/验证码短信广播 (`MIUILOG- Sms Filter`) 问题**：
