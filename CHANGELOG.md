@@ -2,6 +2,21 @@
 
 All notable changes to **eUICC-Nexus** (and upstream NekokoLPA2) are documented in this file.
 
+## [v1.2.0] - 2026-11-03 (`1.2.0+120`)
+
+### ✨ 新增与适配 (Added)
+- **全签名合一安装包 (`eUICC-Nexus-v1.2.0.apk`)**：
+  - 单个 APK 同时集成 **ESTK / NekokoLPA Community (`c47350c7ba682b34a3e584a0d58463ea42b1ad73`)**、**9eSIM (`d1c0f48b370e74d4ea4770ed4c3cd70a3198d31f`)** 与 **SakuraSIM (`65d0571854afec519a90f92d7c5d8cf8148da373`)** 三套 ARA-M 签名证书，无需区分版本即可免 Root 兼容 **ESTKme 全系、ESTK 小白卡、9eSIM 全系、9eSIM 小白卡与 SakuraSIM**。
+
+### 🐛 修复与优化 (Fixed)
+- **修复小米澎湃 OS (HyperOS / MIUI) 拦截通知类/验证码短信广播 (`MIUILOG- Sms Filter`) 问题**：
+  - 声明并动态请求 `READ_SMS` 与 `com.miui.permission.READ_NOTIFICATION_SMS`，提升 `SmsRelayReceiver` 广播优先级至最高 (`2147483647`)；
+  - 在 `RemoteGatewayForegroundService` 常驻服务中新增 **`content://sms/inbox` 数据库 `ContentObserver` + 3 秒增量扫描双引擎兜底**（带 25 秒去重窗口），即使系统底层过滤了 `SMS_RECEIVED` 广播，只要短信写入系统收件箱即可在 1 秒内自动补抓并转发。
+- **修复短时间高频涌入多条短信时的漏转与限流问题**：
+  - `SmsRelayReceiver.onReceive` 改为 `<5ms` 毫秒级落盘至 `SmsRelayStore` 后立即结束广播，避免阻塞系统 `GsmInboundSmsHandler` 有序广播队列；
+  - 后台发送队列扩容至 `256`，新增 `280ms` 突发消息平滑节流锁，并在 `TelegramBotClient` 中支持 `HTTP 429 Too Many Requests` (`retry_after`) 自动退避重发。
+- **修复应用底部导航栏偶发隐藏「短信转发」页面的问题**：在 `MainTabScreen` 中将 Android 端「短信转发」Tab 默认设为常驻可见，并隔离后台预热启动时的权限请求异常，防止异常回调将 Tab 状态重置为隐藏。
+
 ## [v1.1.0] - 2026-11-03 (`1.1.0+110`)
 
 ### ✨ 新增功能 (Added)

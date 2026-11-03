@@ -4,7 +4,7 @@
   <b>基于 Android 备用机的远程多国 eSIM (eUICC) 切卡、基带漫游监控与短信/验证码转发网关</b><br/>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" alt="MIT License" /></a>
   <a href="https://github.com/iebb/NekokoLPA2"><img src="https://img.shields.io/badge/Upstream-NekokoLPA2-6E56CF?style=flat-square" alt="Based on NekokoLPA2" /></a>
-  <a href="https://github.com/MIY-Y/eUICC-Nexus/releases"><img src="https://img.shields.io/badge/Release-v1.1.0-orange?style=flat-square" alt="Release v1.1.0" /></a>
+  <a href="https://github.com/MIY-Y/eUICC-Nexus/releases"><img src="https://img.shields.io/badge/Release-v1.2.0-orange?style=flat-square" alt="Release v1.2.0" /></a>
   <a href="https://linux.do"><img src="https://img.shields.io/badge/Community-LINUX%20DO-f09433?style=flat-square" alt="LINUX DO 社区" /></a>
 </p>
 
@@ -27,10 +27,7 @@
 
 ## 3 分钟快速上手
 
-1. **按卡片类型选择对应签名的 APK 安装**（[前往 Releases 下载](https://github.com/MIY-Y/eUICC-Nexus/releases)，在 App 内授予电话、短信与通知权限并将省电设为**「无限制」**）：
-   - **`eUICC-Nexus-v1.1.0.apk`**：适合 **9eSIM 全系 (V0 / V0 Max / V3) 及 9eSIM 方案小白卡**（内置 `d1c0f48b...` 签名）；
-   - **`eUICC-Nexus-v1.1.0-ESTK.apk`**：适合 **ESTKme 全系 (ECO / Plus / Max) 及 ESTK 方案小白卡**（内置 NekokoLPA Community `c47350c7...` 签名）；
-   - **`eUICC-Nexus-v1.1.0-MultiSign.apk`**：三签名合一版（同时包含 ESTK `c47350...` + 9eSIM `d1c0f4...` + SakuraSIM `65d057...`）；若部分空白卡出厂仅内置了 EasyEUICC 证书，可在读卡工具中将 `c47350c7ba682b34a3e584a0d58463ea42b1ad73` 添加至卡片 ARA-M 白名单即可免 Root 直连。
+1. **安装授权**：将 eUICC 芯片插入备用机，下载安装 [Releases 中的 `eUICC-Nexus-v1.2.0.apk`](https://github.com/MIY-Y/eUICC-Nexus/releases/tag/v1.2.0)（**全签名合一版**：单个安装包同时内置 **ESTK / NekokoLPA `c47350...` + 9eSIM `d1c0f4...` + SakuraSIM `65d057...`** 三套证书，通杀主流实体卡与小白卡）；在 App 内授予电话、短信与通知权限并将省电设为**「无限制」**。
 2. **绑定 Telegram Bot**：
    - 找 [`@BotFather`](https://t.me/BotFather) 发送 `/newbot` 创建机器人并复制 **Bot Token**；
    - 在 Telegram 给你的机器人发送一次 `/start`；
