@@ -263,6 +263,20 @@ internal object TelegramBotClient {
             val responseCode = connection.responseCode
             val stream = if (responseCode in 200..299) connection.inputStream else connection.errorStream
             val responseBody = readBounded(stream)
+            if (responseCode == 429) {
+                val retryAfterSec = runCatching {
+                    JSONObject(responseBody)
+                        .optJSONObject("parameters")
+                        ?.optInt("retry_after", 2)
+                        ?.coerceIn(1, 10)
+                }.getOrNull() ?: 2
+                try {
+                    Thread.sleep(retryAfterSec * 1000L)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                }
+                throw TelegramBotException("telegram_rate_limited")
+            }
             if (responseCode !in 200..299) {
                 throw TelegramBotException("telegram_api_error")
             }

@@ -23,10 +23,12 @@ class MainTabScreen extends StatefulWidget {
   State<MainTabScreen> createState() => _MainTabScreenState();
 }
 
-class _MainTabScreenState extends State<MainTabScreen> {
+class _MainTabScreenState extends State<MainTabScreen>
+    with WidgetsBindingObserver {
   int _currentIndex = 0;
   bool _isHoveringTopBar = false;
-  bool _smsRelayAvailable = false;
+  bool _smsRelayAvailable = PlatformX.isAndroid;
+  bool _permissionsRequested = false;
 
   // Base pages that are always there or standard
   // We'll construct the active list in build or compute it.
@@ -34,38 +36,60 @@ class _MainTabScreenState extends State<MainTabScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     AppSettings().addListener(_onSettingsChanged);
     if (PlatformX.isAndroid) unawaited(_loadSmsRelayAvailability());
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     AppSettings().removeListener(_onSettingsChanged);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && PlatformX.isAndroid) {
+      if (!_smsRelayAvailable) {
+        setState(() => _smsRelayAvailable = true);
+      }
+      if (!_permissionsRequested) {
+        unawaited(_requestAndroidPermissions());
+      }
+    }
   }
 
   void _onSettingsChanged() {
     setState(() {});
   }
 
-  Future<void> _loadSmsRelayAvailability() async {
+  Future<void> _requestAndroidPermissions() async {
     try {
-      final available = await const SmsRelayService().isAvailable();
-      if (mounted && available != _smsRelayAvailable) {
-        setState(() => _smsRelayAvailable = available);
-      }
-      if (available) {
-        await [
-          Permission.phone,
-          Permission.sms,
-          Permission.notification,
-        ].request();
-        unawaited(RemoteGatewayService.instance.resumeIfEnabled());
-      }
+      await [
+        Permission.phone,
+        Permission.sms,
+        Permission.notification,
+      ].request();
+      _permissionsRequested = true;
     } catch (_) {
-      if (mounted && _smsRelayAvailable) {
-        setState(() => _smsRelayAvailable = false);
-      }
+      // Activity may not be attached yet during background pre-warm; retry on resume.
+    }
+  }
+
+  Future<void> _loadSmsRelayAvailability() async {
+    var available = PlatformX.isAndroid;
+    try {
+      available = await const SmsRelayService().isAvailable() || PlatformX.isAndroid;
+    } catch (_) {
+      available = PlatformX.isAndroid;
+    }
+    if (mounted && available != _smsRelayAvailable) {
+      setState(() => _smsRelayAvailable = available);
+    }
+    if (available) {
+      unawaited(RemoteGatewayService.instance.resumeIfEnabled());
+      await _requestAndroidPermissions();
     }
   }
 

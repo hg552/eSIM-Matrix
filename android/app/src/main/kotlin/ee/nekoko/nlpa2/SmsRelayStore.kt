@@ -318,6 +318,58 @@ internal object SmsRelayStore {
     }
 
     @Synchronized
+    fun recordIncomingIfNew(
+        context: Context,
+        sender: String,
+        body: String,
+        slotIndex: Int? = null,
+        carrierName: String? = null,
+        receivedAtMillis: Long = System.currentTimeMillis(),
+        mode: String = SmsRelayMode.TELEGRAM,
+        dedupWindowMillis: Long = 0L,
+    ): String? {
+        if (sender.isBlank() || body.isBlank()) return null
+        val prefs = preferences(context)
+        val existingRaw = prefs.getString(KEY_SMS_HISTORY, null)
+        val existingArr = runCatching {
+            if (existingRaw.isNullOrBlank()) JSONArray() else JSONArray(existingRaw)
+        }.getOrDefault(JSONArray())
+        if (dedupWindowMillis > 0L) {
+            val checkCount = minOf(existingArr.length(), 25)
+            for (i in 0 until checkCount) {
+                val obj = existingArr.optJSONObject(i) ?: continue
+                val prevSender = obj.optString("sender", "")
+                val prevBody = obj.optString("body", "")
+                val prevTime = obj.optLong("receivedAtMillis", 0L)
+                if (prevSender == sender && prevBody == body &&
+                    kotlin.math.abs(receivedAtMillis - prevTime) <= dedupWindowMillis
+                ) {
+                    return null
+                }
+            }
+        }
+        val id = UUID.randomUUID().toString()
+        val nextArr = JSONArray()
+        val item = JSONObject()
+            .put("id", id)
+            .put("sender", sender)
+            .put("body", body)
+            .put("slotIndex", slotIndex ?: JSONObject.NULL)
+            .put("carrierName", carrierName ?: JSONObject.NULL)
+            .put("receivedAtMillis", receivedAtMillis)
+            .put("mode", mode)
+            .put("delivered", false)
+            .put("errorCode", "sending")
+        nextArr.put(item)
+        val limit = minOf(existingArr.length(), MAX_HISTORY_ITEMS - 1)
+        for (i in 0 until limit) {
+            existingArr.optJSONObject(i)?.let(nextArr::put)
+        }
+        prefs.edit().putString(KEY_SMS_HISTORY, nextArr.toString()).commit()
+        return id
+    }
+
+    @Synchronized
     fun loadHistory(context: Context): List<Map<String, Any?>> {
         val raw = preferences(context).getString(KEY_SMS_HISTORY, null)
         if (raw.isNullOrBlank()) return emptyList()

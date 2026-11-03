@@ -14,25 +14,29 @@ import org.json.JSONObject
 import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.util.UUID
-import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 import javax.net.ssl.HttpsURLConnection
 
 internal class SmsRelayReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "NexusSmsRelay"
+        private const val MIN_BURST_INTERVAL_MS = 280L
+        private val lastSendEpochMillis = AtomicLong(0L)
+        private val deliveryLock = Any()
 
         private val executor = ThreadPoolExecutor(
             2,
-            2,
-            0L,
-            TimeUnit.MILLISECONDS,
-            ArrayBlockingQueue(16),
-            ThreadPoolExecutor.AbortPolicy(),
+            4,
+            30L,
+            TimeUnit.SECONDS,
+            LinkedBlockingQueue(256),
+            ThreadPoolExecutor.DiscardOldestPolicy(),
         )
-        private val retryBackoffMillis = longArrayOf(0L, 1500L, 3500L)
+        private val retryBackoffMillis = longArrayOf(0L, 1200L, 3000L)
 
         internal fun deliverSingle(
             settings: SmsRelaySettings,
@@ -53,6 +57,18 @@ internal class SmsRelayReceiver : BroadcastReceiver() {
                     }
                 }
                 try {
+                    synchronized(deliveryLock) {
+                        val now = System.currentTimeMillis()
+                        val elapsed = now - lastSendEpochMillis.get()
+                        if (elapsed in 0 until MIN_BURST_INTERVAL_MS) {
+                            try {
+                                Thread.sleep(MIN_BURST_INTERVAL_MS - elapsed)
+                            } catch (_: InterruptedException) {
+                                Thread.currentThread().interrupt()
+                            }
+                        }
+                        lastSendEpochMillis.set(System.currentTimeMillis())
+                    }
                     val errorCode = when (settings.mode) {
                         SmsRelayMode.WEBHOOK -> {
                             val endpoint = settings.endpoint ?: return "endpoint_missing"
@@ -137,6 +153,69 @@ internal class SmsRelayReceiver : BroadcastReceiver() {
             }
             return SmsRelayOrigin(subscriptionId, slotIndex, carrierName)
         }
+        fun enqueueIncomingSms(
+            context: Context,
+            sender: String,
+            body: String,
+            origin: SmsRelayOrigin,
+            receivedAtMillis: Long,
+            dedupWindowMillis: Long = 0L,
+        ): Boolean {
+            val applicationContext = context.applicationContext
+            val settings = try {
+                SmsRelayStore.load(applicationContext)
+            } catch (_: Exception) {
+                return false
+            }
+            if (!settings.enabled || settings.token.isNullOrBlank()) return false
+            val entryId = SmsRelayStore.recordIncomingIfNew(
+                applicationContext,
+                sender = sender,
+                body = body,
+                slotIndex = origin.slotIndex,
+                carrierName = origin.carrierName,
+                receivedAtMillis = receivedAtMillis,
+                mode = settings.mode,
+                dedupWindowMillis = dedupWindowMillis,
+            ) ?: return false
+
+            val wakeLock = try {
+                (applicationContext.getSystemService(Context.POWER_SERVICE) as PowerManager)
+                    .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "${applicationContext.packageName}:sms-relay")
+                    .apply {
+                        setReferenceCounted(false)
+                        acquire(45_000L)
+                    }
+            } catch (_: Exception) {
+                null
+            }
+            try {
+                executor.execute {
+                    try {
+                        val errorCode = deliverSingle(settings, sender, body, origin, receivedAtMillis)
+                        SmsRelayStore.markDelivered(
+                            applicationContext,
+                            targetId = entryId,
+                            delivered = errorCode == null,
+                            errorCode = errorCode,
+                        )
+                        if (errorCode != null) {
+                            Log.w(TAG, "SMS relay delivery failed after retries ($errorCode)")
+                        }
+                    } finally {
+                        try {
+                            wakeLock?.release()
+                        } catch (_: Exception) {}
+                    }
+                }
+            } catch (_: RejectedExecutionException) {
+                SmsRelayStore.markDelivered(applicationContext, entryId, false, "queue_full")
+                try {
+                    wakeLock?.release()
+                } catch (_: Exception) {}
+            }
+            return true
+        }
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -149,14 +228,6 @@ internal class SmsRelayReceiver : BroadcastReceiver() {
             return
         }
 
-        val settings = try {
-            SmsRelayStore.load(context.applicationContext)
-        } catch (_: Exception) {
-            return
-        }
-        if (!settings.enabled) return
-        val token = settings.token ?: return
-
         val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
         if (messages.isNullOrEmpty()) return
         val sender = messages.firstOrNull()?.originatingAddress?.trim().orEmpty()
@@ -164,81 +235,15 @@ internal class SmsRelayReceiver : BroadcastReceiver() {
         if (sender.isEmpty() || body.isEmpty()) return
 
         val origin = readOrigin(context, intent)
-        val receivedAtMillis = messages.minOf { it.timestampMillis }
-        val payload = JSONObject()
-            .put("event", "sms.received")
-            .put("messageId", UUID.randomUUID().toString())
-            .put("sender", sender)
-            .put("body", body)
-            .put("receivedAtEpochMillis", receivedAtMillis)
-            .put("subscriptionId", origin.subscriptionId ?: JSONObject.NULL)
-            .put("slotIndex", origin.slotIndex ?: JSONObject.NULL)
-            .put("carrierName", origin.carrierName ?: JSONObject.NULL)
-            .toString()
-        val applicationContext = context.applicationContext
-        val pendingResult = goAsync()
-        // Bounded protection while the asynchronous broadcast performs network IO.
-        // This does not extend Android's broadcast execution deadline.
-        val wakeLock = try {
-            (applicationContext.getSystemService(Context.POWER_SERVICE) as PowerManager)
-                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "${applicationContext.packageName}:sms-relay")
-                .apply {
-                    setReferenceCounted(false)
-                    acquire(30_000L)
-                }
-        } catch (_: Exception) {
-            Log.w(TAG, "SMS relay wake lock unavailable")
-            null
-        }
-        try {
-            executor.execute {
-                try {
-                    val errorCode = deliverSingle(settings, sender, body, origin, receivedAtMillis)
-                    SmsRelayStore.recordDelivery(
-                        applicationContext,
-                        delivered = errorCode == null,
-                        errorCode = errorCode,
-                        sender = sender,
-                        body = body,
-                        slotIndex = origin.slotIndex,
-                        carrierName = origin.carrierName,
-                        receivedAtMillis = receivedAtMillis,
-                        mode = settings.mode,
-                    )
-                    if (errorCode == null) {
-                        runCatching { retryUndelivered(applicationContext) }
-                    } else {
-                        Log.w(TAG, "SMS relay delivery failed after retries ($errorCode)")
-                    }
-                } finally {
-                    try {
-                        wakeLock?.release()
-                    } finally {
-                        pendingResult.finish()
-                    }
-                }
-            }
-        } catch (_: RejectedExecutionException) {
-            try {
-                SmsRelayStore.recordDelivery(
-                    applicationContext,
-                    delivered = false,
-                    errorCode = "queue_full",
-                    sender = sender,
-                    body = body,
-                    slotIndex = origin.slotIndex,
-                    carrierName = origin.carrierName,
-                    receivedAtMillis = receivedAtMillis,
-                    mode = settings.mode,
-                )
-            } finally {
-                try {
-                    wakeLock?.release()
-                } finally {
-                    pendingResult.finish()
-                }
-            }
-        }
+        val receivedAtMillis = System.currentTimeMillis()
+        enqueueIncomingSms(
+            context = context.applicationContext,
+            sender = sender,
+            body = body,
+            origin = origin,
+            receivedAtMillis = receivedAtMillis,
+            dedupWindowMillis = 1500L,
+        )
     }
 
     private fun readOrigin(context: Context, intent: Intent): SmsRelayOrigin =

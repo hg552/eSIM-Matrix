@@ -170,6 +170,7 @@ class SmsRelayPlugin :
         pendingPermissionResult = result
         val perms = mutableListOf(
             Manifest.permission.RECEIVE_SMS,
+            Manifest.permission.READ_SMS,
             Manifest.permission.READ_PHONE_STATE,
             Manifest.permission.READ_CALL_LOG,
         )
