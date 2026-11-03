@@ -27,7 +27,10 @@
 
 ## 3 分钟快速上手
 
-1. **安装授权**：将 eUICC 芯片插入备用机，安装 [Releases](https://github.com/MIY-Y/eUICC-Nexus/releases) 中的 APK；在「网络」与「短信转发」页授予电话、短信与通知权限，并将省电策略设为**「无限制」**。
+1. **按卡片类型选择对应签名的 APK 安装**（[前往 Releases 下载](https://github.com/MIY-Y/eUICC-Nexus/releases)，在 App 内授予电话、短信与通知权限并将省电设为**「无限制」**）：
+   - **`eUICC-Nexus-v1.1.0.apk`**：适合 **9eSIM 全系 (V0 / V0 Max / V3) 及 9eSIM 方案小白卡**（内置 `d1c0f48b...` 签名）；
+   - **`eUICC-Nexus-v1.1.0-ESTK.apk`**：适合 **ESTKme 全系 (ECO / Plus / Max) 及 ESTK 方案小白卡**（内置 NekokoLPA Community `c47350c7...` 签名）；
+   - **`eUICC-Nexus-v1.1.0-MultiSign.apk`**：三签名合一版（同时包含 ESTK `c47350...` + 9eSIM `d1c0f4...` + SakuraSIM `65d057...`）；若部分空白卡出厂仅内置了 EasyEUICC 证书，可在读卡工具中将 `c47350c7ba682b34a3e584a0d58463ea42b1ad73` 添加至卡片 ARA-M 白名单即可免 Root 直连。
 2. **绑定 Telegram Bot**：
    - 找 [`@BotFather`](https://t.me/BotFather) 发送 `/newbot` 创建机器人并复制 **Bot Token**；
    - 在 Telegram 给你的机器人发送一次 `/start`；
