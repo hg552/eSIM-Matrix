@@ -92,4 +92,19 @@ class TelegramBotClientTest {
         assertFalse(part.any { Character.isSurrogate(it) })
         assertTrue(part.endsWith("\n\n123456"))
     }
+
+    @Test
+    fun extractsOtpAndFormatsHtmlClickToCopyCode() {
+        assertEquals("G-482910", TelegramBotClient.extractOtp("Your Google verification code is G-482910. Do not share."))
+        assertEquals("839201", TelegramBotClient.extractOtp("【招商银行】您的动态验证码为：839201，5分钟内有效。"))
+        assertEquals("7482", TelegramBotClient.extractOtp("2026年11月登录PIN码 7482"))
+        assertNull(TelegramBotClient.extractOtp("Hello world in 2026!"))
+
+        val origin = SmsRelayOrigin(8, 1, "Elisa <EE>")
+        val html = TelegramBotClient.htmlSmsMessages("Google&Co", "Code: 654321 <fast>", origin).single()
+        assertTrue(html.contains("<code>654321</code>"))
+        assertTrue(html.contains("Elisa &lt;EE&gt;"))
+        assertTrue(html.contains("Google&amp;Co"))
+        assertTrue(html.contains("&lt;fast&gt;"))
+    }
 }

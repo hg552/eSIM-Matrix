@@ -1,6 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
-Future<String?> decodeQrWithZxing(String path) async {
-  // Not supported on web, or use alternative web-specific logic
-  return null;
-}
+Future<String?> decodeQrWithZxing(String path) async => null;
+Future<String?> decodeQrBytesWithZxing(Uint8List bytes) async => null;

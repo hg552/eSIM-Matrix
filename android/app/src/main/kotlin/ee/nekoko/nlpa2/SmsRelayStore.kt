@@ -337,6 +337,7 @@ internal object SmsRelayStore {
                     "id" to id,
                     "sender" to sender,
                     "body" to body,
+                    "otp" to TelegramBotClient.extractOtp(body),
                     "slotIndex" to slotIndex,
                     "carrierName" to carrierName,
                     "receivedAtMillis" to obj.optLong("receivedAtMillis", 0L),
@@ -347,6 +348,36 @@ internal object SmsRelayStore {
             )
         }
         return list
+    }
+
+    @Synchronized
+    fun markDelivered(
+        context: Context,
+        targetId: String,
+        delivered: Boolean,
+        errorCode: String? = null,
+    ) {
+        val prefs = preferences(context)
+        val raw = prefs.getString(KEY_SMS_HISTORY, null) ?: return
+        val arr = runCatching { JSONArray(raw) }.getOrNull() ?: return
+        var updated = false
+        for (i in 0 until arr.length()) {
+            val obj = arr.optJSONObject(i) ?: continue
+            if (obj.optString("id", "") == targetId) {
+                obj.put("delivered", delivered)
+                obj.put("errorCode", errorCode ?: JSONObject.NULL)
+                updated = true
+                break
+            }
+        }
+        if (updated) {
+            val editor = prefs.edit().putString(KEY_SMS_HISTORY, arr.toString())
+            if (delivered) {
+                editor.putLong(KEY_LAST_DELIVERY, System.currentTimeMillis())
+                    .remove(KEY_LAST_ERROR)
+            }
+            editor.commit()
+        }
     }
 
     @Synchronized

@@ -257,6 +257,98 @@ void main() {
       expect('${delConfirmPayload!['text']}', contains('已成功从物理 eUICC 芯片中彻底删除'));
       expect(mockProfiles.deletedIccids, contains('8900000000000000999'));
     });
+
+    test('v1.1.0 features: temporary 5-min switch, /rename, /keepalive, /readers, NVRAM/EID and battery health in /status & /list', () async {
+      const chatId = '10000001';
+
+      // 1. Check /list includes Free NVRAM KB, EID, and 5-min temp switch button
+      final listPayload = await service.handleTelegramUpdateForTesting({
+        'update_id': 2001,
+        'message': {
+          'chat': {'id': 10000001, 'type': 'private'},
+          'from': {'id': 10000001, 'is_bot': false},
+          'text': '/list',
+        },
+      }, chatId);
+      expect(listPayload, isNotNull);
+      expect('${listPayload!['text']}', contains('277.3 KB'));
+      expect('${listPayload['text']}', contains('89049032000001234567'));
+
+      // 2. Rename profile #2 via /rename 2 英国主力 +44
+      final renamePayload = await service.handleTelegramUpdateForTesting({
+        'update_id': 2002,
+        'message': {
+          'chat': {'id': 10000001, 'type': 'private'},
+          'from': {'id': 10000001, 'is_bot': false},
+          'text': '/rename 2 英国主力 +44',
+        },
+      }, chatId);
+      expect(renamePayload, isNotNull);
+      expect('${renamePayload!['text']}', contains('已成功重命名为：【英国主力 +44】'));
+      expect(mockProfiles.profiles[1].alias, equals('英国主力 +44'));
+
+      // 3. Configure keep-alive via callback_query ka_set:2:90 and trigger ka_now:2
+      final kaSetPayload = await service.handleTelegramUpdateForTesting({
+        'update_id': 2003,
+        'callback_query': {
+          'id': 'cb_ka1',
+          'from': {'id': 10000001, 'is_bot': false},
+          'message': {
+            'chat': {'id': 10000001, 'type': 'private'},
+          },
+          'data': 'ka_set:2:90',
+        },
+      }, chatId);
+      expect(kaSetPayload, isNotNull);
+      expect('${kaSetPayload!['text']}', contains('每 90 天'));
+
+      // 4. Temporary 5-minute OTP switch via use_temp:2
+      final tempSwitchPayload = await service.handleTelegramUpdateForTesting({
+        'update_id': 2004,
+        'callback_query': {
+          'id': 'cb_temp',
+          'from': {'id': 10000001, 'is_bot': false},
+          'message': {
+            'chat': {'id': 10000001, 'type': 'private'},
+          },
+          'data': 'use_temp:2',
+        },
+      }, chatId);
+      expect(tempSwitchPayload, isNotNull);
+      expect('${tempSwitchPayload!['text']}', contains('5 分钟后将自动切回默认主卡'));
+
+      // 5. Check /status includes battery health, NVRAM, and remaining countdown
+      final statusPayload = await service.handleTelegramUpdateForTesting({
+        'update_id': 2005,
+        'callback_query': {
+          'id': 'cb_st',
+          'from': {'id': 10000001, 'is_bot': false},
+          'message': {
+            'chat': {'id': 10000001, 'type': 'private'},
+          },
+          'data': 'cmd:status',
+        },
+      }, chatId);
+      expect(statusPayload, isNotNull);
+      expect('${statusPayload!['text']}', contains('96%'));
+      expect('${statusPayload['text']}', contains('自动回主卡'));
+
+      // 6. Switch active reader via reader:2
+      final readerSwitchPayload = await service.handleTelegramUpdateForTesting({
+        'update_id': 2006,
+        'callback_query': {
+          'id': 'cb_rd',
+          'from': {'id': 10000001, 'is_bot': false},
+          'message': {
+            'chat': {'id': 10000001, 'type': 'private'},
+          },
+          'data': 'reader:2',
+        },
+      }, chatId);
+      expect(readerSwitchPayload, isNotNull);
+      expect('${readerSwitchPayload!['text']}', contains('SIM 2'));
+      expect(mockProfiles.selectedReaderId, equals('omapi:SIM2'));
+    });
   });
 }
 
@@ -278,6 +370,16 @@ class FakeSmsRelay extends SmsRelayService {
   Future<void> scheduleGatewayRevert(DateTime deadline) async {}
   @override
   Future<void> cancelGatewayRevert() async {}
+  @override
+  Future<int> retryFailedHistory({String? id}) async => 1;
+  @override
+  Future<DeviceHealthStatus> getDeviceHealth() async => const DeviceHealthStatus(
+    batteryPercent: 96,
+    charging: true,
+    powerSource: 'AC',
+    temperatureCelsius: 31.2,
+    networkType: 'Wi-Fi',
+  );
 }
 
 class MockProfileControl implements RemoteProfileControl {
@@ -289,12 +391,12 @@ class MockProfileControl implements RemoteProfileControl {
       StreamController<NetworkStatusUpdate>.broadcast();
   bool failNextEnable = false;
   int? slotIndexOverride = 1;
+  String currentReaderId = 'reader_0';
 
   void emitNetwork(NetworkStatusUpdate update) => _networkController.add(update);
 
   @override
-  String? get selectedReaderId => 'reader_0';
-
+  String? get selectedReaderId => currentReaderId;
   @override
   int? get networkSlotIndex => slotIndexOverride;
 
@@ -346,5 +448,56 @@ class MockProfileControl implements RemoteProfileControl {
 
   @override
   Future<void> purgeSwitchNotifications() async {}
+
+  @override
+  Future<RemoteCardResourceInfo> getCardResourceInfo() async =>
+      const RemoteCardResourceInfo(
+        eid: '89049032000001234567',
+        freeNonVolatileMemoryBytes: 284000,
+        freeVolatileMemoryBytes: 12000,
+      );
+
+  @override
+  Future<void> renameProfile(String iccid, String nickname) async {
+    final idx = profiles.indexWhere((p) => p.iccid == iccid);
+    if (idx < 0) throw StateError('profile_not_found');
+    final old = profiles[idx];
+    profiles[idx] = RemoteProfileEntry(
+      iccid: old.iccid,
+      rawIccid: old.rawIccid,
+      alias: nickname,
+      enabled: old.enabled,
+    );
+  }
+
+  @override
+  Future<List<RemoteReaderEntry>> listReaders() async => [
+    RemoteReaderEntry(
+      id: 'reader_0',
+      name: 'SIM 1',
+      selected: currentReaderId == 'reader_0',
+    ),
+    RemoteReaderEntry(
+      id: 'omapi:SIM2',
+      name: 'SIM 2',
+      selected: currentReaderId == 'omapi:SIM2',
+    ),
+  ];
+
+  @override
+  Future<RemoteReaderEntry> selectReader(String selector) async {
+    final all = await listReaders();
+    final idx = int.tryParse(selector);
+    final target = (idx != null && idx >= 1 && idx <= all.length)
+        ? all[idx - 1]
+        : all.firstWhere(
+            (r) =>
+                r.id.toLowerCase().contains(selector.toLowerCase()) ||
+                r.name.toLowerCase().contains(selector.toLowerCase()),
+            orElse: () => throw StateError('reader_not_found'),
+          );
+    currentReaderId = target.id;
+    return RemoteReaderEntry(id: target.id, name: target.name, selected: true);
+  }
 }
 

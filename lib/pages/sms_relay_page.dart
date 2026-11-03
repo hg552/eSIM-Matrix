@@ -493,6 +493,22 @@ class _SmsRelayPageState extends State<SmsRelayPage>
     } catch (_) {}
   }
 
+  Future<void> _retryFailedHistory({String? id}) async {
+    try {
+      final count = await _service.retryFailedHistory(id: id);
+      await _refreshHistory();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              count > 0 ? '✅ 已成功补发 $count 条短信' : '⚠️ 补发未成功，请检查网络或 Bot 配置',
+            ),
+          ),
+        );
+      }
+    } catch (_) {}
+  }
+
   Future<void> _clearAllHistory() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -816,9 +832,27 @@ class _SmsRelayPageState extends State<SmsRelayPage>
                           ),
                         ),
                         const SizedBox(height: 6),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
+                        Wrap(
+                          alignment: WrapAlignment.end,
+                          spacing: 4,
                           children: [
+                            if (item.otp != null && item.otp!.isNotEmpty)
+                              FilledButton.tonalIcon(
+                                onPressed: () {
+                                  Clipboard.setData(ClipboardData(text: item.otp!));
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('已复制验证码: ${item.otp}')),
+                                  );
+                                },
+                                icon: const Icon(Icons.key_outlined, size: 15),
+                                label: Text('复制验证码 ${item.otp}'),
+                              ),
+                            if (!item.delivered)
+                              TextButton.icon(
+                                onPressed: () => _retryFailedHistory(id: item.id),
+                                icon: const Icon(Icons.refresh, size: 16),
+                                label: const Text('重发'),
+                              ),
                             TextButton.icon(
                               onPressed: () {
                                 Clipboard.setData(ClipboardData(text: item.body));
@@ -827,9 +861,8 @@ class _SmsRelayPageState extends State<SmsRelayPage>
                                 );
                               },
                               icon: const Icon(Icons.copy_outlined, size: 16),
-                              label: const Text('复制内容'),
+                              label: const Text('复制全文'),
                             ),
-                            const SizedBox(width: 4),
                             TextButton.icon(
                               onPressed: () => _deleteHistoryItem(item.id),
                               icon: Icon(

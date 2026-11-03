@@ -24,7 +24,12 @@ internal object TelegramBotClient {
         "getUpdates?limit=50&timeout=0&allowed_updates=%5B%22message%22%5D"
     private val tokenPattern = Regex("^[0-9]+:[A-Za-z0-9_-]+$")
     private val startCommandPattern = Regex("^/start(?:@[A-Za-z0-9_]+)?(?:\\s|$)")
-
+    private val keywordOtpPattern = Regex(
+        "(?:验证码|驗證碼|动态码|校验码|認証コード|코드|verification\\s*code|security\\s*code|auth(?:entication)?\\s*code|confirmation\\s*code|login\\s*code|passcode|one-time\\s*password|otp|pin|code)[^0-9A-Za-z]{0,16}((?:[A-Z]-)?[0-9]{4,8})(?![0-9])",
+        RegexOption.IGNORE_CASE,
+    )
+    private val prefixOtpPattern = Regex("\\b([A-Z]-[0-9]{4,8})\\b")
+    private val standaloneDigitsPattern = Regex("(?<![0-9+-])([0-9]{4,8})(?![0-9])")
     fun discoverPrivateChat(rawToken: String): TelegramPrivateChat {
         val token = normalizeToken(rawToken)
         val response = execute(token, UPDATES_METHOD, null)
@@ -32,14 +37,90 @@ internal object TelegramBotClient {
             ?: throw TelegramBotException("private_chat_not_found")
     }
 
-    fun sendSms(rawToken: String, rawChatId: String, sender: String, body: String, origin: SmsRelayOrigin = SmsRelayOrigin()) {
+    fun sendSms(
+        rawToken: String,
+        rawChatId: String,
+        sender: String,
+        body: String,
+        origin: SmsRelayOrigin = SmsRelayOrigin(),
+    ) {
         val token = normalizeToken(rawToken)
         val chatId = TelegramChatIdValidator.normalize(rawChatId).toLong()
-        smsMessages(sender, body, origin).forEach { text ->
-            sendText(token, chatId, text)
+        val chunks = htmlSmsMessages(sender, body, origin)
+        chunks.forEachIndexed { index, htmlText ->
+            val isLast = index == chunks.lastIndex
+            sendHtmlText(token, chatId, htmlText, includeQuickActions = isLast)
         }
     }
 
+    fun sendCallAlert(
+        rawToken: String,
+        rawChatId: String,
+        caller: String,
+        origin: SmsRelayOrigin = SmsRelayOrigin(),
+    ) {
+        val token = normalizeToken(rawToken)
+        val chatId = TelegramChatIdValidator.normalize(rawChatId).toLong()
+        val safeCaller = escapeHtml(caller.replace('\n', ' ').replace('\r', ' ').take(128))
+        val html = buildString {
+            append("<b>").append(escapeHtml(origin.label)).append("</b>\n")
+            append("📞 <b>收到呼入来电提醒</b>\n")
+            append("👤 <b>主叫号码：</b><code>").append(safeCaller).append("</code>")
+        }
+        sendHtmlText(token, chatId, html, includeQuickActions = true)
+    }
+
+    internal fun extractOtp(body: String): String? {
+        keywordOtpPattern.find(body)?.groupValues?.getOrNull(1)?.takeIf { it.isNotEmpty() }?.let {
+            return it
+        }
+        prefixOtpPattern.find(body)?.groupValues?.getOrNull(1)?.takeIf { it.isNotEmpty() }?.let {
+            return it
+        }
+        val candidates = standaloneDigitsPattern.findAll(body)
+            .map { it.groupValues[1] }
+            .filterNot { token ->
+                token.length == 4 && token.toIntOrNull()?.let { it in 1990..2035 } == true
+            }
+            .toList()
+        if (candidates.isEmpty()) return null
+        return candidates.firstOrNull { it.length == 6 } ?: candidates.first()
+    }
+
+    internal fun escapeHtml(value: String): String = buildString(value.length + 16) {
+        for (ch in value) {
+            when (ch) {
+                '&' -> append("&amp;")
+                '<' -> append("&lt;")
+                '>' -> append("&gt;")
+                else -> append(ch)
+            }
+        }
+    }
+
+    internal fun htmlSmsMessages(
+        sender: String,
+        body: String,
+        origin: SmsRelayOrigin = SmsRelayOrigin(),
+    ): List<String> {
+        val plainChunks = smsMessages(sender, body, origin)
+        val otp = extractOtp(body)
+        val singleLineSender = sender.replace('\n', ' ').replace('\r', ' ')
+        val safeSender = singleLineSender.substring(0, safeChunkEnd(singleLineSender, 0, 256))
+        return plainChunks.mapIndexed { idx, chunk ->
+            val rawBodyPart = chunk.substringAfter("\n\n", "")
+            buildString {
+                append("<b>").append(escapeHtml(origin.label)).append("</b>\n")
+                append("📩 <b>来自：</b><code>").append(escapeHtml(safeSender)).append("</code>")
+                if (idx > 0) append(" <i>(续)</i>")
+                if (idx == 0 && otp != null) {
+                    append("\n🔑 <b>验证码 (点击复制)：</b><code>").append(escapeHtml(otp)).append("</code>")
+                }
+                append("\n\n")
+                append(escapeHtml(rawBodyPart))
+            }
+        }
+    }
     fun sendTestMessage(rawToken: String, rawChatId: String) {
         val token = normalizeToken(rawToken)
         val chatId = TelegramChatIdValidator.normalize(rawChatId).toLong()
@@ -119,6 +200,27 @@ internal object TelegramBotClient {
             .put("text", text)
             .toString()
         execute(token, "sendMessage", payload)
+    }
+
+    private fun sendHtmlText(
+        token: String,
+        chatId: Long,
+        htmlText: String,
+        includeQuickActions: Boolean = false,
+    ) {
+        val payload = JSONObject()
+            .put("chat_id", chatId)
+            .put("text", htmlText)
+            .put("parse_mode", "HTML")
+        if (includeQuickActions) {
+            val row = org.json.JSONArray()
+                .put(JSONObject().put("text", "🏠 已收到码，切回主卡").put("callback_data", "cmd:back"))
+                .put(JSONObject().put("text", "📋 卡列表").put("callback_data", "cmd:list"))
+                .put(JSONObject().put("text", "📡 状态").put("callback_data", "cmd:status"))
+            val markup = JSONObject().put("inline_keyboard", org.json.JSONArray().put(row))
+            payload.put("reply_markup", markup)
+        }
+        execute(token, "sendMessage", payload.toString())
     }
 
     private fun normalizeToken(rawValue: String): String {

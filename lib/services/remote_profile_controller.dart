@@ -7,12 +7,13 @@ import '../models/euicc_profile.dart';
 import '../plugins/build_plugin_registry.dart';
 import '../services/network_status_service.dart';
 import '../services/notification_service.dart';
+import '../services/profile_metadata_service.dart';
 import '../settings/app_settings.dart';
 import '../utils/apdu_exception.dart';
 import '../utils/error_codes.dart';
 import '../utils/foreground_card_session.dart';
+import '../utils/profile_tag_utils.dart';
 import 'transfer_downloader.dart';
-
 class RemoteProfileEntry {
   const RemoteProfileEntry({
     required this.iccid,
@@ -25,6 +26,42 @@ class RemoteProfileEntry {
   final String rawIccid;
   final String alias;
   final bool enabled;
+}
+
+class RemoteCardResourceInfo {
+  const RemoteCardResourceInfo({
+    this.eid,
+    this.freeNonVolatileMemoryBytes,
+    this.freeVolatileMemoryBytes,
+  });
+
+  final String? eid;
+  final int? freeNonVolatileMemoryBytes;
+  final int? freeVolatileMemoryBytes;
+
+  Map<String, Object?> toJson() => {
+    'eid': eid,
+    'freeNonVolatileMemoryBytes': freeNonVolatileMemoryBytes,
+    'freeVolatileMemoryBytes': freeVolatileMemoryBytes,
+  };
+}
+
+class RemoteReaderEntry {
+  const RemoteReaderEntry({
+    required this.id,
+    required this.name,
+    required this.selected,
+  });
+
+  final String id;
+  final String name;
+  final bool selected;
+
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'name': name,
+    'selected': selected,
+  };
 }
 
 abstract interface class RemoteProfileControl {
@@ -41,6 +78,14 @@ abstract interface class RemoteProfileControl {
   });
   Future<void> deleteProfile(String iccid);
   Future<void> purgeSwitchNotifications();
+  Future<RemoteCardResourceInfo> getCardResourceInfo() async =>
+      const RemoteCardResourceInfo();
+  Future<void> renameProfile(String iccid, String nickname) async =>
+      throw UnsupportedError('renameProfile');
+  Future<List<RemoteReaderEntry>> listReaders() async =>
+      const <RemoteReaderEntry>[];
+  Future<RemoteReaderEntry> selectReader(String selector) async =>
+      throw UnsupportedError('selectReader');
 }
 class LpaRemoteProfileControl implements RemoteProfileControl {
   LpaRemoteProfileControl({
@@ -59,9 +104,9 @@ class LpaRemoteProfileControl implements RemoteProfileControl {
   final NetworkStatusService _networkStatus = const NetworkStatusService();
   final Duration _verificationDelay;
   List<RemoteProfileEntry>? _cachedProfiles;
+  RemoteCardResourceInfo? _cachedResourceInfo;
   String? _cachedReaderId;
   DateTime? _cachedAt;
-
   @override
   String? get selectedReaderId => AppSettings().lastSelectedReader;
 
@@ -291,6 +336,151 @@ class LpaRemoteProfileControl implements RemoteProfileControl {
     } catch (_) {}
   }
 
+  @override
+  Future<RemoteCardResourceInfo> getCardResourceInfo() async {
+    try {
+      final reader = await _selectedReader();
+      final now = DateTime.now();
+      if (_cachedResourceInfo != null &&
+          _cachedReaderId == reader.id &&
+          _cachedAt != null &&
+          now.difference(_cachedAt!) < const Duration(seconds: 30)) {
+        return _cachedResourceInfo!;
+      }
+      return await _adapter.runExclusive(() async {
+        await _adapter.connect(reader);
+        final channel = await _manager.openSession();
+        try {
+          final info = await _readResourceInfoOnChannel(channel);
+          _cachedResourceInfo = info;
+          _cachedReaderId = reader.id;
+          return info;
+        } finally {
+          try {
+            await channel.close();
+          } catch (_) {}
+        }
+      });
+    } catch (_) {
+      return _cachedResourceInfo ?? const RemoteCardResourceInfo();
+    }
+  }
+
+  @override
+  Future<void> renameProfile(String iccid, String nickname) async {
+    final trimmed = nickname.trim();
+    if (trimmed.isEmpty) throw StateError('invalid_nickname');
+    ForegroundCardSession.begin();
+    try {
+      final reader = await _selectedReader();
+      await _adapter.runExclusive(() async {
+        await _adapter.connect(reader);
+        final channel = await _manager.openSession();
+        try {
+          final rawProfiles = await _manager.listProfiles(
+            useChannel: channel,
+            requireKnownState: true,
+          );
+          final target = rawProfiles.where((p) => p.iccid == iccid).firstOrNull;
+          if (target == null) throw StateError('profile_not_found');
+          final parsed = ProfileTagUtils.parse(target.nickname);
+          final fullNickname = ProfileTagUtils.format(trimmed, parsed.tags);
+          await _manager.renameProfile(
+            target.iccid,
+            fullNickname,
+            useChannel: channel,
+          );
+          try {
+            final metaService = await ProfileMetadataService.getInstance();
+            final existing = await metaService.getProfile(target.iccid);
+            if (existing != null) {
+              await metaService.saveProfile(
+                iccid: target.iccid,
+                nickname: fullNickname,
+                name: existing.name,
+                providerName: existing.providerName,
+                mcc: existing.mcc,
+                mnc: existing.mnc,
+                enabled: existing.enabled,
+                profileClass: existing.profileClass,
+                profileSize: existing.profileSize,
+                gid1: existing.gid1,
+                gid2: existing.gid2,
+                tags: parsed.tags.map((t) => t.raw).toList(),
+                eid: existing.eid,
+              );
+            }
+          } catch (_) {}
+        } finally {
+          try {
+            await channel.close();
+          } catch (_) {}
+        }
+      });
+      _cachedProfiles = null;
+    } finally {
+      ForegroundCardSession.end();
+    }
+  }
+
+  @override
+  Future<List<RemoteReaderEntry>> listReaders() async {
+    final readers = await _adapter.listReaders(force: true);
+    String? selectedId = AppSettings().lastSelectedReader;
+    if ((selectedId == null || !readers.any((r) => r.id == selectedId)) &&
+        readers.isNotEmpty) {
+      try {
+        final current = await _selectedReader();
+        selectedId = current.id;
+      } catch (_) {}
+    }
+    return readers
+        .map(
+          (r) => RemoteReaderEntry(
+            id: r.id,
+            name: r.name,
+            selected: r.id == selectedId,
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  @override
+  Future<RemoteReaderEntry> selectReader(String selector) async {
+    final normalized = selector.trim();
+    if (normalized.isEmpty) throw StateError('reader_not_found');
+    final readers = await _adapter.listReaders(force: true);
+    if (readers.isEmpty) throw StateError('selected_reader_unavailable');
+    Reader? matched;
+    final index = int.tryParse(normalized);
+    if (index != null && index >= 1 && index <= readers.length) {
+      matched = readers[index - 1];
+    }
+    matched ??= readers
+        .where((r) => r.id.toLowerCase() == normalized.toLowerCase())
+        .firstOrNull;
+    matched ??= readers
+        .where(
+          (r) =>
+              r.id.toLowerCase().contains(normalized.toLowerCase()) ||
+              r.name.toLowerCase().contains(normalized.toLowerCase()),
+        )
+        .firstOrNull;
+    if (matched == null) throw StateError('reader_not_found');
+    await AppSettings().setLastSelectedReader(matched.id);
+    _cachedProfiles = null;
+    _cachedResourceInfo = null;
+    _cachedReaderId = null;
+    try {
+      await _networkStatus.refresh();
+    } catch (_) {}
+    return RemoteReaderEntry(
+      id: matched.id,
+      name: matched.name,
+      selected: true,
+    );
+  }
+
   Future<Reader> _selectedReader() async {
     final readerId = AppSettings().lastSelectedReader;
     final readers = await _adapter.listReaders(force: true);
@@ -312,6 +502,25 @@ class LpaRemoteProfileControl implements RemoteProfileControl {
     throw StateError('selected_reader_unavailable');
   }
 
+  Future<RemoteCardResourceInfo> _readResourceInfoOnChannel(Channel channel) async {
+    String? eid;
+    int? freeNvm;
+    int? freeRam;
+    try {
+      eid = await _manager.getEid(useChannel: channel);
+    } catch (_) {}
+    try {
+      final info2 = await _manager.getEuiccInfo2(useChannel: channel);
+      freeNvm = info2.extCardResource?.freeNonVolatileMemory;
+      freeRam = info2.extCardResource?.freeVolatileMemory;
+    } catch (_) {}
+    return RemoteCardResourceInfo(
+      eid: eid,
+      freeNonVolatileMemoryBytes: freeNvm,
+      freeVolatileMemoryBytes: freeRam,
+    );
+  }
+
   Future<List<RemoteProfileEntry>> _readProfiles(Reader reader) async {
     return _adapter.runExclusive(() async {
       await _adapter.connect(reader);
@@ -321,6 +530,7 @@ class LpaRemoteProfileControl implements RemoteProfileControl {
           useChannel: channel,
           requireKnownState: true,
         );
+        _cachedResourceInfo = await _readResourceInfoOnChannel(channel);
         return profiles
             .map(_toRemoteProfile)
             .toList(growable: false);

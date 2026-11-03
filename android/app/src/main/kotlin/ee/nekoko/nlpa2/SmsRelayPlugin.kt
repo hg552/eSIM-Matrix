@@ -83,7 +83,8 @@ class SmsRelayPlugin :
             "loadHistory" -> loadHistory(result)
             "deleteHistoryItem" -> deleteHistoryItem(call, result)
             "clearHistory" -> clearHistory(result)
-
+            "retryFailedHistory" -> retryFailedHistory(call, result)
+            "getDeviceHealth" -> getDeviceHealth(result)
             else -> result.notImplemented()
         }
     }
@@ -170,6 +171,7 @@ class SmsRelayPlugin :
         val perms = mutableListOf(
             Manifest.permission.RECEIVE_SMS,
             Manifest.permission.READ_PHONE_STATE,
+            Manifest.permission.READ_CALL_LOG,
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             perms.add(Manifest.permission.POST_NOTIFICATIONS)
@@ -541,5 +543,80 @@ class SmsRelayPlugin :
         }
         runCatching { SmsRelayStore.clearHistory(context) }
         result.success(null)
+    }
+
+    private fun retryFailedHistory(call: MethodCall, result: MethodChannel.Result) {
+        val context = appContext ?: run {
+            result.success(0)
+            return
+        }
+        val targetId = call.argument<String>("id")?.trim()?.takeIf { it.isNotEmpty() }
+        try {
+            networkExecutor.execute {
+                val deliveredCount = runCatching {
+                    SmsRelayReceiver.retryUndelivered(context, targetId)
+                }.getOrDefault(0)
+                Handler(Looper.getMainLooper()).post {
+                    result.success(deliveredCount)
+                }
+            }
+        } catch (_: Exception) {
+            result.success(0)
+        }
+    }
+
+    private fun getDeviceHealth(result: MethodChannel.Result) {
+        val context = appContext ?: run {
+            result.success(emptyMap<String, Any?>())
+            return
+        }
+        try {
+            val batteryIntent = context.registerReceiver(
+                null,
+                android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED),
+            )
+            val level = batteryIntent?.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1) ?: -1
+            val scale = batteryIntent?.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1) ?: -1
+            val batteryPercent = if (level >= 0 && scale > 0) (level * 100) / scale else null
+            val status = batteryIntent?.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1) ?: -1
+            val plugged = batteryIntent?.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0) ?: 0
+            val charging = status == android.os.BatteryManager.BATTERY_STATUS_CHARGING ||
+                status == android.os.BatteryManager.BATTERY_STATUS_FULL ||
+                plugged != 0
+            val powerSource = when (plugged) {
+                android.os.BatteryManager.BATTERY_PLUGGED_AC -> "AC"
+                android.os.BatteryManager.BATTERY_PLUGGED_USB -> "USB"
+                android.os.BatteryManager.BATTERY_PLUGGED_WIRELESS -> "Wireless"
+                else -> if (charging) "Charging" else "Battery"
+            }
+            val rawTemp = batteryIntent?.getIntExtra(android.os.BatteryManager.EXTRA_TEMPERATURE, -1) ?: -1
+            val temperatureCelsius = if (rawTemp > 0) rawTemp / 10.0 else null
+
+            var networkType = "Offline"
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+            if (cm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val activeNet = cm.activeNetwork
+                val caps = if (activeNet != null) cm.getNetworkCapabilities(activeNet) else null
+                if (caps != null) {
+                    val parts = mutableListOf<String>()
+                    if (caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI)) parts.add("Wi-Fi")
+                    if (caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR)) parts.add("Cellular")
+                    if (caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET)) parts.add("Ethernet")
+                    if (caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)) parts.add("VPN")
+                    networkType = if (parts.isEmpty()) "Connected" else parts.joinToString("+")
+                }
+            }
+            result.success(
+                mapOf(
+                    "batteryPercent" to batteryPercent,
+                    "charging" to charging,
+                    "powerSource" to powerSource,
+                    "temperatureCelsius" to temperatureCelsius,
+                    "networkType" to networkType,
+                ),
+            )
+        } catch (_: Exception) {
+            result.success(emptyMap<String, Any?>())
+        }
     }
 }

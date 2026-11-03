@@ -17,6 +17,18 @@ All notable changes to NekokoLPA2 will be documented in this file.
 - Add a non-root eUICC-Nexus Android flavor with read-only telephony status and opt-in inbound SMS relay to an HTTPS webhook or confirmed Telegram private chat. Only this flavor requests `RECEIVE_SMS`; the Nexus reader path ignores OTBridge.
 - Encrypt Telegram Bot Tokens with Android Keystore; discover and confirm direct private chats, or explicitly enter and confirm a group/channel destination. No SMS body logging.
 
+
+## [1.1.0+110]
+
+### Added
+- **Smart OTP Extraction & Click-to-Copy (`<code>OTP</code>`)**: Automatically extract 4–8 digit and prefixed (`G-xxxxxx`) verification codes from incoming SMS, format Telegram messages in HTML with one-tap copyable `<code>` tags, and attach quick `[🏠 已收到码，切回主卡]` inline action buttons directly below each forwarded SMS.
+- **Offline SMS Retry Queue & One-Click Redelivery**: Retry failed SMS deliveries with exponential backoff and automatically flush undelivered messages when connectivity returns or via `/retry_sms` and UI retry buttons.
+- **Dual Switching Modes (Permanent vs. 5-Minute Temporary OTP) & Keep-Alive Cron Engine**: Support both permanent switching (`🔄 启用`) and 5-minute auto-revert OTP switching (`⏱️ 5分接码`), plus a configurable periodic Keep-Alive scheduler (`/keepalive`) that automatically switches to target profiles for 3 minutes of roaming registration and reverts to the default card.
+- **Direct QR Image Decoding in Telegram & Remote Profile Renaming (`/rename`)**: Send an eSIM QR code photo/screenshot directly to the Telegram Bot to decode `LPA:1$...` in memory and install the profile; rename any profile remotely via `/rename <index> <new_name>`.
+- **eUICC Free NVRAM & EID Reporting**: Display remaining eUICC non-volatile memory (`KB`) and `EID` directly in `/list`, `/status`, and the Web UI.
+- **Host Standby Device Health Monitoring & Power/Battery Alerts**: Report battery percentage, charging source (`AC`/`USB`), battery temperature (`°C`), and network transport in `/status`, and push automatic Telegram alerts when AC power is unplugged, battery drops below `20%`, or temperature exceeds `45°C`.
+- **Incoming Call Relay (`CallRelayReceiver`)**: Forward incoming call ringing alerts (`PHONE_STATE`) with caller number and SIM slot to Telegram/Webhook and record them in local history.
+- **Multi-Reader / Dual-SIM Slot Switching (`/readers`)**: Remotely list and switch between `SIM 1`, `SIM 2`, and external readers from Telegram or the REST API.
 ## [1.0.0+100]
 
 ### Released

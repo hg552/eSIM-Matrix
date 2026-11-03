@@ -124,11 +124,52 @@ class RemoteGatewayConfiguration {
   final bool canScheduleExactAlarms;
 }
 
+class DeviceHealthStatus {
+  const DeviceHealthStatus({
+    this.batteryPercent,
+    this.charging = false,
+    this.powerSource,
+    this.temperatureCelsius,
+    this.networkType,
+  });
+
+  factory DeviceHealthStatus.fromPlatform(Object? value) {
+    if (value is! Map) return const DeviceHealthStatus();
+    final map = Map<Object?, Object?>.from(value);
+    final bp = map['batteryPercent'];
+    final temp = map['temperatureCelsius'];
+    final ps = map['powerSource'];
+    final net = map['networkType'];
+    return DeviceHealthStatus(
+      batteryPercent: bp is num ? bp.toInt() : null,
+      charging: map['charging'] == true,
+      powerSource: ps is String && ps.isNotEmpty ? ps : null,
+      temperatureCelsius: temp is num ? temp.toDouble() : null,
+      networkType: net is String && net.isNotEmpty ? net : null,
+    );
+  }
+
+  final int? batteryPercent;
+  final bool charging;
+  final String? powerSource;
+  final double? temperatureCelsius;
+  final String? networkType;
+
+  Map<String, Object?> toJson() => {
+    'batteryPercent': batteryPercent,
+    'charging': charging,
+    'powerSource': powerSource,
+    'temperatureCelsius': temperatureCelsius,
+    'networkType': networkType,
+  };
+}
+
 class SmsHistoryEntry {
   const SmsHistoryEntry({
     required this.id,
     required this.sender,
     required this.body,
+    this.otp,
     required this.slotIndex,
     required this.carrierName,
     required this.receivedAtMillis,
@@ -142,10 +183,12 @@ class SmsHistoryEntry {
     final carrier = map['carrierName'];
     final receivedAt = map['receivedAtMillis'];
     final err = map['errorCode'];
+    final otpVal = map['otp'];
     return SmsHistoryEntry(
       id: '${map['id'] ?? ''}',
       sender: '${map['sender'] ?? ''}',
       body: '${map['body'] ?? ''}',
+      otp: otpVal is String && otpVal.isNotEmpty ? otpVal : null,
       slotIndex: slot is int ? slot : null,
       carrierName: carrier is String && carrier.isNotEmpty ? carrier : null,
       receivedAtMillis: receivedAt is int ? receivedAt : 0,
@@ -160,6 +203,7 @@ class SmsHistoryEntry {
   final String id;
   final String sender;
   final String body;
+  final String? otp;
   final int? slotIndex;
   final String? carrierName;
   final int receivedAtMillis;
@@ -264,6 +308,13 @@ class SmsRelayService {
 
   Future<void> clearHistory() => _channel.invokeMethod<void>('clearHistory');
 
+  Future<int> retryFailedHistory({String? id}) async =>
+      await _channel.invokeMethod<int>('retryFailedHistory', {'id': id}) ?? 0;
+
+  Future<DeviceHealthStatus> getDeviceHealth() async =>
+      DeviceHealthStatus.fromPlatform(
+        await _channel.invokeMethod<Object?>('getDeviceHealth'),
+      );
 
   static bool isSecureEndpoint(String value) {
     final uri = Uri.tryParse(value.trim());
