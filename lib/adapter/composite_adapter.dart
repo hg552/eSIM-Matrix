@@ -20,6 +20,7 @@ import 'omapi/omapi_safety.dart';
 import 'telephony/telephony_adapter.dart';
 import 'scrp/scrp_adapter.dart';
 import 'qrtr/qrtr_reader_adapter.dart';
+import 'qrtr/qrtr_host.dart';
 import 'se_hal_adapter.dart';
 
 import 'remote/remocard_adapter.dart';
@@ -319,16 +320,32 @@ class CompositeAdapter extends BaseAdapter {
     // The modem's own bus, which needs no cable at all: the card is the
     // handset's, reached through the process Shizuku runs.
     if (PlatformX.isAndroid) {
-      await probe(
-        'QRTR modem',
-        () => _qrtrAdapter.listReaders(force: force),
-        failureLog: 'QRTR modem list failed',
-      );
-      await probe(
-        'SE HAL',
-        () => _seHalAdapter.listReaders(force: force),
-        failureLog: 'SE HAL reader list failed',
-      );
+      // Both of these answer an empty list when they cannot run at all, which
+      // the report would otherwise show as "ran and found nothing".
+      if (!AppSettings().enableQrtrConnector) {
+        skipped('QRTR modem', 'QRTR connector is off in settings');
+      } else if (!await QrtrHost.isSupported()) {
+        skipped('QRTR modem', 'this SoC has no QRTR bus');
+      } else if (!await QrtrHost.isAvailable()) {
+        skipped('QRTR modem', 'Shizuku is not installed or not running');
+      } else {
+        await probe(
+          'QRTR modem',
+          () => _qrtrAdapter.listReaders(force: force),
+          failureLog: 'QRTR modem list failed',
+        );
+      }
+      if (!AppSettings().enableSeHalConnector) {
+        skipped('SE HAL', 'SE HAL connector is off in settings');
+      } else if (!await QrtrHost.isAvailable()) {
+        skipped('SE HAL', 'Shizuku is not installed or not running');
+      } else {
+        await probe(
+          'SE HAL',
+          () => _seHalAdapter.listReaders(force: force),
+          failureLog: 'SE HAL reader list failed',
+        );
+      }
     }
 
     // 4. CCID
