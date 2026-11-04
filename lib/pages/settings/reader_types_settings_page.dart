@@ -8,6 +8,7 @@ import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'remote_settings_page.dart';
 import '../../l10n/app_localizations.dart';
 import '../../config.dart';
+import '../../widgets/settings/shizuku_status_tile.dart';
 
 class ReaderTypesSettingsPage extends StatelessWidget {
   const ReaderTypesSettingsPage({super.key});
@@ -35,6 +36,7 @@ class ReaderTypesSettingsPage extends StatelessWidget {
                     if (!PlatformX.isLinux) _buildBleConnectorSwitcher(context),
                     _buildRemoteConnectorSwitcher(context),
                     if (PlatformX.isAndroid) ...[
+                      const ShizukuStatusTile(),
                       _buildQrtrConnectorSwitcher(context),
                       _buildSeHalConnectorSwitcher(context),
                       if (AppSettings().enableSeHalConnector)

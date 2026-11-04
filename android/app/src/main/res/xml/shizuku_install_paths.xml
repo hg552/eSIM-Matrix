@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The only file ever handed out is the bundled Shizuku APK, copied into the
+     app's own cache directory first. Nothing else is exposed. -->
+<paths>
+    <cache-path name="shizuku" path="shizuku/" />
+</paths>

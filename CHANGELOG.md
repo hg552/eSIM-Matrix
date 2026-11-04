@@ -2,6 +2,22 @@
 
 All notable changes to **eUICC-Nexus** (and upstream NekokoLPA2) are documented in this file.
 
+## [v1.3.2] - 2026-11-04 (`1.3.2+132`)
+
+### ✨ 新增 (Added)
+- **Shizuku 按需下载安装（QRTR / SE HAL 的必备依赖）**：
+  - Shizuku 是独立应用，Android 不允许把两个 APK 合并成一个，因此本项目**不在安装包内携带它的副本**；只有用户点击安装时，才会从 GitHub 上游拉取最新的 Shizuku 安装包，并交给系统安装器确认；
+  - 「设置 → 读卡器类型」新增 **Shizuku 状态行**：未安装 / 已安装未运行 / 运行中三态一目了然。未安装时点「安装」即下载并调起系统安装器（首次会引导开启「安装未知应用」权限）；已安装时同样显示「打开」；
+  - 已安装但服务端未运行时，点击「启动指引」会显示**本机实际可用的 `adb shell <path>/libshizuku.so` 启动命令**（按已安装版本动态解析路径），并支持一键复制；手机未 Root 时每次重启都需执行一次，这正是用户最容易漏掉的一步；
+  - 从安装器或 Shizuku 界面返回时自动重新检测状态，无需手动刷新。
+
+### 📌 说明 (Note)
+- APK 体积不变（不内置 Shizuku 二进制）。安装仍需用户在系统弹窗中确认，本项目不会静默安装任何应用。
+- 下载地址优先取 GitHub Releases API 的最新版本，失败时回退到固定版本直链；下载结果小于 500 KB 视为错误页而非 APK，会拒绝交给安装器。
+- 第三方声明见 `third_party/shizuku/NOTICE.txt` 与 `LICENSE.txt`。
+
+
+
 ## [v1.3.1] - 2026-11-04 (`1.3.1+131`)
 
 ### 🐛 修复 (Fixed)

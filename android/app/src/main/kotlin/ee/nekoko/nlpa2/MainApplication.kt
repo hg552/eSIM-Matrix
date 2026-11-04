@@ -23,6 +23,7 @@ class MainApplication : Application() {
         engine.plugins.add(CertificatePlugin())
         engine.plugins.add(QrtrPlugin())
         engine.plugins.add(AdbBridgePlugin())
+        engine.plugins.add(ShizukuInstallerPlugin())
         FlutterEngineCache.getInstance().put(FLUTTER_ENGINE_ID, engine)
         engine.dartExecutor.executeDartEntrypoint(DartExecutor.DartEntrypoint.createDefault())
         runCatching { RemoteGatewayForegroundService.start(this) }

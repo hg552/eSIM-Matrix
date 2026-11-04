@@ -13,6 +13,9 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- Only used to install the bundled Shizuku helper; the app installs
+         nothing else and never downloads an APK. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <application
         android:label="${appName}"
         android:name=".MainApplication"
@@ -83,6 +86,19 @@
             android:authorities="${applicationId}.adbbridge"
             android:enabled="true"
             android:exported="true" />
+
+        <!-- Hands a downloaded Shizuku APK to the system installer. The file
+             lives in the cache dir, so no storage permission is involved. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.shizuku_install"
+            android:enabled="true"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/shizuku_install_paths" />
+        </provider>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

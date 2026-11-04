@@ -1,0 +1,39 @@
+Third-party component: Shizuku
+==============================
+
+  Upstream: https://github.com/RikkaApps/Shizuku
+  License : Apache License 2.0 — see LICENSE.txt in this directory
+
+How this app uses it
+--------------------
+QRTR and SE HAL readers reach the SIM card through a process the `shell` user
+owns. Shizuku is what runs that process on a phone without root. Without it
+both reader types have nothing to talk to.
+
+No Shizuku binary is bundled in this APK
+----------------------------------------
+This build carries no copy of Shizuku. When the user taps install, the app
+
+  1. asks GitHub for the newest Shizuku release APK URL
+     (`api.github.com/repos/RikkaApps/Shizuku/releases/latest`), falling back to
+     a pinned upstream release URL if that request fails;
+  2. downloads that APK into its own cache directory;
+  3. hands it to the Android package installer, which shows the normal
+     confirmation dialog.
+
+Nothing is downloaded until the user asks, nothing is installed silently, and
+the downloaded bytes are not modified in any way.
+
+What is not included
+--------------------
+  - No private signing material of any kind.
+  - No prebuilt privileged helper other than the unmodified upstream APK the
+    user chooses to install.
+  - No Shizuku source code is compiled into this app; only the public Gradle
+    dependency `dev.rikka.shizuku:api` / `:provider` is used, under the same
+    license.
+
+Trademarks
+----------
+Shizuku is a project of RikkaApps. This project is not affiliated with,
+endorsed by, or sponsored by RikkaApps.
