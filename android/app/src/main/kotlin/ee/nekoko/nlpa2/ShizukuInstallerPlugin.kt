@@ -14,7 +14,6 @@ import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
-import org.json.JSONObject
 import rikka.shizuku.Shizuku
 import java.io.File
 import java.net.HttpURLConnection
@@ -179,7 +178,7 @@ class ShizukuInstallerPlugin :
         for (url in candidateUrls()) {
             try {
                 fetch(url, target)
-                if (target.length() < MIN_APK_BYTES) {
+                if (!ShizukuDownload.isPlausibleApk(target.length())) {
                     throw IllegalStateException("downloaded file is too small to be an APK")
                 }
                 Log.i(TAG, "downloaded Shizuku from $url (${target.length()} bytes)")
@@ -193,42 +192,30 @@ class ShizukuInstallerPlugin :
         throw lastError ?: IllegalStateException("no download source available")
     }
 
-    /**
-     * The release API first, so the link follows upstream; the pinned build
-     * second, so a rate limit or an API change does not break the button.
-     */
     private fun candidateUrls(): List<String> {
-        val urls = mutableListOf<String>()
-        try {
-            val latest = resolveLatestApkUrl()
-            if (latest != null) urls.add(latest)
-        } catch (e: Throwable) {
-            Log.w(TAG, "could not ask GitHub for the latest Shizuku release", e)
-        }
-        urls.add(PINNED_APK_URL)
-        return urls
+        val latest =
+            try {
+                resolveLatestApkUrl()
+            } catch (e: Throwable) {
+                Log.w(TAG, "could not ask GitHub for the latest Shizuku release", e)
+                null
+            }
+        return ShizukuDownload.candidateUrls(latest)
     }
 
     private fun resolveLatestApkUrl(): String? {
         val connection =
-            (URL(LATEST_RELEASE_API).openConnection() as HttpURLConnection).apply {
-                connectTimeout = 15000
-                readTimeout = 20000
-                setRequestProperty("Accept", "application/vnd.github+json")
-                setRequestProperty("User-Agent", "eUICC-Nexus")
-            }
+            (URL(ShizukuDownload.LATEST_RELEASE_API).openConnection() as HttpURLConnection)
+                .apply {
+                    connectTimeout = 15000
+                    readTimeout = 20000
+                    setRequestProperty("Accept", "application/vnd.github+json")
+                    setRequestProperty("User-Agent", "eUICC-Nexus")
+                }
         try {
             if (connection.responseCode != 200) return null
             val body = connection.inputStream.bufferedReader().use { it.readText() }
-            val assets = JSONObject(body).optJSONArray("assets") ?: return null
-            for (i in 0 until assets.length()) {
-                val asset = assets.optJSONObject(i) ?: continue
-                val name = asset.optString("name")
-                if (!name.endsWith(".apk")) continue
-                val url = asset.optString("browser_download_url")
-                if (url.isNotEmpty()) return url
-            }
-            return null
+            return ShizukuDownload.apkUrlFromReleaseJson(body)
         } finally {
             connection.disconnect()
         }
@@ -310,13 +297,5 @@ class ShizukuInstallerPlugin :
         private const val TAG = "ShizukuInstaller"
         private const val CHANNEL = "ee.nekoko.shizuku_installer"
         private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
-        private const val LATEST_RELEASE_API =
-            "https://api.github.com/repos/RikkaApps/Shizuku/releases/latest"
-        private const val PINNED_APK_URL =
-            "https://github.com/RikkaApps/Shizuku/releases/download/v13.6.0/" +
-                "shizuku-v13.6.0.r1086.2650830c-release.apk"
-
-        /** Anything smaller than this is an error page, not an APK. */
-        private const val MIN_APK_BYTES = 500_000L
     }
 }

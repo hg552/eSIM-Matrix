@@ -2,6 +2,20 @@
 
 All notable changes to **eUICC-Nexus** (and upstream NekokoLPA2) are documented in this file.
 
+## [v1.3.3] - 2026-11-04 (`1.3.3+133`)
+
+### 🧪 测试与重构 (Tests)
+- **给 Shizuku 下载逻辑补上可测接缝与单元测试**（无行为变更）：
+  - 把「从 GitHub Release JSON 里挑 `.apk` 资源」「候选 URL 排序与去重」「下载体是否够大」三件事从插件里抽成纯逻辑 `ShizukuDownload`，不再与网络、Android API 纠缠；
+  - 新增 **`ShizukuDownloadTest`（8 个用例）**：只挑第一个 `.apk`、忽略非 APK 资源、拒绝非 HTTPS 链接、容忍空/异常的 Release 响应、API 失败时回退到固定直链、固定直链不重复尝试、500 KB 阈值边界。
+- **新增状态行的 Widget 测试**（`shizuku_status_tile_test.dart`，4 个用例）：
+  - 未安装 → 显示「未安装」并只提供「安装」；
+  - 已安装未运行 → 显示「服务端未运行」并只提供「启动指引」，点开后对话框含启动命令与「复制命令」；
+  - 运行中 → 显示「运行中」并只提供「打开」，不出现「启动指引」；
+  - 通道无应答 → 仍渲染该行，且不得误报「运行中」。
+
+
+
 ## [v1.3.2] - 2026-11-04 (`1.3.2+132`)
 
 ### ✨ 新增 (Added)

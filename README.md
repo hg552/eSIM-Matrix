@@ -4,7 +4,7 @@
   <b>基于 Android 备用机的远程多国 eSIM (eUICC) 切卡、基带漫游监控与短信/验证码转发网关</b><br/>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" alt="MIT License" /></a>
   <a href="https://github.com/iebb/NekokoLPA2"><img src="https://img.shields.io/badge/Upstream-NekokoLPA2-6E56CF?style=flat-square" alt="Based on NekokoLPA2" /></a>
-  <a href="https://github.com/MIY-Y/eUICC-Nexus/releases"><img src="https://img.shields.io/badge/Release-v1.3.2-orange?style=flat-square" alt="Release v1.3.2" /></a>
+  <a href="https://github.com/MIY-Y/eUICC-Nexus/releases"><img src="https://img.shields.io/badge/Release-v1.3.3-orange?style=flat-square" alt="Release v1.3.3" /></a>
   <a href="https://linux.do"><img src="https://img.shields.io/badge/Community-LINUX%20DO-f09433?style=flat-square" alt="LINUX DO 社区" /></a>
 </p>
 
@@ -28,7 +28,7 @@
 
 ## 3 分钟快速上手
 
-1. **安装授权**：将 eUICC 芯片插入备用机，下载安装 [Releases 中的 `eUICC-Nexus-v1.3.2.apk`](https://github.com/MIY-Y/eUICC-Nexus/releases/tag/v1.3.2)（**全签名合一版**：单个安装包同时内置 **ESTK / NekokoLPA `c47350...` + 9eSIM `d1c0f4...` + SakuraSIM `65d057...`** 三套证书，通杀主流实体卡与小白卡；**v1.3 新增空卡槽深度自愈诊断与一键复制排查报告**）；在 App 内授予电话、短信与通知权限并将省电设为**「无限制」**。
+1. **安装授权**：将 eUICC 芯片插入备用机，下载安装 [Releases 中的 `eUICC-Nexus-v1.3.3.apk`](https://github.com/MIY-Y/eUICC-Nexus/releases/tag/v1.3.3)（**全签名合一版**：单个安装包同时内置 **ESTK / NekokoLPA `c47350...` + 9eSIM `d1c0f4...` + SakuraSIM `65d057...`** 三套证书，通杀主流实体卡与小白卡；**v1.3 新增空卡槽深度自愈诊断与一键复制排查报告**）；在 App 内授予电话、短信与通知权限并将省电设为**「无限制」**。
 2. **绑定 Telegram Bot**：
    - 找 [`@BotFather`](https://t.me/BotFather) 发送 `/newbot` 创建机器人并复制 **Bot Token**；
    - 在 Telegram 给你的机器人发送一次 `/start`；
@@ -46,13 +46,13 @@
 
 ### 2. 快速使用步骤
 1. **插卡识别**：将 ESTKme 插入手机 SIM 槽（推荐插在闲置的 `SIM 2` 槽）；
-2. **安装应用**：安装 [Releases 中的 `eUICC-Nexus-v1.3.2.apk`](https://github.com/MIY-Y/eUICC-Nexus/releases/tag/v1.3.2)（内置 ESTK 官方出厂 ARA-M 证书 `C47350...`）；
+2. **安装应用**：安装 [Releases 中的 `eUICC-Nexus-v1.3.3.apk`](https://github.com/MIY-Y/eUICC-Nexus/releases/tag/v1.3.3)（内置 ESTK 官方出厂 ARA-M 证书 `C47350...`）；
 3. **读取卡片**：打开 App，首页将通过手机系统内置 OMAPI 自动读取卡内所有 Profile、芯片剩余闪存空间 (`Free NVRAM KB`) 与 `EID`；
 4. **远程切卡与保号**：绑定 Telegram Bot 后，即可远程通过 `/list` 随时切卡，或通过 `/keepalive` 配置每 90/180 天全自动驻网保号。
 
 ### 3. 卡内 ARA-M 规则与密钥配置明细 (白名单配置)
 
-> **注意**：安装本项目 Releases 提供的 `eUICC-Nexus-v1.3.2.apk`（全签名合一版），正常出厂的 ESTK 实体卡**默认已自带该证书，插卡即可直接识别使用**。  
+> **注意**：安装本项目 Releases 提供的 `eUICC-Nexus-v1.3.3.apk`（全签名合一版），正常出厂的 ESTK 实体卡**默认已自带该证书，插卡即可直接识别使用**。  
 > **但如果你的卡片被误清空过、使用了早期空白卡、或者出现 `Access Denied by ARA-M` 报错**，请打开 **ESTKme 官方 App**、**手机自带 STK 菜单**、**EasyEUICC** 或 **PC 读卡器工具**，手动添加以下规则：
 
 #### 🔑 核心密钥参数（直接复制粘贴）
@@ -106,7 +106,7 @@ ESTK MAX 内部拥有两颗独立的物理安全元件。在 eUICC-Nexus 中无�
 - **Q：为什么提示「请连接兼容的读卡器以开始」？**  
   A：检查 App「设置」->「读卡器类型」中「内置 OMAPI」是否开启。如果开启后依然空白，查看首页原位展开的**「硬件诊断报告」**，若显示手机 ROM 缺少 `featureOmapiUicc` 或返回 0 个读卡器，说明该手机系统阉割了 OMAPI 接口，需配合 Root + OTBridge，或搭配 ESTK 官方 USB/蓝牙读卡器使用。
 - **Q：为什么提示「访问被拒绝 (Access Denied by ARA-M)」？**  
-  A：请确认安装的是 Releases 发布的 `eUICC-Nexus-v1.3.2.apk` 全签名合一版。若曾使用第三方工具清空过卡内白名单，可进入手机系统自带的「SIM 卡应用 / STK」菜单恢复默认，或使用 ESTK 官方桌面工具重置卡片。
+  A：请确认安装的是 Releases 发布的 `eUICC-Nexus-v1.3.3.apk` 全签名合一版。若曾使用第三方工具清空过卡内白名单，可进入手机系统自带的「SIM 卡应用 / STK」菜单恢复默认，或使用 ESTK 官方桌面工具重置卡片。
 - **Q：「Qualcomm modem (QRTR)」和「SE HAL」这两个开关是干什么的？**  
   A：当手机 ROM 不把卡槽暴露给 OMAPI（诊断报告里 `UICC=false`、`Raw SE Readers (0)`）时，这两条通道**不依赖卡侧签名白名单**，可绕过 ARA-M 直接访问芯片。两者都需要 [Shizuku](https://github.com/RikkaApps/Shizuku)：在「设置 → 读卡器类型」页的 Shizuku 状态行点「安装」即可，App 会从 GitHub 拉取官方安装包（**安装包内不携带 Shizuku 副本**）。手机未 Root 时，每次重启后需从电脑执行一次 `adb shell <libshizuku.so 路径>`，页面的「启动指引」会直接显示本机可用的完整命令并可一键复制。
 - **Q：高频切卡会磨损卡片闪存吗？**  
