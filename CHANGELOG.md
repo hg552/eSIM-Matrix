@@ -2,6 +2,11 @@
 
 All notable changes to **eUICC-Nexus** (and upstream NekokoLPA2) are documented in this file.
 
+## [v1.3.1] - 2026-11-04 (`1.3.1+131`)
+
+### 🐛 修复 (Fixed)
+- **修复诊断报告把「跑不起来的读卡器来源」误记为正常**：`QRTR modem` 与 `SE HAL` 两个来源在 Shizuku 未安装/未运行、或连接开关关闭时，会直接返回空列表；诊断报告此前一律记为 `[OK] 0 reader(s)`，让人误以为该通道已排查过。现在改为明确的 `[SKIP]` 并附带原因（`Shizuku is not installed or not running` / `QRTR connector is off in settings` / `this SoC has no QRTR bus`）。
+
 ## [v1.3.0] - 2026-11-03 (`1.3.0+130`)
 
 ### ✨ 新增与优化 (Added)
