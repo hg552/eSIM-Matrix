@@ -15,6 +15,7 @@ import 'update_service.dart';
 import 'remote_profile_controller.dart';
 import 'sms_relay_service.dart';
 import 'network_status_service.dart';
+import 'telegram_registry.dart';
 
 /// Interface names that carry mobile data. A carrier CGNAT bearer is also
 /// numbered out of 100.64/10, so the address range alone cannot separate it
@@ -194,6 +195,7 @@ class RemoteGatewayService {
     }
     final previousConfig = _configuration;
     _configuration = config;
+    await _seedOwnerSubscriber(config.telegramChatId);
     if (_running) {
       final telegramChanged =
           previousConfig?.telegramToken != config.telegramToken ||
@@ -223,6 +225,15 @@ class RemoteGatewayService {
     if (config.telegramToken != null && config.telegramChatId != null) {
       unawaited(_pollTelegram(_telegramPollGeneration));
     }
+  }
+
+  /// The owner chat receives announcements even when it has not written to
+  /// the bot since the registry was introduced.
+  Future<void> _seedOwnerSubscriber(String? chatId) async {
+    if (chatId == null || chatId.isEmpty) return;
+    try {
+      await TelegramRegistry.instance.record(chatId, 'Owner');
+    } catch (_) {}
   }
 
   Future<void> resumeIfEnabled() async {
@@ -298,11 +309,16 @@ class RemoteGatewayService {
       health = await _smsRelay.getDeviceHealth();
     } catch (_) {}
     final keepAliveRules = await listKeepAliveRules();
+    int registeredChats = 0;
+    try {
+      registeredChats = await TelegramRegistry.instance.subscriberCount();
+    } catch (_) {}
     return {
       'gateway': _running ? 'running' : 'stopped',
       'apiUrl': apiUrl,
       'selectedReader': _profiles.selectedReaderId,
       'defaultProfile': savedDefault?.alias,
+      'registeredChats': registeredChats,
       'card': cardInfo.toJson(),
       'device': health.toJson(),
       'keepAliveCount': keepAliveRules.length,
@@ -1069,14 +1085,14 @@ class RemoteGatewayService {
     final canReach =
         config?.telegramToken != null && config?.telegramChatId != null;
     if (canReach) {
-      final changelog = update.changelog;
-      await _sendTelegramReply(
-        _TelegramReply(
-          '🆕 eUICC-Nexus 有新版本：${update.version} (build ${update.build})\n'
-          '${changelog == null || changelog.isEmpty ? '' : '$changelog\n'}'
-          '下载地址：${update.downloadUrl ?? update.url}',
-        ),
-      );
+      // The notice goes to every chat that talks to the bot, not only to the
+      // owner: a release note that only reaches one chat leaves the other
+      // users on a build without the fixes.
+      try {
+        await _announceToEveryone(_formatReleaseNotice(update));
+      } catch (e) {
+        _log.warning('Update announcement failed: $e');
+      }
     }
     await UpdateNotifier.markNotified(update);
   }
@@ -1464,6 +1480,7 @@ class RemoteGatewayService {
           {'command': 'download', 'description': '📥 远程下卡或直接发送二维码图片'},
           {'command': 'delete', 'description': '🗑️ 安全二步删卡 (例: /delete 2)'},
           {'command': 'retry_sms', 'description': '🔄 一键补发未送达短信'},
+          {'command': 'announce', 'description': '📣 向所有已登记会话发布公告'},
           {'command': 'help', 'description': '🤖 打开交互式主控台'},
         ],
       }),
@@ -1641,8 +1658,18 @@ class RemoteGatewayService {
   }) async {
     final chat = message['chat'];
     final sender = message['from'];
-    if (chat is! Map || sender is! Map ||
-        chat['type'] != 'private' ||
+    if (chat is! Map || sender is! Map) return null;
+    // Every private chat that writes to the bot is remembered so that release
+    // announcements can reach all of them. Registering grants no control
+    // rights: the command filter below still only accepts the owner chat.
+    if (chat['type'] == 'private' && sender['is_bot'] != true) {
+      unawaited(
+        TelegramRegistry.instance
+            .record('${chat['id']}', _telegramDisplayName(sender))
+            .catchError((Object _) {}),
+      );
+    }
+    if (chat['type'] != 'private' ||
         '${chat['id']}' != allowedChat ||
         '${sender['id']}' != allowedChat ||
         sender['is_bot'] == true) {
@@ -1670,7 +1697,7 @@ class RemoteGatewayService {
         ? ''
         : trimmedText.substring(firstNewline + 1).trim();
     final command = RegExp(
-      r'^/(start|help|menu|list|status|use|use_temp|back|default|rename|keepalive|keepalive_now|readers|reader|retry_sms|download|download_test|delete|delete_confirm|delete_cancel)(?:@[A-Za-z0-9_]+)?(?:\s+(.*))?$',
+      r'^/(start|help|menu|list|status|use|use_temp|back|default|rename|keepalive|keepalive_now|readers|reader|retry_sms|download|download_test|delete|delete_confirm|delete_cancel|announce)(?:@[A-Za-z0-9_]+)?(?:\s+(.*))?$',
       caseSensitive: false,
     ).firstMatch(commandLine);
     if (command == null) return null;
@@ -2183,6 +2210,8 @@ class RemoteGatewayService {
               ],
             ],
           );
+        case 'announce':
+          return await _executeTelegramAnnouncement(argument);
         case 'back':
           final result = await revertProfile();
           return _TelegramReply(
@@ -2411,6 +2440,10 @@ class RemoteGatewayService {
         lines.add('🆔 EID：$eid');
       }
     }
+    final registeredChats = value['registeredChats'];
+    if (registeredChats is int && registeredChats > 0) {
+      lines.add('📣 已登记公告会话：$registeredChats 个');
+    }
     if (device is Map && device['batteryPercent'] != null) {
       final pct = device['batteryPercent'];
       final charging = device['charging'] == true;
@@ -2442,6 +2475,107 @@ class RemoteGatewayService {
 
   Future<void> _sendTelegramText(String text) =>
       _sendTelegramReply(_TelegramReply(text));
+
+  /// The name a chat is shown with in the subscriber list.
+  static String _telegramDisplayName(Map sender) {
+    final first = '${sender['first_name'] ?? ''}'.trim();
+    final last = '${sender['last_name'] ?? ''}'.trim();
+    final username = '${sender['username'] ?? ''}'.trim();
+    final full = '$first $last'.trim();
+    if (full.isNotEmpty) return full;
+    if (username.isNotEmpty) return '@$username';
+    return 'Chat ${sender['id']}';
+  }
+
+  /// Sends a plain message to one specific chat.
+  ///
+  /// Returns false when Telegram rejected the message, so a broadcast can
+  /// count what actually got through.
+  Future<bool> _sendTelegramTextTo(
+    String token,
+    String chatId,
+    String text,
+  ) async {
+    final uri = Uri.https('api.telegram.org', '/bot$token/sendMessage');
+    final request = await _telegramHttpClient
+        .postUrl(uri)
+        .timeout(const Duration(seconds: 10));
+    request.headers.contentType = ContentType.json;
+    request.write(jsonEncode({'chat_id': chatId, 'text': text}));
+    final response = await request.close().timeout(const Duration(seconds: 10));
+    final body = await response.transform(utf8.decoder).join().timeout(const Duration(seconds: 10));
+    if (response.statusCode < 200 || response.statusCode >= 300) return false;
+    final decoded = jsonDecode(body);
+    return decoded is Map && decoded['ok'] == true;
+  }
+
+  /// The text of a release notice, used by the automatic update notification
+  /// and by the `/announce` command.
+  static String _formatReleaseNotice(UpdateInfo update) {
+    final changelog = update.changelog ?? '';
+    return '🆕 eUICC-Nexus 有新版本：${update.version} (build ${update.build})\n'
+        '${changelog.isEmpty ? '' : '$changelog\n'}'
+        '下载地址：${update.downloadUrl ?? update.url}';
+  }
+
+  /// Announces a message to every chat the bot knows about.
+  ///
+  /// The owner chat is left out of the broadcast because the caller delivers
+  /// the announcement there itself.
+  Future<int> _broadcastTelegramText(
+    String text, {
+    String? excludeChatId,
+  }) async {
+    final token = _configuration?.telegramToken;
+    if (token == null || token.isEmpty) return 0;
+    final targets = await TelegramRegistry.instance.announcementTargets(
+      excludeChatId: excludeChatId,
+    );
+    var delivered = 0;
+    for (final chatId in targets) {
+      try {
+        if (await _sendTelegramTextTo(token, chatId, text)) delivered++;
+      } catch (e) {
+        _log.warning('Broadcast to chat $chatId failed: $e');
+      }
+    }
+    return delivered;
+  }
+
+  /// Sends a notice to the owner chat and to every other registered chat.
+  Future<void> _announceToEveryone(String notice) async {
+    final owner = _configuration?.telegramChatId;
+    final delivered = await _broadcastTelegramText(notice, excludeChatId: owner);
+    await _sendTelegramReply(_TelegramReply(notice));
+    _log.info('Announcement delivered to $delivered registered chats');
+  }
+
+  /// Runs the `/announce` command.
+  ///
+  /// Without an argument the newest release from the update feed is
+  /// announced, so one command tells every registered chat about a new
+  /// version.
+  Future<_TelegramReply> _executeTelegramAnnouncement(String argument) async {
+    final text = argument.trim();
+    String notice;
+    if (text.isEmpty) {
+      final update = await UpdateNotifier.check(manual: true);
+      if (update == null) {
+        return const _TelegramReply(
+          'ℹ️ 更新源里没有更新的发布，暂时无法生成升级公告。\n'
+          '也可以直接发送：/announce <公告内容>',
+        );
+      }
+      notice = _formatReleaseNotice(update);
+    } else {
+      notice = text;
+    }
+    final owner = _configuration?.telegramChatId;
+    final delivered = await _broadcastTelegramText(notice, excludeChatId: owner);
+    return _TelegramReply(
+      '$notice\n\n📣 已同时推送给另外 $delivered 个已登记会话。',
+    );
+  }
 
   Future<void> _sendTelegramReply(_TelegramReply reply) async {
     final config = _configuration;
