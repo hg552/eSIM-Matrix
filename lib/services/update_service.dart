@@ -25,7 +25,19 @@ class UpdateInfo {
 
 class UpdateService {
   static final Logger _log = Logger('UpdateService');
-  static const String _configUrl = 'https://updates.lpa.ee/nlpa2.json';
+
+  /// Upstream publishes its own feed; a fork points this at its own file.
+  static const String _defaultConfigUrl = 'https://updates.lpa.ee/nlpa2.json';
+
+  /// Set with `--dart-define=APP_UPDATE_FEED_URL=...` at build time.
+  static const String _configuredConfigUrl = String.fromEnvironment(
+    'APP_UPDATE_FEED_URL',
+  );
+
+  /// The feed this build reads.
+  static String get configUrl =>
+      _configuredConfigUrl.isEmpty ? _defaultConfigUrl : _configuredConfigUrl;
+
   static const _certChannel = MethodChannel('ee.nekoko.certificate_plugin');
 
   Future<UpdateInfo?> checkForUpdates() async {
@@ -38,7 +50,7 @@ class UpdateService {
         return null;
       }
 
-      final response = await http.get(Uri.parse(_configUrl));
+      final response = await http.get(Uri.parse(configUrl));
       if (response.statusCode != 200) {
         _log.warning('Failed to fetch update config: ${response.statusCode}');
         return null;

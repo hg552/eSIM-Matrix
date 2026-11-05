@@ -273,6 +273,42 @@ class AppSettings extends ChangeNotifier {
   bool _enableUpdateCheck = true;
   bool get enableUpdateCheck => _enableUpdateCheck;
 
+  /// When the update feed was last read, and for which build.
+  int? _lastUpdateCheckAtMillis;
+  int get lastUpdateCheckAtMillis => _lastUpdateCheckAtMillis ?? 0;
+  int _lastUpdateCheckBuild = 0;
+  int get lastUpdateCheckBuild => _lastUpdateCheckBuild;
+
+  /// The newest version the user was told about, and the one they dismissed.
+  int _lastNotifiedUpdateBuild = 0;
+  int get lastNotifiedUpdateBuild => _lastNotifiedUpdateBuild;
+  int _dismissedUpdateBuild = 0;
+  int get dismissedUpdateBuild => _dismissedUpdateBuild;
+
+  DateTime? get lastUpdateCheckAt => lastUpdateCheckAtMillis > 0
+      ? DateTime.fromMillisecondsSinceEpoch(lastUpdateCheckAtMillis)
+      : null;
+
+  Future<void> recordUpdateCheck(int build) async {
+    _lastUpdateCheckBuild = build;
+    _lastUpdateCheckAtMillis = DateTime.now().millisecondsSinceEpoch;
+    await _prefs?.setInt('lastUpdateCheckAtMillis', _lastUpdateCheckAtMillis!);
+    await _prefs?.setInt('lastUpdateCheckBuild', build);
+    notifyListeners();
+  }
+
+  Future<void> recordUpdateNotified(int build) async {
+    _lastNotifiedUpdateBuild = build;
+    await _prefs?.setInt('lastNotifiedUpdateBuild', build);
+    notifyListeners();
+  }
+
+  Future<void> recordUpdateDismissed(int build) async {
+    _dismissedUpdateBuild = build;
+    await _prefs?.setInt('dismissedUpdateBuild', build);
+    notifyListeners();
+  }
+
   RspProxyMode _rspProxyMode = RspProxyMode.direct;
   String _rspForwardProxyProtocol = 'http';
   String _rspForwardProxyHost = '';
@@ -677,6 +713,10 @@ class AppSettings extends ChangeNotifier {
         _prefs?.getBool('enableTmapiConnector') ?? !otbridgeHasTmapi;
     _enableRemoteConnector = _prefs?.getBool('enableRemoteConnector') ?? false;
     _enableUpdateCheck = _prefs?.getBool('enableUpdateCheck') ?? true;
+    _lastUpdateCheckAtMillis = _prefs?.getInt('lastUpdateCheckAtMillis');
+    _lastUpdateCheckBuild = _prefs?.getInt('lastUpdateCheckBuild') ?? 0;
+    _lastNotifiedUpdateBuild = _prefs?.getInt('lastNotifiedUpdateBuild') ?? 0;
+    _dismissedUpdateBuild = _prefs?.getInt('dismissedUpdateBuild') ?? 0;
     _rspProxyMode = RspProxyConfig.modeFromString(
       _prefs?.getString('rspProxyMode'),
     );

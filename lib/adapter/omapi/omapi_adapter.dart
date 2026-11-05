@@ -518,8 +518,16 @@ class OmapiAdapter extends BaseAdapter {
       return;
     }
 
-    _refCounts[channelId] = (_refCounts[channelId] ?? 1) - 1;
-    if (_refCounts[channelId]! <= 0) {
+    // Never leave the counter below zero: an overlapping double release used to
+    // drive it to -1, which _finalizeCloseChannel then read as "nobody holds
+    // this" and could close a channel another handle still owned.
+    final remaining = (_refCounts[channelId] ?? 1) - 1;
+    if (remaining > 0) {
+      _refCounts[channelId] = remaining;
+    } else {
+      _refCounts.remove(channelId);
+    }
+    if (remaining <= 0) {
       if (_profileSwitchInProgress || immediate || _appInBackground) {
         await _finalizeCloseChannel(channelId, aidHex, ownershipToken);
         return;
@@ -736,9 +744,11 @@ class _OmapiChannel extends BaseChannel {
   @override
   Future<void> close() async {
     if (_closed) return;
+    // Marked before the await: two closes racing on the same handle must not
+    // both reach the refcount.
+    _closed = true;
     if (_aidHex == null) {
       _adapter._releasePlaceholder(_internalId, _ownershipToken);
-      _closed = true;
       return;
     }
     try {
@@ -747,9 +757,9 @@ class _OmapiChannel extends BaseChannel {
         _aidHex!,
         _ownershipToken,
       );
-      _closed = true;
     } catch (_) {
       _adapter._restoreReferenceIfOwned(_internalId, _ownershipToken);
+      _closed = false;
       rethrow;
     }
   }

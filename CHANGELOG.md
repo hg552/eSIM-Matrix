@@ -2,6 +2,26 @@
 
 All notable changes to **eUICC-Nexus** (and upstream NekokoLPA2) are documented in this file.
 
+## [v1.3.4] - 2026-11-05 (`1.3.4+134`)
+
+### ✨ 新增 (Added)
+- **自动检查新版本 + 一键复制排查报告的发布侧闭环（`UpdateNotifier` / `UpdateCheckPolicy`）**：
+  - **更新源可配置**：沿用上游的更新 feed 格式与选择逻辑（`UpdateFeed`），但把 feed 地址改为构建期注入（`--dart-define=APP_UPDATE_FEED_URL=...`）；上游 flavor 仍默认指向 `updates.lpa.ee`，本项目的 flavor 指向本仓库发布的 `update_feed.json`；
+  - **自动检查**：`App` 启动时与**网关常驻运行**时都会检查更新。网关是无头运行的，没人打开 App 就收不到任何提示，因此发现新版本会**直接推送 Telegram 通知**（含版本号、更新日志与下载地址）；
+  - **不再打扰**：同一次安装最多每 24 小时检查一次；应用自身升级后立即检查一次；用户点「以后再说」的版本不再重复弹窗；已通知过的版本不会重复通知（`UpdateCheckPolicy` 纯函数，11 个用例覆盖）；
+  - **发布脚本**：`scripts/publish_update_feed.mjs` 从已签名 APK 里读出三套 ARA-M 证书指纹，写入 `update_feed.json`；签名不匹配的 APK 不会被推荐更新。
+- **发布构建闸门**：`scripts/build_android_release.sh` 在编译后**强制校验** APK 内含 `librust_lib_nlpa2.so`，缺失即构建失败。
+
+### 🐛 修复 (Fixed)
+- **修复此前所有版本都缺少 Rust 原生库**：Cargokit 在找不到 Rust 工具链时是**软失败**，Gradle 仍会出包，于是 `librust_lib_nlpa2.so`（QRTR 调制解调器总线）从未被打进 APK —— **QRTR / SE HAL 读卡器在 v1.0.0 ~ v1.3.3 的所有安装包里都是不可用的**。v1.3.4 起由构建脚本强制校验。
+- **修复更新检查永远无法命中（真机实测发现）**：发布脚本此前传 `--dart-define=APP_VARIANT=m`，而 `AppSettings.variant` 会原样返回该值，更新源因此去匹配名为 `m` 的渠道，而本项目发布的 feed 键是 `multi` —— **自动更新对所有用户都是死的**。改为 `APP_VARIANT=multi`（与上游 multi flavor 及 `scripts/build.py` 一致）。
+- **修复更新弹窗显示上游品牌**：更新弹窗与窗口标题此前恒为「NekokoLPA 2」，现改为构建期注入 `--dart-define=APP_DISPLAY_NAME=eUICC-Nexus`，上游 flavor 不受影响。
+
+### ✅ 真机验证 (Verified on device)
+- **SE HAL 读卡器实测可用**：在 Android 16 / HyperOS 3 / 高通机型上通过 SE HAL 成功读取 eUICC 的 EID 与剩余空间（补库前为 `NO_SERVICE`）。
+- **更新检查全链路实测通过**：手动检查与「启动时自动检查」均能正确弹出更新框（含更新日志），「以后再说」后不再重复弹出，24 小时节流生效。
+- QRTR 在该机型仍失败于 `no QRTR socket: errno 13`（手机 ROM 的 SELinux 不允许 `shell` 打开 QRTR socket，属系统策略限制）。
+
 ## [v1.3.3] - 2026-11-04 (`1.3.3+133`)
 
 ### 🧪 测试与重构 (Tests)
@@ -13,8 +33,6 @@ All notable changes to **eUICC-Nexus** (and upstream NekokoLPA2) are documented 
   - 已安装未运行 → 显示「服务端未运行」并只提供「启动指引」，点开后对话框含启动命令与「复制命令」；
   - 运行中 → 显示「运行中」并只提供「打开」，不出现「启动指引」；
   - 通道无应答 → 仍渲染该行，且不得误报「运行中」。
-
-
 
 ## [v1.3.2] - 2026-11-04 (`1.3.2+132`)
 

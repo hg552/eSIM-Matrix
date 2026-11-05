@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import java.util.concurrent.Executors
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
@@ -20,11 +21,15 @@ class SmsRelayPlugin :
     ActivityAware,
     MethodChannel.MethodCallHandler {
     companion object {
+        private const val TAG = "SmsRelayPlugin"
         private const val CHANNEL = "ee.nekoko.sms_relay"
         private const val REQUEST_SMS_PERMISSION = 8421
         private val networkExecutor = Executors.newSingleThreadExecutor { runnable ->
             Thread(runnable, "sms-relay-network").apply { isDaemon = true }
         }
+
+        /** Only one resend sweep may be outstanding at a time. */
+        private val retryInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
     }
 
     private var appContext: Context? = null
@@ -552,16 +557,26 @@ class SmsRelayPlugin :
             return
         }
         val targetId = call.argument<String>("id")?.trim()?.takeIf { it.isNotEmpty() }
+        // A sweep walks the whole history and can take minutes when the
+        // endpoint is unreachable. Queuing another one behind it would deliver
+        // the same verification code again, once per queued sweep.
+        if (!retryInFlight.compareAndSet(false, true)) {
+            Log.i(TAG, "A resend sweep is already running; not starting another")
+            result.success(0)
+            return
+        }
         try {
             networkExecutor.execute {
                 val deliveredCount = runCatching {
                     SmsRelayReceiver.retryUndelivered(context, targetId)
                 }.getOrDefault(0)
+                retryInFlight.set(false)
                 Handler(Looper.getMainLooper()).post {
                     result.success(deliveredCount)
                 }
             }
         } catch (_: Exception) {
+            retryInFlight.set(false)
             result.success(0)
         }
     }

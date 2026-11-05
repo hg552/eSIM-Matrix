@@ -38,6 +38,9 @@ internal class SmsRelayReceiver : BroadcastReceiver() {
         )
         private val retryBackoffMillis = longArrayOf(0L, 1200L, 3000L)
 
+        /** How many messages one sweep resends before the next one takes over. */
+        private const val MAX_RETRY_ITEMS_PER_SWEEP = 20
+
         internal fun deliverSingle(
             settings: SmsRelaySettings,
             sender: String,
@@ -112,11 +115,16 @@ internal class SmsRelayReceiver : BroadcastReceiver() {
             if (!settings.enabled || settings.token.isNullOrBlank()) return 0
             val items = SmsRelayStore.loadHistory(context.applicationContext)
             var deliveredCount = 0
+            var attempted = 0
             for (item in items) {
                 val id = item["id"] as? String ?: continue
                 if (targetId != null && id != targetId) continue
                 val alreadyDelivered = item["delivered"] as? Boolean ?: true
                 if (alreadyDelivered && targetId == null) continue
+                // One sweep only carries so much: every message costs up to
+                // three attempts, and a dead endpoint makes each of them wait
+                // out its timeouts. The rest is picked up by the next sweep.
+                if (attempted >= MAX_RETRY_ITEMS_PER_SWEEP) break
                 val sender = item["sender"] as? String ?: continue
                 val body = item["body"] as? String ?: continue
                 val slotIndex = item["slotIndex"] as? Int
@@ -126,6 +134,7 @@ internal class SmsRelayReceiver : BroadcastReceiver() {
                 val err = deliverSingle(settings, sender, body, origin, receivedAtMillis)
                 SmsRelayStore.markDelivered(context.applicationContext, id, err == null, err)
                 if (err == null) deliveredCount++
+                attempted++
             }
             return deliveredCount
         }

@@ -6,18 +6,43 @@ import 'package:nlpa2/settings/app_settings.dart';
 
 void main() {
   group('DiagnosticsService.redact', () {
-    test('masks 19-20 digit ICCIDs while keeping prefix and suffix', () {
+    test('masks an ICCID while keeping prefix and suffix', () {
       const line = 'Processing card with ICCID 8986048123456789012F in slot 0';
       final redacted = DiagnosticsService.redact(line);
-      expect(redacted, contains('8986...012F [ICCID masked]'));
+      expect(redacted, contains('8986...012F [ID masked]'));
       expect(redacted, isNot(contains('123456789')));
     });
 
-    test('masks 32-character EIDs', () {
+    test('masks a 32-character EID', () {
       const line = 'eUICC EID is 89049032000000000000000000001234';
       final redacted = DiagnosticsService.redact(line);
-      expect(redacted, contains('8904...1234 [EID masked]'));
+      expect(redacted, contains('8904...1234 [ID masked]'));
       expect(redacted, isNot(contains('00000000000000000000')));
+    });
+
+    test('masks an EID that sits inside a longer hex blob', () {
+      // Tag 5A values arrive as contiguous hex on both sides, where a word
+      // boundary never fires — the case the old rule missed.
+      const line = 'APDU 81E2002C5A1089049032000000000000000000000012340100';
+      final redacted = DiagnosticsService.redact(line);
+      expect(redacted, contains('[ID masked]'));
+      expect(redacted, isNot(contains('0000000000000000')));
+    });
+
+    test('masks a credential carried inside a URL', () {
+      const line =
+          'remocard:http://:s3cret-pass@192.168.1.10:33777|Slot 1 -> Slot 1';
+      final redacted = DiagnosticsService.redact(line);
+      expect(redacted, contains('://***@192.168.1.10:33777'));
+      // Nothing but the marker may survive between the scheme and the host.
+      expect(RegExp(r'://(?!\*\*\*@)').hasMatch(redacted), isFalse);
+    });
+
+    test('masks a Bluetooth reader address but keeps its vendor octet', () {
+      const line = 'red_ble: NBLESim X|AA:BB:CC:DD:EE:FF -> SIM';
+      final redacted = DiagnosticsService.redact(line);
+      expect(redacted, contains('AA:**:**:**:**:**'));
+      expect(redacted, isNot(contains('CC:DD:EE:FF')));
     });
 
     test('masks Telegram bot tokens', () {

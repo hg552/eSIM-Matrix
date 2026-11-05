@@ -65,7 +65,7 @@ import '../widgets/common/adaptive_context_menu.dart';
 import '../widgets/common/loading_spinner.dart';
 import '../widgets/profiles_screen/connect_step_message.dart';
 import '../widgets/profiles_screen/profile_loading_overlay.dart';
-import '../services/update_service.dart';
+import '../services/update_notifier.dart';
 import '../utils/update_utils.dart';
 import '../widgets/profiles_screen/profile_list_section.dart';
 import '../widgets/profiles_screen/reader_helper.dart';
@@ -902,12 +902,12 @@ class _ProfilesScreenState extends State<ProfilesScreen>
   }
 
   Future<void> _checkForUpdates() async {
-    if (!AppSettings().enableUpdateCheck) return;
-    // Only check if not already checking
-    final update = await UpdateService().checkForUpdates();
-    if (update != null && mounted) {
-      showUpdateDialog(context, update);
-    }
+    // The notifier applies the schedule and remembers what was announced, so
+    // this stays a single call on every launch.
+    final update = await UpdateNotifier.check();
+    if (update == null || !mounted) return;
+    if (!UpdateNotifier.shouldPrompt(update)) return;
+    showUpdateDialog(context, update);
   }
 
   /// Refreshes the badge from the database alone, without touching the card.

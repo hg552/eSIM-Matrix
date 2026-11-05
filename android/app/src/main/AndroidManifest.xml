@@ -13,8 +13,9 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-    <!-- Only used to install the bundled Shizuku helper; the app installs
-         nothing else and never downloads an APK. -->
+    <!-- Used only to hand a user-requested Shizuku download to the system
+         installer, which shows its own confirmation. The app installs nothing
+         silently and carries no APK of its own. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <application
         android:label="${appName}"
@@ -107,6 +108,13 @@
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
         <provider android:authorities="ee.nekoko.nbridge.provider" />
+        <!-- Without this the app cannot see Shizuku on Android 11+, so the status
+             row would report "not installed" even when it is. -->
+        <package android:name="moe.shizuku.privileged.api" />
+        <!-- Needed to address the system installer explicitly instead of letting an
+             implicit VIEW pick any app that claims the package-archive MIME type. -->
+        <package android:name="com.android.packageinstaller" />
+        <package android:name="com.google.android.packageinstaller" />
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="https" />

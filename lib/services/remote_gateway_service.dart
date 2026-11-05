@@ -10,9 +10,95 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../utils/zxing_decoder.dart'
     if (dart.library.js_interop) '../utils/zxing_decoder_web.dart';
+import 'update_notifier.dart';
+import 'update_service.dart';
 import 'remote_profile_controller.dart';
 import 'sms_relay_service.dart';
 import 'network_status_service.dart';
+
+/// Interface names that carry mobile data. A carrier CGNAT bearer is also
+/// numbered out of 100.64/10, so the address range alone cannot separate it
+/// from the tailnet.
+const List<String> _cellularInterfacePrefixes = <String>[
+  'rmnet',
+  'ccmni',
+  'pdp',
+  'wwan',
+  'clat',
+  'v4-',
+];
+
+bool _isCellularInterface(String name) {
+  final lower = name.toLowerCase();
+  return _cellularInterfacePrefixes.any(lower.startsWith);
+}
+
+bool _looksLikeTailnetInterface(String name) {
+  final lower = name.toLowerCase();
+  return lower.startsWith('tailscale') || lower.startsWith('ts');
+}
+
+bool _isTailscaleAddress(InternetAddress address) {
+  final bytes = address.rawAddress;
+  if (address.type == InternetAddressType.IPv4) {
+    return bytes.length == 4 && bytes[0] == 100 && bytes[1] >= 64 && bytes[1] <= 127;
+  }
+  return bytes.length == 16 &&
+      bytes[0] == 0xfd &&
+      bytes[1] == 0x7a &&
+      bytes[2] == 0x11 &&
+      bytes[3] == 0x5c &&
+      bytes[4] == 0xa1 &&
+      bytes[5] == 0xe0;
+}
+
+InternetAddress? _firstTailnetAddress(
+  ({String name, List<InternetAddress> addresses}) interface,
+) {
+  for (final type in [InternetAddressType.IPv4, InternetAddressType.IPv6]) {
+    for (final address in interface.addresses) {
+      if (address.type == type && _isTailscaleAddress(address)) return address;
+    }
+  }
+  return null;
+}
+
+/// Picks the address the control API binds to.
+///
+/// A carrier CGNAT bearer also lives in 100.64/10, and binding there would
+/// publish the API on mobile data instead of the tailnet — and never be
+/// reachable over Tailscale. The interface name is what separates the two, so
+/// mobile bearers are dropped before any range check, and a named tailnet
+/// interface is preferred over an unnamed match.
+@visibleForTesting
+InternetAddress? pickTailnetAddress(
+  Iterable<({String name, List<InternetAddress> addresses})> interfaces,
+) {
+  final usable = interfaces
+      .where((interface) => !_isCellularInterface(interface.name))
+      .toList(growable: false);
+  for (final interface in usable) {
+    if (!_looksLikeTailnetInterface(interface.name)) continue;
+    final address = _firstTailnetAddress(interface);
+    if (address != null) return address;
+  }
+  for (final interface in usable) {
+    final address = _firstTailnetAddress(interface);
+    if (address != null) return address;
+  }
+  return null;
+}
+
+/// Whether an automatic resend sweep may run now.
+///
+/// The first sweep always runs; afterwards one has to wait out the interval, so
+/// a dead endpoint cannot turn the 20-second tick into a retry storm.
+@visibleForTesting
+bool shouldRunAutomaticSmsRetry({
+  required DateTime? lastAttempt,
+  required DateTime now,
+  required Duration interval,
+}) => lastAttempt == null || now.difference(lastAttempt) >= interval;
 
 class RemoteGatewayException implements Exception {
   const RemoteGatewayException(this.code);
@@ -69,6 +155,18 @@ class RemoteGatewayService {
   bool? _wasCharging;
   int _lastHealthAlertMillis = 0;
   int _maintenanceTickCount = 0;
+
+  /// One maintenance run at a time; the 20-second timer must not overlap them.
+  bool _maintenanceInFlight = false;
+
+  /// One SMS retry batch at a time, so a code is never delivered twice.
+  bool _smsRetryInFlight = false;
+  DateTime? _lastAutomaticSmsRetry;
+
+  /// How long to wait between automatic resend sweeps. An unreachable endpoint
+  /// makes every sweep take minutes, so they must not be packed together.
+  static const Duration _automaticSmsRetryInterval = Duration(minutes: 5);
+
   bool get isRunning => _running;
   String? get apiUrl => _serverAddress == null
       ? null
@@ -933,13 +1031,81 @@ class RemoteGatewayService {
 
   Future<void> _runPeriodicMaintenance() async {
     if (!_running) return;
-    _maintenanceTickCount++;
-    await _checkDeviceHealthAlerts();
-    if (_maintenanceTickCount % 3 == 0) {
-      try {
-        await _smsRelay.retryFailedHistory();
-      } catch (_) {}
-      await _checkScheduledKeepAlive();
+    // The 20-second timer must not start a second run while the first is still
+    // working, or the two drift into each other.
+    if (_maintenanceInFlight) return;
+    _maintenanceInFlight = true;
+    try {
+      _maintenanceTickCount++;
+      await _checkDeviceHealthAlerts();
+      if (_maintenanceTickCount % 3 == 0) {
+        // The retry is deliberately not awaited: one batch can take minutes
+        // when the endpoint is unreachable, and keep-alive checks must not
+        // wait for it.
+        unawaited(_retryFailedSms(automatic: true));
+        await _checkScheduledKeepAlive();
+      }
+      // The gateway runs headless, so an update the operator never hears
+      // about is an update that never gets installed. The notifier keeps this
+      // to one feed read per day.
+      unawaited(_checkForUpdateRelease());
+    } finally {
+      _maintenanceInFlight = false;
+    }
+  }
+
+  /// Tells the operator over Telegram that a newer release exists.
+  Future<void> _checkForUpdateRelease() async {
+    final UpdateInfo? update;
+    try {
+      update = await UpdateNotifier.check();
+    } catch (_) {
+      return;
+    }
+    if (update == null) return;
+    if (!UpdateNotifier.shouldNotify(update)) return;
+
+    final config = _configuration;
+    final canReach =
+        config?.telegramToken != null && config?.telegramChatId != null;
+    if (canReach) {
+      final changelog = update.changelog;
+      await _sendTelegramReply(
+        _TelegramReply(
+          '🆕 eUICC-Nexus 有新版本：${update.version} (build ${update.build})\n'
+          '${changelog == null || changelog.isEmpty ? '' : '$changelog\n'}'
+          '下载地址：${update.downloadUrl ?? update.url}',
+        ),
+      );
+    }
+    await UpdateNotifier.markNotified(update);
+  }
+
+  /// Resends the SMS that never made it out.
+  ///
+  /// Only one batch may be outstanding at a time. Two overlapping batches
+  /// deliver the same verification code twice, and each one queues behind the
+  /// other on the platform side, so the queue only ever grows.
+  Future<int> _retryFailedSms({required bool automatic, String? id}) async {
+    if (_smsRetryInFlight) return 0;
+    final now = DateTime.now();
+    if (automatic) {
+      if (!shouldRunAutomaticSmsRetry(
+        lastAttempt: _lastAutomaticSmsRetry,
+        now: now,
+        interval: _automaticSmsRetryInterval,
+      )) {
+        return 0;
+      }
+      _lastAutomaticSmsRetry = now;
+    }
+    _smsRetryInFlight = true;
+    try {
+      return await _smsRelay.retryFailedHistory(id: id);
+    } catch (_) {
+      return 0;
+    } finally {
+      _smsRetryInFlight = false;
     }
   }
 
@@ -1027,7 +1193,9 @@ class RemoteGatewayService {
   Future<void> _refreshHttpServer() async {
     if (!_running) return;
     final address = await _findTailscaleAddress();
-    if (address == _serverAddress && _server != null) return;
+    // _serverAddress holds the textual form; comparing an InternetAddress to it
+    // never matched, so the listener was torn down and rebound every refresh.
+    if (address?.address == _serverAddress && _server != null) return;
     await _server?.close(force: true);
     _server = null;
     _serverAddress = null;
@@ -1046,39 +1214,17 @@ class RemoteGatewayService {
   }
 
   Future<InternetAddress?> _findTailscaleAddress() async {
-    for (final type in [InternetAddressType.IPv4, InternetAddressType.IPv6]) {
-      try {
-        final interfaces = await NetworkInterface.list(
-          includeLoopback: false,
-          type: type,
-        );
-        for (final interface in interfaces) {
-          for (final address in interface.addresses) {
-            if (_isTailscaleAddress(address)) return address;
-          }
-        }
-      } catch (_) {
-        // A missing VPN interface is normal until Tailscale connects.
-      }
+    try {
+      final interfaces = await NetworkInterface.list(includeLoopback: false);
+      return pickTailnetAddress(
+        interfaces.map(
+          (interface) => (name: interface.name, addresses: interface.addresses),
+        ),
+      );
+    } catch (_) {
+      // A missing VPN interface is normal until Tailscale connects.
+      return null;
     }
-    return null;
-  }
-
-  bool _isTailscaleAddress(InternetAddress address) {
-    final bytes = address.rawAddress;
-    if (address.type == InternetAddressType.IPv4) {
-      return bytes.length == 4 &&
-          bytes[0] == 100 &&
-          bytes[1] >= 64 &&
-          bytes[1] <= 127;
-    }
-    return bytes.length == 16 &&
-        bytes[0] == 0xfd &&
-        bytes[1] == 0x7a &&
-        bytes[2] == 0x11 &&
-        bytes[3] == 0x5c &&
-        bytes[4] == 0xa1 &&
-        bytes[5] == 0xe0;
   }
 
   Future<void> _handleHttpRequest(HttpRequest request) async {
@@ -1167,7 +1313,7 @@ class RemoteGatewayService {
           );
         }
       } else if (request.method == 'POST' && path == '/api/v1/sms/retry') {
-        final delivered = await _smsRelay.retryFailedHistory();
+        final delivered = await _retryFailedSms(automatic: false);
         await _writeJson(
           request.response,
           HttpStatus.ok,
@@ -2025,7 +2171,7 @@ class RemoteGatewayService {
             prefixHeader: '🔀 已切换当前活动读卡器为：【${sel['name']}】(${sel['id']})',
           );
         case 'retry_sms':
-          final count = await _smsRelay.retryFailedHistory();
+          final count = await _retryFailedSms(automatic: false);
           return _TelegramReply(
             count > 0
                 ? '✅ 已成功补发 $count 条之前未送达的短信！'

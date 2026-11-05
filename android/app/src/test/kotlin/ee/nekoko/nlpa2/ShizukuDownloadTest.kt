@@ -7,6 +7,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ShizukuDownloadTest {
+    private val apkUrl = "https://github.com/RikkaApps/Shizuku/releases/download/v13.6.0/app.apk"
+
     @Test
     fun picksTheFirstApkAssetFromTheReleaseBody() {
         val body =
@@ -14,16 +16,13 @@ class ShizukuDownloadTest {
             {
               "tag_name": "v13.6.0",
               "assets": [
-                {"name": "checksums.txt", "browser_download_url": "https://example.test/sums"},
-                {"name": "shizuku-release.apk", "browser_download_url": "https://example.test/shizuku.apk"},
-                {"name": "shizuku-debug.apk", "browser_download_url": "https://example.test/debug.apk"}
+                {"name": "checksums.txt", "browser_download_url": "https://github.com/x/sums"},
+                {"name": "shizuku-release.apk", "browser_download_url": "$apkUrl"},
+                {"name": "shizuku-debug.apk", "browser_download_url": "https://github.com/x/debug.apk"}
               ]
             }
             """
-        assertEquals(
-            "https://example.test/shizuku.apk",
-            ShizukuDownload.apkUrlFromReleaseJson(body),
-        )
+        assertEquals(apkUrl, ShizukuDownload.apkUrlFromReleaseJson(body))
     }
 
     @Test
@@ -32,9 +31,24 @@ class ShizukuDownloadTest {
             """
             {
               "assets": [
-                {"name": "notes.apk.txt", "browser_download_url": "https://example.test/notes"},
-                {"name": "shizuku.apk", "browser_download_url": "http://example.test/insecure.apk"},
+                {"name": "notes.apk.txt", "browser_download_url": "https://github.com/x/notes"},
+                {"name": "shizuku.apk", "browser_download_url": "http://github.com/x/insecure.apk"},
                 {"name": "shizuku.apk", "browser_download_url": ""}
+              ]
+            }
+            """
+        assertNull(ShizukuDownload.apkUrlFromReleaseJson(body))
+    }
+
+    @Test
+    fun refusesAnApkHostedSomewhereElse() {
+        // The release body is data, not authority: a compromised or replaced
+        // asset must not be able to point the installer at an arbitrary host.
+        val body =
+            """
+            {
+              "assets": [
+                {"name": "shizuku.apk", "browser_download_url": "https://evil.example/shizuku.apk"}
               ]
             }
             """
@@ -61,10 +75,9 @@ class ShizukuDownloadTest {
 
     @Test
     fun triesTheLatestReleaseBeforeThePin() {
-        val latest = "https://example.test/v14/shizuku.apk"
         assertEquals(
-            listOf(latest, ShizukuDownload.PINNED_APK_URL),
-            ShizukuDownload.candidateUrls(latest),
+            listOf(apkUrl, ShizukuDownload.PINNED_APK_URL),
+            ShizukuDownload.candidateUrls(apkUrl),
         )
     }
 
@@ -77,19 +90,51 @@ class ShizukuDownloadTest {
     }
 
     @Test
-    fun rejectsAnInsecureUrlFromTheApi() {
-        assertEquals(
-            listOf(ShizukuDownload.PINNED_APK_URL),
-            ShizukuDownload.candidateUrls("http://example.test/shizuku.apk"),
-        )
+    fun rejectsInsecureOrForeignUrlsFromTheApi() {
+        listOf(
+            "http://github.com/shizuku.apk",
+            "https://evil.example/shizuku.apk",
+            "https://github.com.evil.example/shizuku.apk",
+            "https://user@evil.example/shizuku.apk",
+        ).forEach { url ->
+            assertEquals(
+                "candidate list for $url",
+                listOf(ShizukuDownload.PINNED_APK_URL),
+                ShizukuDownload.candidateUrls(url),
+            )
+        }
     }
 
     @Test
-    fun rejectsBodiesTooSmallToBeAnInstaller() {
-        // An HTML error page is a few kilobytes; the real APK is well over 2 MB.
+    fun acceptsTheHostsGithubActuallyRedirectsTo() {
+        listOf(
+            "https://github.com/a/b.apk",
+            "https://objects.githubusercontent.com/a/b.apk?sig=1",
+            "https://release-assets.githubusercontent.com/a/b.apk",
+        ).forEach { url ->
+            assertTrue("should accept $url", ShizukuDownload.isAllowedDownloadUrl(url))
+        }
+    }
+
+    @Test
+    fun rejectsBodiesOutsideThePlausibleApkRange() {
+        // An HTML error page is a few kilobytes; the real APK is over 2 MB.
         assertFalse(ShizukuDownload.isPlausibleApk(0))
         assertFalse(ShizukuDownload.isPlausibleApk(ShizukuDownload.MIN_APK_BYTES - 1))
         assertTrue(ShizukuDownload.isPlausibleApk(ShizukuDownload.MIN_APK_BYTES))
         assertTrue(ShizukuDownload.isPlausibleApk(2_571_773))
+        // Nothing legitimate is this large; the download aborts instead of
+        // filling the data partition.
+        assertFalse(ShizukuDownload.isPlausibleApk(ShizukuDownload.MAX_APK_BYTES + 1))
+    }
+
+    @Test
+    fun pinsTheReleaseSigner() {
+        // 32 bytes of SHA-256, lowercase hex; the value the installer compares
+        // the downloaded APK against.
+        assertEquals(64, ShizukuDownload.SIGNER_SHA256.length)
+        assertTrue(
+            ShizukuDownload.SIGNER_SHA256.all { it in '0'..'9' || it in 'a'..'f' },
+        )
     }
 }

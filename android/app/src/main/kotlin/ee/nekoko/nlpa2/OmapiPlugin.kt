@@ -1060,11 +1060,25 @@ class OmapiPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                     result.error(OMAPI_SESSION_CORRUPTED, CORRUPTED_MESSAGE, poisonDetails(info))
                 }
             }
+            // A close that fails is exactly the case this class treats as fatal everywhere
+            // else: the Channel is marked closed on the Java side while the framework may
+            // still retain it, which is the state that leaves com.android.se spinning. Report
+            // it as success and the next checkpointCleanIdle() clears the durable ARMED marker,
+            // so a later process death re-enters OMAPI on top of a channel nobody can close.
             try {
                 channel.close()
                 readerChannels[readerName]?.remove(DEFAULT_EUICC_AID, channel)
-            } catch (_: Exception) {
-                readerChannels[readerName]?.remove(DEFAULT_EUICC_AID, channel)
+            } catch (closeError: Exception) {
+                val info =
+                        cleanupCoordinator.markPoisoned(
+                                readerName,
+                                "Channel.close() failed after a transmit: " +
+                                        (closeError.message ?: closeError.javaClass.simpleName),
+                                operationMayHaveSucceeded = true,
+                        )
+                return runOnUiThread {
+                    result.error(OMAPI_SESSION_CORRUPTED, CORRUPTED_MESSAGE, poisonDetails(info))
+                }
             }
             runOnUiThread { result.success(responseHex) }
         } catch (e: Exception) {

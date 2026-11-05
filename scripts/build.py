@@ -193,12 +193,18 @@ def main():
         if build_android:
             flavor = "lineage" if variant == "lineage" else "m"
             channel_args = ["--dart-define=APP_UPDATE_CHANNEL=lineage"] if variant == "lineage" else []
+            # This project publishes its own feed; upstream's default would
+            # advertise upstream releases, which are a different package.
+            feed_args = [
+                "--dart-define=APP_UPDATE_FEED_URL="
+                "https://raw.githubusercontent.com/MIY-Y/eUICC-Nexus/main/update_feed.json"
+            ]
             # Android
             run_cmd([
                 "flutter", "build", "apk", "--release", "--split-per-abi", "--flavor", flavor,
                 "--target-platform", "android-arm64,android-arm", "--dart-define=APP_VARIANT=multi", "--dart-define=ENABLE_ZXING=false",
                 "--no-pub", "--obfuscate", "--split-debug-info=release/symbols"
-            ] + channel_args)
+            ] + channel_args + feed_args)
             apk_src = f"build/app/outputs/flutter-apk/app-arm64-v8a-{flavor}-release.apk"
             package = "ee.nekoko.nlpa2.multi.lineage" if variant == "lineage" else "ee.nekoko.nlpa2.multi"
             apk_dest = f"{release_dir}/{package}-{v_filename}-arm64-v8a.apk"

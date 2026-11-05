@@ -71,17 +71,35 @@ class DiagnosticsSnapshot {
 }
 
 class DiagnosticsService {
-  /// Regular expressions used to mask sensitive data before copying.
-  static final RegExp _iccidRegex = RegExp(r'\b(89\d{2})[0-9a-fA-F]{11,16}([0-9a-fA-F]{4})\b');
-  static final RegExp _eidRegex = RegExp(r'\b(89\d{2})[0-9a-fA-F]{24}(\w{4})\b');
+  /// Identifier runs that start with 89 are ICCIDs or EIDs. They are matched
+  /// without a word boundary so the value is still caught when it sits inside a
+  /// longer hex blob — an APDU value of tag 5A, for instance, has hex on both
+  /// sides and `\b` never fires there.
+  static final RegExp _idRunRegex = RegExp(
+    r'(89[0-9]{2})[0-9a-fA-F]{10,30}([0-9a-fA-F]{4})',
+  );
   static final RegExp _botTokenRegex = RegExp(r'\b\d{8,11}:[A-Za-z0-9_-]{35}\b');
 
-  /// Redacts sensitive ICCIDs, EIDs, and bot tokens from diagnostic logs.
+  /// Credentials embedded in a URL, as the remote-card settings store them
+  /// (`http://:<password>@host:port`).
+  static final RegExp _urlCredentialRegex = RegExp(r'://[^/\s@]+@');
+
+  /// Bluetooth reader addresses identify hardware; keep the vendor prefix only.
+  static final RegExp _macRegex = RegExp(
+    r'\b([0-9A-Fa-f]{2})(?::[0-9A-Fa-f]{2}){5}\b',
+  );
+
+  /// Redacts identifiers, credentials and tokens before a report is shared.
+  ///
+  /// This is applied to the whole report as a final pass, not just to the log
+  /// tail: reader ids, telephony strings and exception messages carry the same
+  /// material and used to reach the clipboard untouched.
   static String redact(String input) {
     var s = input;
-    s = s.replaceAllMapped(_iccidRegex, (m) => '${m[1]}...${m[2]} [ICCID masked]');
-    s = s.replaceAllMapped(_eidRegex, (m) => '${m[1]}...${m[2]} [EID masked]');
+    s = s.replaceAllMapped(_urlCredentialRegex, (_) => '://***@');
+    s = s.replaceAllMapped(_idRunRegex, (m) => '${m[1]}...${m[2]} [ID masked]');
     s = s.replaceAllMapped(_botTokenRegex, (_) => '[BOT_TOKEN_REDACTED]');
+    s = s.replaceAllMapped(_macRegex, (m) => '${m[1]}:**:**:**:**:**');
     return s;
   }
 
@@ -443,7 +461,9 @@ class DiagnosticsService {
     }
     buf.writeln('================================================================');
 
-    return buf.toString();
+    // Final pass over every section, not just the log tail: reader ids,
+    // telephony strings and exception messages carry the same material.
+    return redact(buf.toString());
   }
 
   /// Collects a live diagnostic report snapshot asynchronously.

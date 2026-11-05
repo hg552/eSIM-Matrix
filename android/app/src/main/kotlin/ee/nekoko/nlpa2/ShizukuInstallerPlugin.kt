@@ -179,7 +179,17 @@ class ShizukuInstallerPlugin :
             try {
                 fetch(url, target)
                 if (!ShizukuDownload.isPlausibleApk(target.length())) {
-                    throw IllegalStateException("downloaded file is too small to be an APK")
+                    throw IllegalStateException(
+                        "downloaded body is ${target.length()} bytes, not an APK",
+                    )
+                }
+                // Size is not identity: anyone who can steer the download can serve a
+                // large file. Only Rikka's signer makes these bytes Shizuku.
+                val signer = signerSha256(ctx, target)
+                if (signer != ShizukuDownload.SIGNER_SHA256) {
+                    throw IllegalStateException(
+                        "downloaded APK is signed by $signer, not Shizuku's release key",
+                    )
                 }
                 Log.i(TAG, "downloaded Shizuku from $url (${target.length()} bytes)")
                 return target
@@ -191,6 +201,36 @@ class ShizukuInstallerPlugin :
         }
         throw lastError ?: IllegalStateException("no download source available")
     }
+
+    /** Certificate SHA-256 of the APK's first signer, or null when unreadable. */
+    private fun signerSha256(ctx: Context, apk: File): String? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return null
+        return try {
+            val info =
+                @Suppress("DEPRECATION")
+                ctx.packageManager
+                    .getPackageArchiveInfo(
+                        apk.absolutePath,
+                        android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES,
+                    ) ?: return null
+            val signing = info.signingInfo ?: return null
+            val signers =
+                if (signing.hasMultipleSigners()) {
+                    signing.apkContentsSigners
+                } else {
+                    signing.signingCertificateHistory
+                }
+            signers?.firstOrNull()?.toByteArray()?.let { digest("SHA-256", it) }
+        } catch (e: Throwable) {
+            Log.w(TAG, "could not read the downloaded APK's signers", e)
+            null
+        }
+    }
+
+    private fun digest(algorithm: String, bytes: ByteArray): String =
+        java.security.MessageDigest.getInstance(algorithm)
+            .digest(bytes)
+            .joinToString("") { "%02x".format(it) }
 
     private fun candidateUrls(): List<String> {
         val latest =
@@ -222,21 +262,58 @@ class ShizukuInstallerPlugin :
     }
 
     private fun fetch(url: String, target: File) {
-        val connection =
-            (URL(url).openConnection() as HttpURLConnection).apply {
-                instanceFollowRedirects = true
-                connectTimeout = 15000
-                readTimeout = 60000
-                setRequestProperty("User-Agent", "eUICC-Nexus")
+        var current = url
+        var hops = 0
+        while (true) {
+            // Applied to every hop: instanceFollowRedirects would carry the first
+            // request's HTTPS decision over to a host we never agreed to talk to.
+            if (!ShizukuDownload.isAllowedDownloadUrl(current)) {
+                throw IllegalStateException("refusing to download from $current")
             }
-        try {
-            val code = connection.responseCode
-            if (code !in 200..299) throw IllegalStateException("HTTP $code from $url")
-            connection.inputStream.use { input ->
-                target.outputStream().use { output -> input.copyTo(output, 64 * 1024) }
+            val connection =
+                (URL(current).openConnection() as HttpURLConnection).apply {
+                    instanceFollowRedirects = false
+                    connectTimeout = 15000
+                    readTimeout = 60000
+                    setRequestProperty("User-Agent", "eUICC-Nexus")
+                }
+            try {
+                val code = connection.responseCode
+                if (code in 300..399) {
+                    val location =
+                        connection.getHeaderField("Location")
+                            ?: throw IllegalStateException("HTTP $code without a Location")
+                    current = URL(URL(current), location).toString()
+                    if (++hops > MAX_REDIRECTS) {
+                        throw IllegalStateException("more than $MAX_REDIRECTS redirects")
+                    }
+                    continue
+                }
+                if (code !in 200..299) throw IllegalStateException("HTTP $code from $current")
+
+                val announced = connection.contentLengthLong
+                if (announced > ShizukuDownload.MAX_APK_BYTES) {
+                    throw IllegalStateException("server announced $announced bytes")
+                }
+                var written = 0L
+                connection.inputStream.use { input ->
+                    target.outputStream().use { output ->
+                        val buffer = ByteArray(64 * 1024)
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            written += read
+                            if (written > ShizukuDownload.MAX_APK_BYTES) {
+                                throw IllegalStateException("download exceeded the size cap")
+                            }
+                            output.write(buffer, 0, read)
+                        }
+                    }
+                }
+                return
+            } finally {
+                connection.disconnect()
             }
-        } finally {
-            connection.disconnect()
         }
     }
 
@@ -248,6 +325,9 @@ class ShizukuInstallerPlugin :
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 if (activity == null) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
+        // An implicit VIEW plus the read grant would let any app that claims this MIME
+        // type take delivery of the download and show its own installer.
+        systemInstaller(ctx)?.let { intent.setPackage(it) }
         try {
             (activity ?: ctx).startActivity(intent)
             return "installer_opened"
@@ -255,6 +335,17 @@ class ShizukuInstallerPlugin :
             throw IllegalStateException("no package installer answered", e)
         }
     }
+
+    /** The platform installer, when this build has one under a known name. */
+    private fun systemInstaller(ctx: Context): String? =
+        INSTALLER_PACKAGES.firstOrNull { pkg ->
+            try {
+                ctx.packageManager.getPackageInfo(pkg, 0)
+                true
+            } catch (_: Throwable) {
+                false
+            }
+        }
 
     private fun allowInstall(ctx: Context, result: MethodChannel.Result) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
@@ -297,5 +388,14 @@ class ShizukuInstallerPlugin :
         private const val TAG = "ShizukuInstaller"
         private const val CHANNEL = "ee.nekoko.shizuku_installer"
         private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
+
+        /** The platform package installers, most specific first. */
+        private val INSTALLER_PACKAGES =
+            listOf(
+                "com.google.android.packageinstaller",
+                "com.android.packageinstaller",
+            )
+
+        private const val MAX_REDIRECTS = 5
     }
 }

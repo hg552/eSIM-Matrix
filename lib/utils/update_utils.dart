@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../services/update_notifier.dart';
 import '../services/update_service.dart';
 import '../l10n/app_localizations.dart';
 import '../config.dart';
@@ -66,7 +69,12 @@ Future<void> showUpdateDialog(BuildContext context, UpdateInfo update) async {
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(context),
+          onPressed: () {
+            // "Later" is a dismissal: this version must not be offered again
+            // until a newer one shows up.
+            unawaited(UpdateNotifier.markDismissed(update));
+            Navigator.pop(context);
+          },
           child: Text(l10n.later),
         ),
         ElevatedButton(
