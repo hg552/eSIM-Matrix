@@ -1,8 +1,9 @@
 import 'dart:async';
-
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../l10n/app_localizations.dart';
 import '../services/sms_relay_service.dart';
@@ -22,6 +23,7 @@ class _SmsRelayPageState extends State<SmsRelayPage>
   final TextEditingController _endpointController = TextEditingController();
   final TextEditingController _tokenController = TextEditingController();
   final TextEditingController _chatIdController = TextEditingController();
+  final TextEditingController _cfChannelController = TextEditingController();
   final TextEditingController _activationCodeController = TextEditingController();
   final TextEditingController _confirmationCodeController = TextEditingController();
 
@@ -35,6 +37,8 @@ class _SmsRelayPageState extends State<SmsRelayPage>
   String _mode = SmsRelayMode.telegram;
   bool _webhookTokenConfigured = false;
   bool _telegramTokenConfigured = false;
+  bool _cfTokenConfigured = false;
+  bool _testingCfWorker = false;
   bool _discoveringChat = false;
   bool _testingTelegram = false;
   int? _lastDeliveryAtMillis;
@@ -62,6 +66,7 @@ class _SmsRelayPageState extends State<SmsRelayPage>
     WidgetsBinding.instance.removeObserver(this);
     _endpointController.dispose();
     _tokenController.dispose();
+    _cfChannelController.dispose();
     _chatIdController.dispose();
     _activationCodeController.dispose();
     _confirmationCodeController.dispose();
@@ -117,13 +122,19 @@ class _SmsRelayPageState extends State<SmsRelayPage>
       if (!mounted) return;
       _endpointController.text = configuration.endpoint ?? '';
       _chatIdController.text = configuration.telegramChatId ?? '';
+      _cfChannelController.text = configuration.cfChannelId ?? '';
+      _cfTokenConfigured = configuration.cfTokenConfigured;
       _savedChatId = configuration.telegramChatId;
       setState(() {
         _available = true;
         _permissionGranted = permissionGranted;
         _enabled = configuration.enabled;
         _mode = configuration.mode;
-        _tokenConfigured = configuration.tokenConfigured;
+        _tokenConfigured = switch (configuration.mode) {
+          SmsRelayMode.telegram => configuration.telegramTokenConfigured,
+          SmsRelayMode.cfWorker => configuration.cfTokenConfigured,
+          _ => configuration.webhookTokenConfigured,
+        };
         _webhookTokenConfigured = configuration.webhookTokenConfigured;
         _telegramTokenConfigured = configuration.telegramTokenConfigured;
         _lastDeliveryAtMillis = configuration.lastDeliveryAtMillis;
@@ -186,15 +197,19 @@ class _SmsRelayPageState extends State<SmsRelayPage>
 
   Future<void> _persistEnabledToggle(bool enabled) async {
     final isTelegram = _mode == SmsRelayMode.telegram;
+    final isCf = _mode == SmsRelayMode.cfWorker;
     final endpoint = _endpointController.text.trim();
     final telegramChatId = _chatIdController.text.trim();
+    final cfChannelId = _cfChannelController.text.trim();
     if (isTelegram && telegramChatId.isEmpty) return;
-    if (!isTelegram && !SmsRelayService.isSecureEndpoint(endpoint)) return;
+    if (isCf && (cfChannelId.isEmpty || !SmsRelayService.isSecureEndpoint(endpoint))) return;
+    if (!isTelegram && !isCf && !SmsRelayService.isSecureEndpoint(endpoint)) return;
     try {
       await _service.saveConfiguration(
         mode: _mode,
         endpoint: isTelegram ? null : endpoint,
         telegramChatId: isTelegram ? telegramChatId : null,
+        cfChannelId: isCf ? cfChannelId : null,
         token: _tokenController.text,
         enabled: enabled,
       );
@@ -208,9 +223,19 @@ class _SmsRelayPageState extends State<SmsRelayPage>
     _tokenController.clear();
     setState(() {
       _mode = mode;
-      _tokenConfigured = mode == SmsRelayMode.telegram
-          ? _telegramTokenConfigured
-          : _webhookTokenConfigured;
+      _tokenConfigured = switch (mode) {
+        SmsRelayMode.telegram => _telegramTokenConfigured,
+        SmsRelayMode.cfWorker => _cfTokenConfigured,
+        _ => _webhookTokenConfigured,
+      };
+      if (mode == SmsRelayMode.cfWorker) {
+        if (_endpointController.text.trim().isEmpty) {
+          _endpointController.text = 'https://nexus-relay.nexus-relay.workers.dev';
+        }
+        if (_cfChannelController.text.trim().isEmpty) {
+          _generateRandomChannel();
+        }
+      }
       _error = null;
     });
   }
@@ -286,11 +311,62 @@ class _SmsRelayPageState extends State<SmsRelayPage>
     }
   }
 
+  void _generateRandomChannel() {
+    final random = Random.secure();
+    final hex = List.generate(8, (_) => random.nextInt(16).toRadixString(16)).join();
+    setState(() {
+      _cfChannelController.text = 'ch_$hex';
+    });
+  }
+
+  void _generateRandomSecret() {
+    final random = Random.secure();
+    final hex = List.generate(64, (_) => random.nextInt(16).toRadixString(16)).join();
+    setState(() {
+      _tokenController.text = hex;
+    });
+  }
+
+  String _getLiveWebUrl() {
+    final endpoint = _endpointController.text.trim().replaceAll(RegExp(r'/+$'), '');
+    final channel = _cfChannelController.text.trim();
+    final key = _tokenController.text.trim();
+    final base = endpoint.isNotEmpty ? endpoint : 'https://nexus-relay.nexus-relay.workers.dev';
+    if (key.isNotEmpty) {
+      return '$base/?channel=$channel#key=$key';
+    }
+    return '$base/?channel=$channel';
+  }
+
+  Future<void> _testCfWorker() async {
+    setState(() {
+      _testingCfWorker = true;
+      _error = null;
+    });
+    try {
+      await _service.testCfWorker();
+      final history = await _service.loadHistory();
+      if (mounted) {
+        setState(() => _history = history);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('CF Worker 加密隧道测试消息已送达！')),
+        );
+      }
+    } on PlatformException catch (error) {
+      if (mounted) setState(() => _error = _platformError(error.code));
+    } catch (_) {
+      if (mounted) setState(() => _error = 'network_error');
+    } finally {
+      if (mounted) setState(() => _testingCfWorker = false);
+    }
+  }
+
   String _platformError(String code) => switch (code) {
     'invalid_endpoint' || 'https_required' => 'invalid_endpoint',
-    'token_required' || 'telegram_config_required' => 'token_required',
+    'token_required' || 'telegram_config_required' || 'cf_config_required' => 'token_required',
     'invalid_chat_id' => 'invalid_chat_id',
-    'private_chat_not_found' => 'private_chat_not_found',
+    'invalid_channel_id' => 'invalid_channel_id',
+    'invalid_cf_secret' => 'invalid_cf_secret',
     'permission_required' => 'permission_required',
     'invalid_bot_token' ||
     'telegram_api_error' ||
@@ -306,14 +382,20 @@ class _SmsRelayPageState extends State<SmsRelayPage>
   Future<void> _save() async {
     final l10n = AppLocalizations.of(context)!;
     final isTelegram = _mode == SmsRelayMode.telegram;
+    final isCf = _mode == SmsRelayMode.cfWorker;
     final endpoint = _endpointController.text.trim();
     final telegramChatId = _chatIdController.text.trim();
+    final cfChannelId = _cfChannelController.text.trim();
     if (!isTelegram && !SmsRelayService.isSecureEndpoint(endpoint)) {
       setState(() => _error = 'invalid_endpoint');
       return;
     }
     if (isTelegram && telegramChatId.isEmpty) {
       setState(() => _error = 'invalid_chat_id');
+      return;
+    }
+    if (isCf && cfChannelId.isEmpty) {
+      setState(() => _error = 'invalid_channel_id');
       return;
     }
     if (isTelegram && telegramChatId != _savedChatId) {
@@ -343,6 +425,7 @@ class _SmsRelayPageState extends State<SmsRelayPage>
         mode: _mode,
         endpoint: isTelegram ? null : endpoint,
         telegramChatId: isTelegram ? telegramChatId : null,
+        cfChannelId: isCf ? cfChannelId : null,
         token: _tokenController.text,
         enabled: _enabled,
       );
@@ -404,7 +487,11 @@ class _SmsRelayPageState extends State<SmsRelayPage>
     'token_required' =>
       _mode == SmsRelayMode.telegram
           ? l10n.smsRelayBotTokenRequired
-          : l10n.smsRelayTokenRequired,
+          : _mode == SmsRelayMode.cfWorker
+              ? '请输入或生成 256 位隧道加密密钥'
+              : l10n.smsRelayTokenRequired,
+    'invalid_channel_id' => '请输入有效的通道 ID（4~64位字母数字或下划线）',
+    'invalid_cf_secret' => '隧道密钥格式无效，请提供 64 位 Hex 或 32 字节 Base64 密钥',
     'invalid_chat_id' => l10n.smsRelayInvalidPrivateChat,
     'private_chat_not_found' => l10n.smsRelayPrivateChatNotFound,
     'telegram_request_failed' => l10n.smsRelayTelegramRequestFailed,
@@ -766,7 +853,7 @@ class _SmsRelayPageState extends State<SmsRelayPage>
                   ];
                   final originText = originParts.isEmpty ? '本机接收' : originParts.join(' · ');
                   final statusText = item.delivered
-                      ? '已转发 (${item.mode == SmsRelayMode.telegram ? "Telegram" : "Webhook"})'
+                      ? '已转发 (${item.mode == SmsRelayMode.telegram ? "Telegram" : item.mode == SmsRelayMode.cfWorker ? "CF Worker" : "Webhook"})'
                       : '失败 (${item.errorCode ?? "error"})';
                   return Container(
                     padding: const EdgeInsets.all(12),
@@ -1252,6 +1339,10 @@ class _SmsRelayPageState extends State<SmsRelayPage>
                           value: SmsRelayMode.telegram,
                           child: Text(l10n.smsRelayTelegram),
                         ),
+                        const DropdownMenuItem(
+                          value: SmsRelayMode.cfWorker,
+                          child: Text('Cloudflare 加密隧道 (Web接码)'),
+                        ),
                       ],
                       onChanged: _saving ? null : _onModeChanged,
                     ),
@@ -1268,6 +1359,61 @@ class _SmsRelayPageState extends State<SmsRelayPage>
                           border: const OutlineInputBorder(),
                         ),
                       ),
+                    ] else if (_mode == SmsRelayMode.cfWorker) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.25),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3)),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(Icons.shield_outlined, color: Theme.of(context).colorScheme.primary, size: 20),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                '端到端零知识加密：短信由手机本地 AES-256-GCM 加密，CF Worker 仅作盲中继。任意电脑/手机浏览器打开专属看板链接即可解密接码。',
+                                style: TextStyle(fontSize: 12.5, height: 1.45, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _endpointController,
+                        keyboardType: TextInputType.url,
+                        autocorrect: false,
+                        decoration: const InputDecoration(
+                          labelText: 'Cloudflare Worker 节点地址',
+                          hintText: 'https://nexus-relay.nexus-relay.workers.dev',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _cfChannelController,
+                              decoration: const InputDecoration(
+                                labelText: '通道 ID (Channel ID)',
+                                hintText: '如: ch_abc12345',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          FilledButton.tonal(
+                            onPressed: _saving ? null : _generateRandomChannel,
+                            child: const Text('随机生成'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
                     ] else ...[
                       const SizedBox(height: 12),
                       Align(
@@ -1276,21 +1422,36 @@ class _SmsRelayPageState extends State<SmsRelayPage>
                       ),
                       const SizedBox(height: 12),
                     ],
-                    TextField(
-                      controller: _tokenController,
-                      obscureText: true,
-                      autocorrect: false,
-                      enableSuggestions: false,
-                      textInputAction: TextInputAction.done,
-                      decoration: InputDecoration(
-                        labelText: _mode == SmsRelayMode.telegram
-                            ? l10n.smsRelayBotToken
-                            : l10n.smsRelayToken,
-                        hintText: _tokenConfigured
-                            ? l10n.smsRelayTokenHint
-                            : null,
-                        border: const OutlineInputBorder(),
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _tokenController,
+                            obscureText: true,
+                            autocorrect: false,
+                            enableSuggestions: false,
+                            textInputAction: TextInputAction.done,
+                            decoration: InputDecoration(
+                              labelText: _mode == SmsRelayMode.telegram
+                                  ? l10n.smsRelayBotToken
+                                  : _mode == SmsRelayMode.cfWorker
+                                      ? '隧道加密密钥 (AES-256 Secret Key)'
+                                      : l10n.smsRelayToken,
+                              hintText: _tokenConfigured
+                                  ? (_mode == SmsRelayMode.cfWorker ? '已加密保存，留空保持原密钥' : l10n.smsRelayTokenHint)
+                                  : null,
+                              border: const OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                        if (_mode == SmsRelayMode.cfWorker) ...[
+                          const SizedBox(width: 8),
+                          FilledButton.tonal(
+                            onPressed: _saving ? null : _generateRandomSecret,
+                            child: const Text('生成密钥'),
+                          ),
+                        ],
+                      ],
                     ),
                     if (_tokenConfigured) ...[
                       const SizedBox(height: 8),
@@ -1299,8 +1460,73 @@ class _SmsRelayPageState extends State<SmsRelayPage>
                         child: Text(
                           _mode == SmsRelayMode.telegram
                               ? l10n.smsRelayTelegramTokenStored
-                              : l10n.smsRelayTokenStored,
+                              : _mode == SmsRelayMode.cfWorker
+                                  ? '隧道加密密钥已使用 Android Keystore 硬件安全模块加密存储。'
+                                  : l10n.smsRelayTokenStored,
                           style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
+                    ],
+                    if (_mode == SmsRelayMode.cfWorker) ...[
+                      const SizedBox(height: 14),
+                      Card(
+                        color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        child: Padding(
+                          padding: const EdgeInsets.all(14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(Icons.link_rounded, color: Theme.of(context).colorScheme.primary, size: 20),
+                                  const SizedBox(width: 6),
+                                  Text('网页专属接码看板链接', style: TextStyle(fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface)),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                _getLiveWebUrl(),
+                                style: TextStyle(fontSize: 12, fontFamily: 'monospace', color: Theme.of(context).colorScheme.primary),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 12),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  FilledButton.icon(
+                                    icon: const Icon(Icons.copy_rounded, size: 16),
+                                    label: const Text('复制链接'),
+                                    onPressed: () {
+                                      Clipboard.setData(ClipboardData(text: _getLiveWebUrl()));
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('接码看板专属链接已复制到剪贴板！')),
+                                      );
+                                    },
+                                  ),
+                                  OutlinedButton.icon(
+                                    icon: const Icon(Icons.open_in_browser_rounded, size: 16),
+                                    label: const Text('打开看板'),
+                                    onPressed: () async {
+                                      final uri = Uri.parse(_getLiveWebUrl());
+                                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                                    },
+                                  ),
+                                  OutlinedButton.icon(
+                                    icon: _testingCfWorker
+                                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                                        : const Icon(Icons.send_rounded, size: 16),
+                                    label: const Text('测试通道'),
+                                    onPressed: _saving || _testingCfWorker || !_cfTokenConfigured
+                                        ? null
+                                        : _testCfWorker,
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ],

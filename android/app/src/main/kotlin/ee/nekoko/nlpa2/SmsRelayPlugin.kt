@@ -74,6 +74,7 @@ class SmsRelayPlugin :
             "saveConfiguration" -> saveConfiguration(call, result)
             "discoverTelegramChat" -> discoverTelegramChat(call, result)
             "testTelegram" -> testTelegram(result)
+            "testCfWorker" -> testCfWorker(result)
             "clearToken" -> clearToken(result)
             "isGatewayAvailable" -> result.success(isGatewayAvailable())
             "loadGatewayConfiguration" -> loadGatewayConfiguration(result)
@@ -201,6 +202,8 @@ class SmsRelayPlugin :
                     "enabled" to settings.enabled,
                     "endpoint" to settings.endpoint,
                     "telegramChatId" to settings.telegramChatId,
+                    "cfChannelId" to settings.cfChannelId,
+                    "cfTokenConfigured" to !settings.cfToken.isNullOrBlank(),
                     "tokenConfigured" to !settings.token.isNullOrBlank(),
                     "webhookTokenConfigured" to !settings.webhookToken.isNullOrBlank(),
                     "telegramTokenConfigured" to !settings.telegramToken.isNullOrBlank(),
@@ -221,10 +224,11 @@ class SmsRelayPlugin :
         val mode = call.argument<String>("mode") ?: SmsRelayMode.WEBHOOK
         val endpoint = call.argument<String>("endpoint")
         val telegramChatId = call.argument<String>("telegramChatId")
+        val cfChannelId = call.argument<String>("cfChannelId")
         val token = call.argument<String>("token")
         val enabled = call.argument<Boolean>("enabled") ?: false
         try {
-            SmsRelayStore.save(appContext!!, mode, endpoint, telegramChatId, token, enabled)
+            SmsRelayStore.save(appContext!!, mode, endpoint, telegramChatId, cfChannelId, token, enabled)
             if (isGatewayAvailable()) {
                 val updatedSms = SmsRelayStore.load(appContext!!)
                 val hasTelegramControl = !updatedSms.telegramToken.isNullOrBlank() &&
@@ -243,6 +247,8 @@ class SmsRelayPlugin :
                     "https_required",
                     "invalid_mode",
                     "invalid_chat_id",
+                    "invalid_channel_id",
+                    "invalid_cf_secret",
                     "token_required",
                     "token_too_large",
                 )
@@ -497,6 +503,60 @@ class SmsRelayPlugin :
             }
         } catch (_: Exception) {
             result.error("telegram_unavailable", "Telegram request could not be queued", null)
+        }
+    }
+
+    private fun testCfWorker(result: MethodChannel.Result) {
+        if (!isAvailable()) {
+            result.error("unsupported", "SMS relay is not included in this app variant", null)
+            return
+        }
+        val settings = try {
+            SmsRelayStore.load(appContext!!)
+        } catch (_: Exception) {
+            result.error("settings_unavailable", "SMS relay settings could not be read", null)
+            return
+        }
+        val endpoint = settings.endpoint
+        val channelId = settings.cfChannelId
+        val token = settings.cfToken
+        if (endpoint.isNullOrBlank() || channelId.isNullOrBlank() || token.isNullOrBlank()) {
+            result.error("cf_config_required", "Save Worker endpoint, Channel ID and Secret Key first", null)
+            return
+        }
+
+        try {
+            networkExecutor.execute {
+                try {
+                    val err = SmsRelayCfWorkerClient.post(
+                        endpoint,
+                        channelId,
+                        token,
+                        "eUICC-Nexus 验证通道",
+                        "【eUICC-Nexus】您正在验证 Cloudflare 加密隧道接码看板，验证码为：888666，打通即享零知识安全接码。",
+                        SmsRelayOrigin(1, 0, "TestCarrier"),
+                        System.currentTimeMillis(),
+                    )
+                    if (err == null) {
+                        SmsRelayStore.recordDelivery(
+                            appContext!!,
+                            delivered = true,
+                            sender = "eUICC-Nexus 验证通道",
+                            body = "这是一条来自 eUICC-Nexus 的 CF Worker 隧道测试消息。",
+                            mode = SmsRelayMode.CF_WORKER,
+                        )
+                        Handler(Looper.getMainLooper()).post { result.success(true) }
+                    } else {
+                        Handler(Looper.getMainLooper()).post { result.error(err, err, null) }
+                    }
+                } catch (e: Exception) {
+                    Handler(Looper.getMainLooper()).post {
+                        result.error("network_error", e.message, null)
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            result.error("queue_unavailable", "Request could not be queued", null)
         }
     }
 

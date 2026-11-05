@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 class SmsRelayMode {
   static const String webhook = 'webhook';
   static const String telegram = 'telegram';
+  static const String cfWorker = 'cf_worker';
 }
 
 class SmsRelayConfiguration {
@@ -11,13 +12,14 @@ class SmsRelayConfiguration {
     required this.enabled,
     required this.endpoint,
     required this.telegramChatId,
+    required this.cfChannelId,
     required this.tokenConfigured,
     required this.webhookTokenConfigured,
     required this.telegramTokenConfigured,
+    required this.cfTokenConfigured,
     required this.lastDeliveryAtMillis,
     required this.lastDeliveryError,
   });
-
   factory SmsRelayConfiguration.fromPlatform(Object? value) {
     if (value is! Map) {
       return const SmsRelayConfiguration(
@@ -25,9 +27,11 @@ class SmsRelayConfiguration {
         enabled: false,
         endpoint: null,
         telegramChatId: null,
+        cfChannelId: null,
         tokenConfigured: false,
         webhookTokenConfigured: false,
         telegramTokenConfigured: false,
+        cfTokenConfigured: false,
         lastDeliveryAtMillis: null,
         lastDeliveryError: null,
       );
@@ -35,18 +39,24 @@ class SmsRelayConfiguration {
     final map = Map<Object?, Object?>.from(value);
     final endpoint = map['endpoint'];
     final telegramChatId = map['telegramChatId'];
+    final cfChannelId = map['cfChannelId'];
     final lastDeliveryAtMillis = map['lastDeliveryAtMillis'];
     final lastDeliveryError = map['lastDeliveryError'];
+    final mode = switch (map['mode']) {
+      SmsRelayMode.telegram => SmsRelayMode.telegram,
+      SmsRelayMode.cfWorker => SmsRelayMode.cfWorker,
+      _ => SmsRelayMode.webhook,
+    };
     return SmsRelayConfiguration(
-      mode: map['mode'] == SmsRelayMode.telegram
-          ? SmsRelayMode.telegram
-          : SmsRelayMode.webhook,
+      mode: mode,
       enabled: map['enabled'] == true,
       endpoint: endpoint is String ? endpoint : null,
       telegramChatId: telegramChatId is String ? telegramChatId : null,
+      cfChannelId: cfChannelId is String ? cfChannelId : null,
       tokenConfigured: map['tokenConfigured'] == true,
       webhookTokenConfigured: map['webhookTokenConfigured'] == true,
       telegramTokenConfigured: map['telegramTokenConfigured'] == true,
+      cfTokenConfigured: map['cfTokenConfigured'] == true,
       lastDeliveryAtMillis: lastDeliveryAtMillis is int
           ? lastDeliveryAtMillis
           : null,
@@ -58,9 +68,11 @@ class SmsRelayConfiguration {
   final bool enabled;
   final String? endpoint;
   final String? telegramChatId;
+  final String? cfChannelId;
   final bool tokenConfigured;
   final bool webhookTokenConfigured;
   final bool telegramTokenConfigured;
+  final bool cfTokenConfigured;
   final int? lastDeliveryAtMillis;
   final String? lastDeliveryError;
 }
@@ -235,6 +247,7 @@ class SmsRelayService {
     required String mode,
     required String? endpoint,
     required String? telegramChatId,
+    String? cfChannelId,
     required String token,
     required bool enabled,
   }) async {
@@ -242,6 +255,7 @@ class SmsRelayService {
       'mode': mode,
       'endpoint': endpoint,
       'telegramChatId': telegramChatId,
+      'cfChannelId': cfChannelId,
       'token': token,
       'enabled': enabled,
     });
@@ -260,6 +274,10 @@ class SmsRelayService {
     await _channel.invokeMethod<bool>('testTelegram');
   }
 
+  Future<void> testCfWorker() async {
+    await _channel.invokeMethod<bool>('testCfWorker');
+  }
+
   Future<void> clearToken() => _channel.invokeMethod<void>('clearToken');
   Future<bool> isGatewayAvailable() async =>
       await _channel.invokeMethod<bool>('isGatewayAvailable') ?? false;
@@ -271,6 +289,8 @@ class SmsRelayService {
 
   Future<void> saveGatewayToken(String token) =>
       _channel.invokeMethod<void>('saveGatewayToken', {'token': token});
+  Future<void> updateGatewayNotification(String text) =>
+      _channel.invokeMethod<void>('updateGatewayNotification', {'text': text});
 
   Future<bool> canScheduleExactAlarms() async =>
       await _channel.invokeMethod<bool>('canScheduleExactAlarms') ?? false;

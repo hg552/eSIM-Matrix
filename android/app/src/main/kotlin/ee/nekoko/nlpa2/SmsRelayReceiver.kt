@@ -94,6 +94,11 @@ internal class SmsRelayReceiver : BroadcastReceiver() {
                             TelegramBotClient.sendSms(token, chatId, sender, body, origin)
                             null
                         }
+                        SmsRelayMode.CF_WORKER -> {
+                            val endpoint = settings.endpoint ?: return "endpoint_missing"
+                            val channelId = settings.cfChannelId ?: return "channel_missing"
+                            SmsRelayCfWorkerClient.post(endpoint, channelId, token, sender, body, origin, receivedAtMillis)
+                        }
                         else -> return "invalid_mode"
                     }
                     if (errorCode == null) return null
@@ -319,6 +324,20 @@ internal class CallRelayReceiver : BroadcastReceiver() {
                             val code = SmsRelayWebhookClient.post(endpoint, settings.token, payload)
                             if (code in 200..299) null else "http_$code"
                         }
+                        SmsRelayMode.CF_WORKER -> {
+                            val endpoint = settings.endpoint ?: "endpoint_missing"
+                            val channelId = settings.cfChannelId ?: "channel_missing"
+                            val token = settings.token ?: ""
+                            SmsRelayCfWorkerClient.post(
+                                endpoint,
+                                channelId,
+                                token,
+                                "📞 来电: $callerDisplay",
+                                "收到呼入电话振铃提醒 (${origin.label})",
+                                origin,
+                                now,
+                            )
+                        }
                         else -> "invalid_mode"
                     }
                 } catch (e: TelegramBotException) {
@@ -376,5 +395,98 @@ internal object SmsRelayWebhookClient {
         } finally {
             connection.disconnect()
         }
+    }
+}
+
+internal object SmsRelayCfWorkerClient {
+    fun post(
+        endpoint: String,
+        channelId: String,
+        secretKey: String,
+        sender: String,
+        body: String,
+        origin: SmsRelayOrigin,
+        receivedAtMillis: Long,
+    ): String? {
+        val keyBytes = parseSecretKeyBytes(secretKey) ?: return "invalid_key"
+        val tokenHex = sha256Hex(keyBytes)
+
+        val plainJson = JSONObject()
+            .put("id", UUID.randomUUID().toString())
+            .put("sender", sender)
+            .put("body", body)
+            .put("otp", TelegramBotClient.extractOtp(body) ?: JSONObject.NULL)
+            .put("receivedAtEpochMillis", receivedAtMillis)
+            .put("timestamp", receivedAtMillis)
+            .put("slot", origin.slotIndex?.let { it + 1 } ?: JSONObject.NULL)
+            .put("carrier", origin.carrierName ?: JSONObject.NULL)
+            .toString()
+
+        val (ivBase64, cipherBase64) = encryptAesGcm(plainJson, keyBytes)
+
+        val payload = JSONObject()
+            .put("iv", ivBase64)
+            .put("ciphertext", cipherBase64)
+            .put("timestamp", receivedAtMillis)
+            .toString()
+
+        val normalized = SmsRelayEndpointValidator.normalize(endpoint).trimEnd('/')
+        val pushUrl = "$normalized/api/push"
+        val connection = (URL(pushUrl).openConnection() as? HttpsURLConnection) ?: return "https_required"
+        return try {
+            connection.requestMethod = "POST"
+            connection.connectTimeout = 8000
+            connection.readTimeout = 8000
+            connection.doOutput = true
+            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            connection.setRequestProperty("X-Channel-Id", channelId)
+            connection.setRequestProperty("X-Channel-Token", tokenHex)
+
+            val bytes = payload.toByteArray(StandardCharsets.UTF_8)
+            connection.setFixedLengthStreamingMode(bytes.size)
+            connection.outputStream.use { out ->
+                out.write(bytes)
+            }
+            val responseCode = connection.responseCode
+            if (responseCode in 200..299) null else "http_$responseCode"
+        } catch (e: Exception) {
+            "network_error"
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    fun parseSecretKeyBytes(secret: String): ByteArray? {
+        val clean = secret.trim()
+        if (clean.matches(Regex("^[a-fA-F0-9]{64}$"))) {
+            val bytes = ByteArray(32)
+            for (i in 0 until 32) {
+                bytes[i] = clean.substring(i * 2, i * 2 + 2).toInt(16).toByte()
+            }
+            return bytes
+        }
+        return runCatching {
+            val decoded = android.util.Base64.decode(clean, android.util.Base64.DEFAULT)
+            if (decoded.size == 32) decoded else null
+        }.getOrNull()
+    }
+
+    fun sha256Hex(bytes: ByteArray): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256").digest(bytes)
+        return digest.joinToString("") { "%02x".format(it) }
+    }
+
+    private fun encryptAesGcm(plainText: String, keyBytes: ByteArray): Pair<String, String> {
+        val iv = ByteArray(12)
+        java.security.SecureRandom().nextBytes(iv)
+        val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+        val keySpec = javax.crypto.spec.SecretKeySpec(keyBytes, "AES")
+        val gcmSpec = javax.crypto.spec.GCMParameterSpec(128, iv)
+        cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, keySpec, gcmSpec)
+        val cipherBytes = cipher.doFinal(plainText.toByteArray(StandardCharsets.UTF_8))
+        return Pair(
+            android.util.Base64.encodeToString(iv, android.util.Base64.NO_WRAP),
+            android.util.Base64.encodeToString(cipherBytes, android.util.Base64.NO_WRAP),
+        )
     }
 }

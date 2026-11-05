@@ -19,6 +19,7 @@ import java.util.UUID
 internal object SmsRelayMode {
     const val WEBHOOK = "webhook"
     const val TELEGRAM = "telegram"
+    const val CF_WORKER = "cf_worker"
 }
 
 internal data class SmsRelaySettings(
@@ -26,9 +27,11 @@ internal data class SmsRelaySettings(
     val enabled: Boolean,
     val endpoint: String?,
     val telegramChatId: String?,
+    val cfChannelId: String?,
     val token: String?,
     val webhookToken: String?,
     val telegramToken: String?,
+    val cfToken: String?,
     val lastDeliveryAtMillis: Long?,
     val lastDeliveryError: String?,
 )
@@ -77,6 +80,9 @@ internal object SmsRelayStore {
     private const val KEY_WEBHOOK_TOKEN_CIPHERTEXT = "token_ciphertext"
     private const val KEY_TELEGRAM_TOKEN_IV = "telegram_token_iv"
     private const val KEY_TELEGRAM_TOKEN_CIPHERTEXT = "telegram_token_ciphertext"
+    private const val KEY_CF_CHANNEL_ID = "cf_channel_id"
+    private const val KEY_CF_TOKEN_IV = "cf_token_iv"
+    private const val KEY_CF_TOKEN_CIPHERTEXT = "cf_token_ciphertext"
     private const val KEY_LAST_DELIVERY = "last_delivery_at"
     private const val KEY_LAST_ERROR = "last_delivery_error"
     private const val MAX_TOKEN_BYTES = 4096
@@ -91,15 +97,16 @@ internal object SmsRelayStore {
     @Synchronized
     fun load(context: Context): SmsRelaySettings {
         val preferences = preferences(context)
-        val mode = if (preferences.getString(KEY_MODE, SmsRelayMode.TELEGRAM) == SmsRelayMode.WEBHOOK) {
-            SmsRelayMode.WEBHOOK
-        } else {
-            SmsRelayMode.TELEGRAM
+        val mode = when (preferences.getString(KEY_MODE, null)) {
+            SmsRelayMode.WEBHOOK -> SmsRelayMode.WEBHOOK
+            SmsRelayMode.CF_WORKER -> SmsRelayMode.CF_WORKER
+            else -> SmsRelayMode.TELEGRAM
         }
         val endpoint = preferences.getString(KEY_ENDPOINT, null)
         val telegramChatId = preferences.getString(KEY_TELEGRAM_CHAT_ID, null)?.let { raw ->
             runCatching { TelegramChatIdValidator.normalize(raw) }.getOrNull()
         }
+        val cfChannelId = preferences.getString(KEY_CF_CHANNEL_ID, null)?.trim()?.takeIf(String::isNotEmpty)
         val webhookToken = try {
             decryptToken(
                 preferences.getString(KEY_WEBHOOK_TOKEN_IV, null),
@@ -116,10 +123,23 @@ internal object SmsRelayStore {
         } catch (_: Exception) {
             null
         }
+        val cfToken = try {
+            decryptToken(
+                preferences.getString(KEY_CF_TOKEN_IV, null),
+                preferences.getString(KEY_CF_TOKEN_CIPHERTEXT, null),
+            )
+        } catch (_: Exception) {
+            null
+        }
 
-        val activeToken = if (mode == SmsRelayMode.TELEGRAM) telegramToken else webhookToken
+        val activeToken = when (mode) {
+            SmsRelayMode.TELEGRAM -> telegramToken
+            SmsRelayMode.CF_WORKER -> cfToken
+            else -> webhookToken
+        }
         val configured = when (mode) {
             SmsRelayMode.TELEGRAM -> !telegramChatId.isNullOrBlank() && !telegramToken.isNullOrBlank()
+            SmsRelayMode.CF_WORKER -> !endpoint.isNullOrBlank() && !cfChannelId.isNullOrBlank() && !cfToken.isNullOrBlank()
             else -> !endpoint.isNullOrBlank() && !webhookToken.isNullOrBlank()
         }
         val enabled = preferences.getBoolean(KEY_ENABLED, false) && configured
@@ -133,9 +153,11 @@ internal object SmsRelayStore {
             enabled = enabled,
             endpoint = endpoint,
             telegramChatId = telegramChatId,
+            cfChannelId = cfChannelId,
             token = activeToken,
             webhookToken = webhookToken,
             telegramToken = telegramToken,
+            cfToken = cfToken,
             lastDeliveryAtMillis = lastDelivery,
             lastDeliveryError = preferences.getString(KEY_LAST_ERROR, null),
         )
@@ -147,14 +169,15 @@ internal object SmsRelayStore {
         rawMode: String,
         rawEndpoint: String?,
         rawTelegramChatId: String?,
+        rawCfChannelId: String? = null,
         rawToken: String?,
         enabled: Boolean,
     ) {
         check(Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) { "secure_storage_unavailable" }
         val mode = rawMode.trim()
-        require(mode == SmsRelayMode.WEBHOOK || mode == SmsRelayMode.TELEGRAM) { "invalid_mode" }
+        require(mode == SmsRelayMode.WEBHOOK || mode == SmsRelayMode.TELEGRAM || mode == SmsRelayMode.CF_WORKER) { "invalid_mode" }
         val existing = load(context)
-        val endpoint = if (mode == SmsRelayMode.WEBHOOK) {
+        val endpoint = if (mode == SmsRelayMode.WEBHOOK || mode == SmsRelayMode.CF_WORKER) {
             val value = rawEndpoint?.trim()?.takeIf(String::isNotEmpty) ?: existing.endpoint.orEmpty()
             SmsRelayEndpointValidator.normalize(value)
         } else {
@@ -167,11 +190,19 @@ internal object SmsRelayStore {
         } else {
             existing.telegramChatId
         }
-        val suppliedToken = rawToken?.trim()?.takeIf(String::isNotEmpty)
-        val token = suppliedToken ?: if (mode == SmsRelayMode.TELEGRAM) {
-            existing.telegramToken
+        val cfChannelId = if (mode == SmsRelayMode.CF_WORKER) {
+            val value = rawCfChannelId?.trim()?.takeIf(String::isNotEmpty)
+                ?: existing.cfChannelId.orEmpty()
+            require(value.matches(Regex("^[a-zA-Z0-9_-]{4,64}$"))) { "invalid_channel_id" }
+            value
         } else {
-            existing.webhookToken
+            existing.cfChannelId
+        }
+        val suppliedToken = rawToken?.trim()?.takeIf(String::isNotEmpty)
+        val token = suppliedToken ?: when (mode) {
+            SmsRelayMode.TELEGRAM -> existing.telegramToken
+            SmsRelayMode.CF_WORKER -> existing.cfToken
+            else -> existing.webhookToken
         }
         require(!token.isNullOrBlank()) { "token_required" }
         require(token.toByteArray(Charsets.UTF_8).size <= MAX_TOKEN_BYTES) { "token_too_large" }
@@ -180,16 +211,19 @@ internal object SmsRelayStore {
             .putString(KEY_MODE, mode)
             .putBoolean(KEY_ENABLED, enabled)
             .remove(KEY_LAST_ERROR)
-        if (mode == SmsRelayMode.WEBHOOK) {
+        if (mode == SmsRelayMode.CF_WORKER) {
+            editor.putString(KEY_ENDPOINT, endpoint)
+            editor.putString(KEY_CF_CHANNEL_ID, cfChannelId)
+        } else if (mode == SmsRelayMode.WEBHOOK) {
             editor.putString(KEY_ENDPOINT, endpoint)
         } else {
             editor.putString(KEY_TELEGRAM_CHAT_ID, telegramChatId)
         }
         if (suppliedToken != null) {
-            if (mode == SmsRelayMode.TELEGRAM) {
-                encryptToken(editor, suppliedToken, KEY_TELEGRAM_TOKEN_IV, KEY_TELEGRAM_TOKEN_CIPHERTEXT)
-            } else {
-                encryptToken(editor, suppliedToken, KEY_WEBHOOK_TOKEN_IV, KEY_WEBHOOK_TOKEN_CIPHERTEXT)
+            when (mode) {
+                SmsRelayMode.TELEGRAM -> encryptToken(editor, suppliedToken, KEY_TELEGRAM_TOKEN_IV, KEY_TELEGRAM_TOKEN_CIPHERTEXT)
+                SmsRelayMode.CF_WORKER -> encryptToken(editor, suppliedToken, KEY_CF_TOKEN_IV, KEY_CF_TOKEN_CIPHERTEXT)
+                else -> encryptToken(editor, suppliedToken, KEY_WEBHOOK_TOKEN_IV, KEY_WEBHOOK_TOKEN_CIPHERTEXT)
             }
         }
         check(editor.commit()) { "storage_error" }
