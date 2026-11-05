@@ -2,6 +2,18 @@
   "android": {
     "multi": [
       {
+        "version": "1.3.5",
+        "build": 137,
+        "url": "https://github.com/MIY-Y/eUICC-Nexus/releases/tag/v1.3.5",
+        "download_url": "https://github.com/MIY-Y/eUICC-Nexus/releases/download/v1.3.5/eUICC-Nexus-v1.3.5.apk",
+        "changelog": "🆕 eUICC-Nexus 1.3.5（build 137）\n\n本次更新把「发布提醒」从只发给主人，扩展为推送给所有与机器人对话过的会话：\n\n• 公告广播：新增会话登记簿，凡是给机器人发过消息的私聊都会被登记。登记只授予「收公告」的资格，不授予任何控制权——远程指令仍然只认配置里的那个 chat id。\n• 自动发布提醒：网关发现新版本时，会把版本号、更新日志与下载地址推送给登记簿里的每一个会话，而不只是主人。\n• /announce 指令：带参数广播指定内容；不带参数时自动取更新源里最新的一版（含更新日志）广播，一条命令即可完成一次发布公告。\n• 主人会话自动入册：网关启动时会把配置的 chat id 写进登记簿，老用户升级后无需先给机器人发消息就能收到公告。\n• 网关常驻通知会显示最近一次公告的结果（已推送几个会话），不用打开 App 也能确认。\n\n同时包含 v1.3.4 的全部内容，其中最重要的是：**v1.3.4 之前的所有安装包都缺少 Rust 原生库，QRTR / SE HAL 读卡器完全不可用**（v1.3.4 起由构建脚本强制校验）。",
+        "signatures": [
+          "C47350C7BA682B34A3E584A0D58463EA42B1AD73",
+          "D1C0F48B370E74D4EA4770ED4C3CD70A3198D31F",
+          "65D0571854AFEC519A90F92D7C5D8CF8148DA373"
+        ]
+      },
+      {
         "version": "1.3.4",
         "build": 134,
         "url": "https://github.com/MIY-Y/eUICC-Nexus/releases/tag/v1.3.4",
