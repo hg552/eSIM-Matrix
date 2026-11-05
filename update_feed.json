@@ -2,6 +2,18 @@
   "android": {
     "multi": [
       {
+        "version": "1.3.5",
+        "build": 135,
+        "url": "https://github.com/MIY-Y/eUICC-Nexus/releases/tag/v1.3.5",
+        "download_url": "https://github.com/MIY-Y/eUICC-Nexus/releases/download/v1.3.5/eUICC-Nexus-v1.3.5.apk",
+        "changelog": "端到端验证：检查更新弹窗、下载按钮与「以后再说」记忆。",
+        "signatures": [
+          "C47350C7BA682B34A3E584A0D58463EA42B1AD73",
+          "D1C0F48B370E74D4EA4770ED4C3CD70A3198D31F",
+          "65D0571854AFEC519A90F92D7C5D8CF8148DA373"
+        ]
+      },
+      {
         "version": "1.3.4",
         "build": 134,
         "url": "https://github.com/MIY-Y/eUICC-Nexus/releases/tag/v1.3.4",
