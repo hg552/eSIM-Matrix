@@ -587,6 +587,59 @@ class AppSettings extends ChangeNotifier {
     }
     await setProxyCustomRules(rules);
   }
+  // Mock Location Settings (Virtual Location / GPS Spoofing)
+  bool _mockLocationLinkageEnabled = false;
+  bool get mockLocationLinkageEnabled => _mockLocationLinkageEnabled;
+
+  String _mockLocationMode = 'system'; // 'system' or 'shizuku'
+  String get mockLocationMode => _mockLocationMode;
+
+  bool _mockLocationAutoRestore = true;
+  bool get mockLocationAutoRestore => _mockLocationAutoRestore;
+
+  Map<String, String> _mockLocationCustomRules = {};
+  Map<String, String> get mockLocationCustomRules => Map.unmodifiable(_mockLocationCustomRules);
+
+  Future<void> setMockLocationLinkageEnabled(bool value) async {
+    _mockLocationLinkageEnabled = value;
+    await _prefs?.setBool('mockLocationLinkageEnabled', value);
+    notifyListeners();
+  }
+
+  Future<void> setMockLocationMode(String value) async {
+    _mockLocationMode = value;
+    await _prefs?.setString('mockLocationMode', value);
+    notifyListeners();
+  }
+
+  Future<void> setMockLocationAutoRestore(bool value) async {
+    _mockLocationAutoRestore = value;
+    await _prefs?.setBool('mockLocationAutoRestore', value);
+    notifyListeners();
+  }
+
+  Future<void> setMockLocationCustomRules(Map<String, String> rules) async {
+    _mockLocationCustomRules = Map<String, String>.from(rules);
+    await _prefs?.setString('mockLocationCustomRules', jsonEncode(_mockLocationCustomRules));
+    notifyListeners();
+  }
+
+  String? mockLocationForIccid(String iccid) {
+    final value = _mockLocationCustomRules[iccid]?.trim();
+    return value == null || value.isEmpty ? null : value;
+  }
+
+  Future<void> setMockLocationForIccid(String iccid, String? locationStr) async {
+    final rules = Map<String, String>.from(_mockLocationCustomRules);
+    final clean = locationStr?.trim();
+    if (clean == null || clean.isEmpty) {
+      rules.remove(iccid);
+    } else {
+      rules[iccid] = clean;
+    }
+    await setMockLocationCustomRules(rules);
+  }
+
 
   // Roaming data safeguard: a foreign keep-alive eSIM can burn chargeable
   // megabytes the moment the baseband registers, so the switch state machine
@@ -883,6 +936,18 @@ class AppSettings extends ChangeNotifier {
         final decoded = jsonDecode(rulesJson);
         if (decoded is Map) {
           _proxyCustomRules = decoded.map((k, v) => MapEntry(k.toString(), v.toString()));
+        }
+      } catch (_) {}
+    }
+    _mockLocationLinkageEnabled = _prefs?.getBool('mockLocationLinkageEnabled') ?? false;
+    _mockLocationMode = _prefs?.getString('mockLocationMode') ?? 'system';
+    _mockLocationAutoRestore = _prefs?.getBool('mockLocationAutoRestore') ?? true;
+    final locRulesJson = _prefs?.getString('mockLocationCustomRules');
+    if (locRulesJson != null) {
+      try {
+        final decoded = jsonDecode(locRulesJson);
+        if (decoded is Map) {
+          _mockLocationCustomRules = decoded.map((k, v) => MapEntry(k.toString(), v.toString()));
         }
       } catch (_) {}
     }

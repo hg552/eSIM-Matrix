@@ -2871,6 +2871,11 @@ class _ProfilesScreenState extends State<ProfilesScreen>
               .applyProxyForProfile(iccid: p.iccid, alias: p.displayName)
               .catchError((Object _) => null),
         );
+        unawaited(
+          RemoteGatewayService.instance
+              .applyLocationForProfile(iccid: p.iccid, alias: p.displayName, mcc: p.mcc)
+              .catchError((Object _) => false),
+        );
       }
     } catch (e) {
       if (isOmapiSessionCorruptedError(e)) {

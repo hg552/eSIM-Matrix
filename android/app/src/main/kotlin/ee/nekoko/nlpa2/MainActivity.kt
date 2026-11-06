@@ -18,5 +18,6 @@ class MainActivity : FlutterActivity() {
         flutterEngine.plugins.add(CertificatePlugin())
         flutterEngine.plugins.add(QrtrPlugin())
         flutterEngine.plugins.add(AdbBridgePlugin())
+        flutterEngine.plugins.add(MockLocationPlugin())
     }
 }

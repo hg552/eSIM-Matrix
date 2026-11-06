@@ -1,4 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     package="ee.nekoko.nlpa2">
 
     <uses-permission android:name="android.permission.INTERNET" />
@@ -13,6 +14,8 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- Rootless Mock Location permission (requires enabling in Developer Options: Select mock location app) -->
+    <uses-permission android:name="android.permission.ACCESS_MOCK_LOCATION" tools:ignore="MockLocation" />
     <!-- Used only to hand a user-requested Shizuku download to the system
          installer, which shows its own confirmation. The app installs nothing
          silently and carries no APK of its own. -->

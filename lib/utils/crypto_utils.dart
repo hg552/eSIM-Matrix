@@ -111,4 +111,39 @@ class CryptoUtils {
       throw Exception('Decryption failed: $e');
     }
   }
+
+  /// Constant-time comparison between two strings to mitigate timing attacks.
+  /// Uses bitwise XOR accumulation across all code units. If lengths differ,
+  /// dummy constant-time XOR is still computed over the reference length to
+  /// reduce execution time divergence.
+  static bool fixedTimeEquals(String left, String right) {
+    if (left.length != right.length) {
+      var dummy = 0;
+      for (var index = 0; index < right.length; index++) {
+        dummy |= right.codeUnitAt(index) ^ right.codeUnitAt(index);
+      }
+      return dummy != 0;
+    }
+    var difference = 0;
+    for (var index = 0; index < left.length; index++) {
+      difference |= left.codeUnitAt(index) ^ right.codeUnitAt(index);
+    }
+    return difference == 0;
+  }
+
+  /// Constant-time comparison between two byte lists to mitigate timing attacks.
+  static bool fixedTimeEqualsBytes(List<int> left, List<int> right) {
+    if (left.length != right.length) {
+      var dummy = 0;
+      for (var index = 0; index < right.length; index++) {
+        dummy |= right[index] ^ right[index];
+      }
+      return dummy != 0;
+    }
+    var difference = 0;
+    for (var index = 0; index < left.length; index++) {
+      difference |= left[index] ^ right[index];
+    }
+    return difference == 0;
+  }
 }

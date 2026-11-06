@@ -10,6 +10,7 @@ import '../services/proxy_linkage_service.dart';
 import '../services/sms_relay_service.dart';
 import '../services/remote_gateway_service.dart';
 import '../settings/app_settings.dart';
+import '../services/mock_location_service.dart';
 import '../widgets/styled_header_scaffold.dart';
 
 class SmsRelayPage extends StatefulWidget {
@@ -65,6 +66,10 @@ class _SmsRelayPageState extends State<SmsRelayPage>
   bool _guardRestoreOnRevert = true;
   bool _proxyEnabled = false;
   bool _proxyAutoRestore = true;
+  bool _mockLocationEnabled = false;
+  String _mockLocationMode = 'system';
+  bool _mockLocationAutoRestore = true;
+  String? _mockLocationTestStatus;
   bool _linkageBusy = false;
   String? _linkageStatus;
   bool _linkageStatusIsError = false;
@@ -86,6 +91,9 @@ class _SmsRelayPageState extends State<SmsRelayPage>
     _guardRestoreOnRevert = settings.dataGuardRestoreOnRevert;
     _proxyEnabled = settings.proxyLinkageEnabled;
     _proxyAutoRestore = settings.proxyAutoRestore;
+    _mockLocationEnabled = settings.mockLocationLinkageEnabled;
+    _mockLocationMode = settings.mockLocationMode;
+    _mockLocationAutoRestore = settings.mockLocationAutoRestore;
   }
 
   Future<void> _saveLinkage() async {
@@ -99,6 +107,9 @@ class _SmsRelayPageState extends State<SmsRelayPage>
       await settings.setDataGuardRestoreOnRevert(_guardRestoreOnRevert);
       await settings.setProxyLinkageEnabled(_proxyEnabled);
       await settings.setProxyAutoRestore(_proxyAutoRestore);
+      await settings.setMockLocationLinkageEnabled(_mockLocationEnabled);
+      await settings.setMockLocationMode(_mockLocationMode);
+      await settings.setMockLocationAutoRestore(_mockLocationAutoRestore);
       await settings.setProxyControllerUrl(_proxyUrlController.text.trim());
       await settings.setProxyTargetGroup(
         _proxyGroupController.text.trim().isEmpty
@@ -119,6 +130,57 @@ class _SmsRelayPageState extends State<SmsRelayPage>
       setState(() {
         _linkageStatus = '保存失败：$error';
         _linkageStatusIsError = true;
+      });
+    } finally {
+      if (mounted) setState(() => _linkageBusy = false);
+    }
+  }
+
+  Future<void> _testMockLocation() async {
+    setState(() {
+      _linkageBusy = true;
+      _mockLocationTestStatus = '正在检查免Root虚拟定位权限...';
+    });
+    try {
+      const service = MockLocationService();
+      final status = await service.getStatus();
+      final isMockApp = status.isMockApp;
+      final isShizuku = status.isShizukuAvailable;
+
+      if (_mockLocationMode == 'shizuku' && isShizuku) {
+        await service.grantMockViaShizuku();
+        final success = await service.startMockLocation(
+          latitude: 22.3193,
+          longitude: 114.1694,
+          mode: 'shizuku',
+        );
+        setState(() {
+          _mockLocationTestStatus = success
+              ? '✅ Shizuku 免Root注入成功！已将GPS定位注入为：香港尖沙咀 (22.3193, 114.1694)'
+              : '❌ Shizuku 注入失败，请检查 Shizuku 授权状态';
+        });
+      } else if (isMockApp) {
+        final success = await service.startMockLocation(
+          latitude: 22.3193,
+          longitude: 114.1694,
+          mode: 'system',
+        );
+        setState(() {
+          _mockLocationTestStatus = success
+              ? '✅ 系统模拟位置注入成功！已将GPS定位注入为：香港尖沙咀 (22.3193, 114.1694)'
+              : '❌ 模拟位置注入失败';
+        });
+      } else {
+        setState(() {
+          _mockLocationTestStatus =
+              '⚠️ 尚未获得模拟位置权限：\n'
+              '• 系统模拟位置：请在「开发者选项 → 选择模拟位置信息应用」中选择本项目\n'
+              '• Shizuku 模式：请先启动并授权 Shizuku';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _mockLocationTestStatus = '测试失败：$e';
       });
     } finally {
       if (mounted) setState(() => _linkageBusy = false);
@@ -997,6 +1059,76 @@ class _SmsRelayPageState extends State<SmsRelayPage>
                 isDense: true,
               ),
             ),
+            const Divider(height: 24),
+            Row(
+              children: [
+                Icon(Icons.location_on_outlined, color: theme.colorScheme.primary, size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  '虚拟定位联动 (免 Root / Shizuku)',
+                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('启用免Root虚拟定位联动'),
+              subtitle: Text(
+                '切卡时自动将系统 GPS 经纬度注入至目标国家（如香港 ClubSim ➔ 尖沙咀，美国 Saily ➔ 洛杉矶）',
+                style: TextStyle(fontSize: 12, color: subtle),
+              ),
+              value: _mockLocationEnabled,
+              onChanged: _linkageBusy ? null : (v) => setState(() => _mockLocationEnabled = v),
+            ),
+            if (_mockLocationEnabled) ...[
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('回滚时停止模拟定位'),
+                value: _mockLocationAutoRestore,
+                onChanged: _linkageBusy ? null : (v) => setState(() => _mockLocationAutoRestore = v),
+              ),
+              const SizedBox(height: 8),
+              DropdownButtonFormField<String>(
+                value: _mockLocationMode,
+                decoration: InputDecoration(
+                  labelText: '定位伪装方案',
+                  border: fieldBorder,
+                  isDense: true,
+                ),
+                items: const [
+                  DropdownMenuItem(
+                    value: 'system',
+                    child: Text('系统模拟位置 (开发者选项，免Root)'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'shizuku',
+                    child: Text('Shizuku 底层 FusedLocation (免Root框架)'),
+                  ),
+                ],
+                onChanged: _linkageBusy ? null : (v) => setState(() => _mockLocationMode = v ?? 'system'),
+              ),
+              const SizedBox(height: 8),
+              if (_mockLocationTestStatus != null) ...[
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    _mockLocationTestStatus!,
+                    style: TextStyle(fontSize: 12, color: theme.colorScheme.primary),
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
+              OutlinedButton.icon(
+                onPressed: _linkageBusy ? null : _testMockLocation,
+                icon: const Icon(Icons.my_location, size: 16),
+                label: const Text('检查权限并测试注入'),
+              ),
+            ],
             if (_linkageStatus != null) ...[
               const SizedBox(height: 12),
               Text(

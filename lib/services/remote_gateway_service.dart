@@ -20,6 +20,8 @@ import '../settings/app_settings.dart';
 import 'cellular_data_guardian.dart';
 import 'proxy_linkage_service.dart';
 import 'proxy_mapping_resolver.dart';
+import 'mock_location_service.dart';
+import 'location_mapping_resolver.dart';
 
 /// Distinguishes "argument not supplied" from an explicit null in copyWith.
 const Object _absent = Object();
@@ -175,6 +177,10 @@ class RemoteGatewayService {
   ProxySnapshot? _proxySnapshot;
   String? _lastLinkedProxyNode;
   DataGuardResult? _lastGuardResult;
+  final MockLocationService _mockLocationService = const MockLocationService();
+  final LocationMappingResolver _locationResolver = const LocationMappingResolver();
+  LocationCoordinate? _lastMockLocation;
+  LocationCoordinate? get lastMockLocation => _lastMockLocation;
 
   /// One maintenance run at a time; the 20-second timer must not overlap them.
   bool _maintenanceInFlight = false;
@@ -883,18 +889,26 @@ class RemoteGatewayService {
   }
   Future<void> _triggerProxySwitch(RemoteProfileEntry target) async {
     final settings = AppSettings();
-    if (!settings.proxyLinkageEnabled) return;
-    final group = settings.proxyTargetGroup;
-    _proxyLinkage.updateConfig(
-      controllerUrl: settings.proxyControllerUrl,
-      secret: settings.proxySecret,
-    );
-    try {
-      // Keep the pre-switch node so _revert can put it back.
-      _proxySnapshot ??= await _proxyLinkage.snapshot(group);
-      await applyProxyForProfile(iccid: target.iccid, alias: target.alias);
-    } catch (e) {
-      _log.warning('Proxy linkage switch failed: $e');
+    if (settings.proxyLinkageEnabled) {
+      final group = settings.proxyTargetGroup;
+      _proxyLinkage.updateConfig(
+        controllerUrl: settings.proxyControllerUrl,
+        secret: settings.proxySecret,
+      );
+      try {
+        // Keep the pre-switch node so _revert can put it back.
+        _proxySnapshot ??= await _proxyLinkage.snapshot(group);
+        await applyProxyForProfile(iccid: target.iccid, alias: target.alias);
+      } catch (e) {
+        _log.warning('Proxy linkage switch failed: $e');
+      }
+    }
+    if (settings.mockLocationLinkageEnabled) {
+      try {
+        await applyLocationForProfile(iccid: target.iccid, alias: target.alias);
+      } catch (e) {
+        _log.warning('Mock location switch failed: $e');
+      }
     }
   }
 
@@ -954,6 +968,57 @@ class RemoteGatewayService {
     } catch (e) {
       _log.warning('Proxy linkage switch exception: $e');
       return null;
+    }
+  }
+
+  /// Injects rootless mock location for one eSIM profile.
+  Future<bool> applyLocationForProfile({
+    required String iccid,
+    String? alias,
+    String? mcc,
+  }) async {
+    final settings = AppSettings();
+    if (!settings.mockLocationLinkageEnabled) return false;
+    try {
+      final match = _locationResolver.resolveLocation(
+        iccid: iccid,
+        alias: alias,
+        mcc: mcc,
+        customRules: settings.mockLocationCustomRules,
+      );
+      if (!match.matched || match.coordinate == null) {
+        _log.info('Mock location: no coordinate matched for $iccid');
+        return false;
+      }
+      final coord = match.coordinate!;
+      final success = await _mockLocationService.startMockLocation(
+        latitude: coord.latitude,
+        longitude: coord.longitude,
+        mode: settings.mockLocationMode,
+      );
+      if (success) {
+        _lastMockLocation = coord;
+        _log.info(
+          'Mock location: injected [${coord.cityName}] (${coord.latitude}, ${coord.longitude}) '
+          'for $iccid (mode=${settings.mockLocationMode}, confidence=${match.confidence})',
+        );
+      }
+      return success;
+    } catch (e) {
+      _log.warning('Mock location linkage failed: $e');
+      return false;
+    }
+  }
+
+  Future<bool> stopMockLocation() async {
+    try {
+      final res = await _mockLocationService.stopMockLocation();
+      _lastMockLocation = null;
+      _log.info('Mock location stopped');
+      return res;
+    } catch (e) {
+      _log.warning('Stop mock location failed: $e');
+      return false;
     }
   }
 

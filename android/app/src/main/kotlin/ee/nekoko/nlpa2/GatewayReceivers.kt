@@ -4,20 +4,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 
-internal class GatewayBootReceiver : BroadcastReceiver() {
-    override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != Intent.ACTION_BOOT_COMPLETED || BuildConfig.FLAVOR != "m") return
-        val shouldStart = runCatching {
-            val gateway = SmsRelayStore.loadGateway(context)
-            val sms = SmsRelayStore.load(context)
-            gateway.enabled || sms.enabled ||
-                (!sms.telegramToken.isNullOrBlank() && !sms.telegramChatId.isNullOrBlank())
-        }.getOrDefault(false)
-        if (shouldStart) {
-            RemoteGatewayForegroundService.start(context, RemoteGatewayForegroundService.ACTION_RECOVER)
-        }
-    }
-}
 
 internal class GatewayAlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
