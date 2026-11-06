@@ -72,13 +72,13 @@ android {
         create("nexus") {
             dimension = "version"
             applicationId = "ee.nekoko.nlpa2.nexus"
-            manifestPlaceholders["appName"] = "eUICC-Nexus"
+            manifestPlaceholders["appName"] = "eSIM-Matrix"
             signingConfig = signingConfigs.getByName("community")
         }
         create("m") {
             dimension = "version"
             applicationId = "ee.nekoko.nlpa2.multi"
-            manifestPlaceholders["appName"] = "eUICC-Nexus"
+            manifestPlaceholders["appName"] = "eSIM-Matrix"
             signingConfig = signingConfigs.getByName("esim9")
         }
 

@@ -1,11 +1,11 @@
 {
-    "name": "NekokoLPA 2",
-    "short_name": "NekokoLPA 2",
+    "name": "eSIM-Matrix",
+    "short_name": "eSIM-Matrix",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "NekokoLPA 2, now works with Web Bluetooth",
+    "description": "eSIM-Matrix: Remote Multi-Profile eSIM Gateway with 3D Overseas Environment Linkage",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

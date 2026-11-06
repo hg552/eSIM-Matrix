@@ -1,6 +1,21 @@
 # Changelog (更新日志)
 
-All notable changes to **eUICC-Nexus** (and upstream NekokoLPA2) are documented in this file.
+All notable changes to **eSIM-Matrix** (formerly eUICC-Nexus, based on upstream NekokoLPA2) are documented in this file.
+
+## [v1.4.0] - 2026-11-07 (`1.4.0+140`)
+
+### 🚀 品牌升级 (Rebranding)
+- **全面升级更名为「eSIM-Matrix」**：由内而外统一更新应用名称、Web 控制台品牌（`<title>eSIM-Matrix Web Console</title>`）与 Telegram 主控台文案。
+- **LINUX DO 社区深度共建**：全面加入 **[LINUX DO 社区 (https://linux.do)](https://linux.do)** 友军链接与徽标，并开源发布专为 LINUX DO 社区打造的完整食用指南。
+
+### ✨ 核心功能：3D 异构海外环境联动 (3D Overseas Environment Linkage)
+- **维度一 · SIM 身份与物理基带域**：支持秒级 Profile 热切换、5 分钟临时切卡接码自动回滚，以及 CS 语音域与 PS 数据域双域搜网状态机，精准识别 4G/5G 漫游注册。
+- **维度二 · FlClash / Mihomo 代理节点秒级联动**：切卡时自动调用本地控制器将代理节点切换为目标国节点，支持 ICCID 专属定向绑定与 Emoji/ISO/区号智能推导，内置**漫游流量卫士 (Data Guard)** 锁死蜂窝网络。
+- **维度三 · 虚拟定位模板与精准坐标自输入**：内置全球主流 17 个重点城市模板（香港尖沙咀/中环、美国洛杉矶/时代广场/硅谷、爱沙尼亚塔林、日本新宿/心斋桥等），支持手动输入任意经纬度与保存为常用模板，卡片激活时即时注入。
+
+### 🛠️ 性能与健壮性
+- **eUICC 芯片闪存自洁**：切卡后静默秒清通知，杜绝 NVRAM 闪存耗尽与死锁；
+- **多证书合一**：单个安装包内置 ESTKme + 9eSIM + SakuraSIM 三套证书链，出厂免写 ARA-M 开箱即用。
 
 ## [v1.3.5] - 2026-11-05 (`1.3.5+137`)
 

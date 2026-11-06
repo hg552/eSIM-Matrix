@@ -1613,6 +1613,7 @@ class RemoteGatewayService {
         request.response
           ..statusCode = HttpStatus.ok
           ..headers.contentType = ContentType.html
+          ..headers.set(HttpHeaders.serverHeader, 'eSIM-Matrix Gateway')
           ..headers.set(HttpHeaders.cacheControlHeader, 'no-store')
           ..write(_dashboardHtml);
         await request.response.close();
@@ -1886,6 +1887,7 @@ class RemoteGatewayService {
     response
       ..statusCode = statusCode
       ..headers.contentType = ContentType.json
+      ..headers.set(HttpHeaders.serverHeader, 'eSIM-Matrix Gateway')
       ..headers.set(HttpHeaders.cacheControlHeader, 'no-store')
       ..headers.set('X-Content-Type-Options', 'nosniff')
       ..write(jsonEncode(payload));
@@ -2772,7 +2774,7 @@ class RemoteGatewayService {
         case 'menu':
           final st = await status();
           return _TelegramReply(
-            '🤖 eUICC-Nexus 远程控制主控台\n\n'
+            '🤖 eSIM-Matrix 远程控制主控台\n\n'
             '${_formatStatus(st)}\n\n'
             '👇 请点击下方按钮直接操作，或直接发送 LPA:1\$... 激活码远程下卡：',
             keyboard: _mainMenuKeyboard(),
@@ -3338,7 +3340,7 @@ class RemoteGatewayService {
   /// and by the `/announce` command.
   static String _formatReleaseNotice(UpdateInfo update) {
     final changelog = update.changelog ?? '';
-    return '🆕 eUICC-Nexus 有新版本：${update.version} (build ${update.build})\n'
+    return '🆕 eSIM-Matrix 有新版本：${update.version} (build ${update.build})\n'
         '${changelog.isEmpty ? '' : '$changelog\n'}'
         '下载地址：${update.downloadUrl ?? update.url}';
   }
@@ -3493,7 +3495,7 @@ class RemoteGatewayService {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0f1216">
-<title>eUICC-Nexus</title>
+<title>eSIM-Matrix Web Console</title>
 <style>
 :root{color-scheme:dark;--bg:#0f1216;--panel:#171b22;--panel2:#1e232c;--fg:#e9eef7;--muted:#98a2b3;--border:#2a303b;--accent:#7aa2ff;--ok:#3ddc97;--warn:#ffb84d;--err:#ff6b6b;--radius:16px}
 *{box-sizing:border-box}
@@ -3548,7 +3550,7 @@ label{display:block;font-size:.76rem;color:var(--muted);margin:10px 0 6px}
 <body>
 <main>
 <header>
-  <div class="logo">eUICC<i>·</i>Nexus</div>
+  <div class="logo">eSIM<i>·</i>Matrix</div>
   <span id="gwPill" class="pill">连接中…</span>
   <span id="guardPill" class="pill hide">流量卫士</span>
   <span id="proxyPill" class="pill hide">代理</span>
@@ -3588,7 +3590,7 @@ const $=(s,r=document)=>r.querySelector(s);
 const FLAG={US:'🇺🇸',HK:'🇭🇰',TW:'🇹🇼',JP:'🇯🇵',SG:'🇸🇬',GB:'🇬🇧',EE:'🇪🇪',DE:'🇩🇪',CA:'🇨🇦',AU:'🇦🇺',FR:'🇫🇷',KR:'🇰🇷',NL:'🇳🇱',TH:'🇹🇭',MY:'🇲🇾',PH:'🇵🇭',VN:'🇻🇳',CN:'🇨🇳',IN:'🇮🇳',TR:'🇹🇷',BR:'🇧🇷',RU:'🇷🇺'};
 const KEYWORDS=[[/(?:^|[^a-z])(us|usa|america)(?:[^a-z]|$)|美国|美卡|saily|t-mobile|verizon|at&t|洛杉矶|硅谷|纽约/i,'US'],[/hong\s*kong|香港|港卡|csl|clubsim|(?<![a-z])hk(?![a-z])/i,'HK'],[/taiwan|台湾|中華|中华|(?<![a-z])tw(?![a-z])/i,'TW'],[/japan|日本|docomo|softbank|(?<![a-z])jp(?![a-z])/i,'JP'],[/singapore|新加坡|(?<![a-z])sg(?![a-z])/i,'SG'],[/estonia|爱沙尼亚|elisa|(?<![a-z])ee(?![a-z])/i,'EE'],[/united\s*kingdom|britain|英国|giffgaff|vodafone|(?<![a-z])(uk|gb)(?![a-z])/i,'GB'],[/germany|德国|telekom|(?<![a-z])de(?![a-z])/i,'DE'],[/canada|加拿大|(?<![a-z])ca(?![a-z])/i,'CA'],[/australia|澳洲|澳大利亚|(?<![a-z])au(?![a-z])/i,'AU'],[/france|法国|(?<![a-z])fr(?![a-z])/i,'FR'],[/korea|韩国|(?<![a-z])kr(?![a-z])/i,'KR'],[/netherlands|荷兰|(?<![a-z])nl(?![a-z])/i,'NL'],[/thailand|泰国|(?<![a-z])th(?![a-z])/i,'TH'],[/malaysia|马来|(?<![a-z])my(?![a-z])/i,'MY'],[/philippines|菲律宾|(?<![a-z])ph(?![a-z])/i,'PH'],[/vietnam|越南|(?<![a-z])vn(?![a-z])/i,'VN'],[/中国|china|(?<![a-z])cn(?![a-z])/i,'CN']];
 const PREFIX={'204':'NL','208':'FR','214':'ES','222':'IT','228':'CH','232':'AT','234':'GB','235':'GB','238':'DK','240':'SE','242':'NO','244':'FI','248':'EE','250':'RU','255':'UA','262':'DE','268':'PT','272':'IE','274':'IS','276':'AL','278':'MT','280':'CY','282':'GE','286':'TR','302':'CA','310':'US','311':'US','312':'US','313':'US','314':'US','315':'US','316':'US','334':'MX','404':'IN','405':'IN','406':'IN','410':'PK','413':'LK','414':'MM','415':'LB','416':'JO','417':'SY','418':'IQ','419':'KW','420':'SA','421':'YE','422':'OM','424':'AE','425':'IL','426':'BH','427':'QA','428':'MN','429':'NP','430':'AE','431':'AE','432':'IR','440':'JP','441':'JP','450':'KR','452':'VN','454':'HK','455':'MO','456':'KH','457':'LA','460':'CN','461':'CN','466':'TW','467':'KP','470':'BD','472':'MV','502':'MY','505':'AU','510':'ID','514':'TL','515':'PH','520':'TH','525':'SG','528':'BN','530':'NZ','536':'NR','537':'PG','539':'TO','540':'SB','541':'VU','542':'FJ','544':'AS','546':'NC','547':'PF','548':'CK','549':'WS','550':'FM','551':'MH','552':'PW','553':'TV','555':'NU','602':'EG','603':'DZ','604':'MA','605':'TN','606':'LY','607':'GM','608':'SN','609':'MR','610':'ML','611':'GN','612':'CI','613':'BF','614':'NE','615':'TG','616':'BJ','617':'MU','618':'LR','619':'SL','620':'GH','621':'NG','622':'TD','623':'CF','624':'CM','625':'CV','626':'ST','627':'GQ','628':'GA','629':'CG','630':'CD','631':'AO','632':'GW','633':'SC','634':'SD','635':'RW','636':'ET','637':'SO','638':'DJ','639':'KE','640':'TZ','641':'UG','642':'BI','643':'MZ','645':'ZM','646':'MG','647':'RE','648':'ZW','649':'NA','650':'MW','651':'LS','652':'BW','653':'SZ','654':'KM','655':'ZA','657':'ER','659':'SS','702':'BZ','704':'GT','706':'SV','708':'HN','710':'NI','712':'CR','714':'PA','716':'PE','722':'AR','724':'BR','730':'CL','732':'CO','734':'VE','736':'BO','738':'GY','740':'EC','742':'GF','744':'PY','746':'SR','748':'UY','750':'FK'};
-const S={token:sessionStorage.getItem('nexus_token')||'',data:null,timer:null,busy:false,proxyCfg:null};
+const S={token:sessionStorage.getItem('matrix_token')||sessionStorage.getItem('nexus_token')||'',data:null,timer:null,busy:false,proxyCfg:null};
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function toast(msg,isErr){const t=$('#toast');t.textContent=msg;t.className='toast show'+(isErr?' err':'');clearTimeout(t._h);t._h=setTimeout(()=>t.className='toast',2600)}
 async function api(path,method='GET',body){
@@ -3761,7 +3763,7 @@ document.addEventListener('click',async ev=>{
 });
 
 $('#loginBtn').onclick=async()=>{
-  S.token=$('#token').value.trim();sessionStorage.setItem('nexus_token',S.token);
+  S.token=$('#token').value.trim();sessionStorage.setItem('matrix_token',S.token);
   await refresh();
   if(!$('#app').classList.contains('hide')){startTimer();toast('已连接')}
 };

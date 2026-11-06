@@ -1,10 +1,10 @@
-# eUICC-Nexus
+# eSIM-Matrix
 
 <p align="center">
   <b>基于 Android 备用机的远程多国 eSIM (eUICC) 切卡、基带漫游监控、3D 异构海外环境联动（SIM + 代理 + 虚拟定位）与短信/验证码转发网关</b><br/>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" alt="MIT License" /></a>
   <a href="https://github.com/iebb/NekokoLPA2"><img src="https://img.shields.io/badge/Upstream-NekokoLPA2-6E56CF?style=flat-square" alt="Based on NekokoLPA2" /></a>
-  <a href="https://github.com/MIY-Y/eUICC-Nexus/releases"><img src="https://img.shields.io/badge/Release-v1.3.4-orange?style=flat-square" alt="Release v1.3.4" /></a>
+  <a href="https://github.com/MIY-Y/eSIM-Matrix/releases"><img src="https://img.shields.io/badge/Release-v1.3.5-orange?style=flat-square" alt="Release v1.3.5" /></a>
   <a href="https://linux.do"><img src="https://img.shields.io/badge/Community-LINUX%20DO-f09433?style=flat-square" alt="LINUX DO 社区" /></a>
 </p>
 
@@ -33,7 +33,7 @@
 
 ## 3 分钟快速上手
 
-1. **安装授权**：将 eUICC 芯片插入备用机（推荐插在 `SIM 2` 槽），下载安装 [Releases 中的最新版 APK](https://github.com/MIY-Y/eUICC-Nexus/releases)（**全签名合一版**：单个安装包内置 ESTK `c47350...` + 9eSIM `d1c0f4...` + SakuraSIM `65d057...` 三套证书）；在 App 内授予电话、短信、定位与通知权限，将系统省电策略设为**「无限制」**。
+1. **安装授权**：将 eUICC 芯片插入备用机（推荐插在 `SIM 2` 槽），下载安装 [Releases 中的最新版 APK](https://github.com/MIY-Y/eSIM-Matrix/releases)（**全签名合一版**：单个安装包内置 ESTK `c47350...` + 9eSIM `d1c0f4...` + SakuraSIM `65d057...` 三套证书）；在 App 内授予电话、短信、定位与通知权限，将系统省电策略设为**「无限制」**。
 2. **绑定 Telegram Bot**：
    - 找 [`@BotFather`](https://t.me/BotFather) 发送 `/newbot` 创建机器人并复制 **Bot Token**；
    - 在 Telegram 给你的机器人发送一次 `/start`；
@@ -52,7 +52,7 @@
 3. **物理定位**：Android 系统 GPS / Fused Location 经纬度及基站网络定位。
 
 传统方案中，用户往往只换了卡，出网 IP 依然是国内或与 SIM 卡属地不符，且真实物理 GPS 暴露无遗，极易触发异地欺诈风控被封。  
-**eUICC-Nexus 3D 联动引擎** 在切卡时实现原子级协同切换：
+**eSIM-Matrix 3D 联动引擎** 在切卡时实现原子级协同切换：
 ```text
 远程触发切卡 (/use_temp 2)
   │
@@ -70,7 +70,7 @@
    - 打开 FlClash ➔「设置」➔ 找到「外部控制 (External Controller)」；
    - 监听端口设为 `9090`（即 `127.0.0.1:9090`）；
    - 设置「控制密钥 (Secret)」（如无密码可留空）。
-2. **eUICC-Nexus App 侧配置**：
+2. **eSIM-Matrix App 侧配置**：
    - 进入 App「短信转发」页 ➔ 下滑找到「切卡自动化联动」；
    - 开启「启用切卡自动联动代理」；
    - Controller 地址填入 `http://127.0.0.1:9090`，填入 Secret，目标策略组填入 `PROXY`（或你的代理组名称）；
@@ -83,7 +83,7 @@
 4. **漫游流量卫士 (Data Guard)**：
    - 海外卡漫游资费极其高昂。切卡时漫游流量卫士会自动禁用移动数据与数据漫游，并强制网络走 Wi-Fi / FlClash 本地代理，杜绝天价漫游账单。
 
-### 3. 免 Root 虚拟定位预设坐标对照
+### 3. 免 Root 虚拟定位预设模板与自定义经纬度
 切卡时，系统会自动根据目标卡国家匹配注入经纬度：
 
 | 国家/地区 | 预设伪装城市 | 经纬度 (Latitude, Longitude) | 常见对应卡片 |
@@ -99,8 +99,12 @@
 | **法国 (FR)** | 巴黎 (Paris) | `48.8566, 2.3522` | Orange FR, Free Mobile |
 | **台湾 (TW)** | 台北 (信义区) | `25.0330, 121.5654` | 中华电信, 台湾大哥大 |
 
-*(支持在 App 设置或 REST API 中为特定卡自定义经纬度坐标)*
-
+- **开箱即用预设模板**：切卡时根据目标卡的国家代码自动套用上方预设核心商务区坐标，无需繁琐设置。
+- **自定义经纬度覆盖**：支持在 App 设置、Web 控制台或 REST API 中为特定卡（按 ICCID）单独指定专属经纬度坐标（例如自定义为海外真实合租地址、境外服务器托管机房或目标居住地）。
+- **双免 Root 方案支持**：
+  1. **系统模拟位置**（开发者选项中指定应用）：简单快捷，支持大部分日常场景；
+  2. **Shizuku 底层 Fused Location 注入**：免开发者选项留痕，零被检出风险，直通系统底层融合定位引擎。
+- **全自动安全还原**：无论通过 Telegram、Web 还是 API 触发切回主卡，或 5 分钟接码倒计时归零，系统自动注销测试 Provider 并关闭虚拟定位，立刻无缝恢复真实物理 GPS。
 ---
 
 ## 💡 ESTKme 实体卡使用指南

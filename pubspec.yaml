@@ -1,5 +1,5 @@
 name: nlpa2
-description: "NekokoLPA 2"
+description: "eSIM-Matrix: Remote Multi-Profile eSIM Gateway with 3D Overseas Environment Linkage"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev

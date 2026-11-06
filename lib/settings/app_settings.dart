@@ -154,10 +154,10 @@ class AppSettings extends ChangeNotifier {
   String get appName {
     final v = variant;
     if (v == 'esim9') return '9eSIM';
-    if (v == 'nexus' || v == 'm') return 'eUICC-Nexus';
+    if (v == 'nexus' || v == 'm' || v == 'matrix') return 'eSIM-Matrix';
     if (v == 'community') return 'NekokoLPA 2 Community';
     if (v == 'community-rooted') return 'NekokoLPA 2 Community Rooted';
-    return 'eUICC-Nexus';
+    return 'eSIM-Matrix';
   }
 
   String get userAgent {
