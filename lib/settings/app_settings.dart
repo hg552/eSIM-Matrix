@@ -570,6 +570,24 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Per-profile proxy node bindings, keyed by the displayed ICCID. An empty
+  // result means "let the country resolver decide".
+  String? proxyNodeForIccid(String iccid) {
+    final value = _proxyCustomRules[iccid]?.trim();
+    return value == null || value.isEmpty ? null : value;
+  }
+
+  Future<void> setProxyNodeForIccid(String iccid, String? node) async {
+    final rules = Map<String, String>.from(_proxyCustomRules);
+    final clean = node?.trim();
+    if (clean == null || clean.isEmpty) {
+      rules.remove(iccid);
+    } else {
+      rules[iccid] = clean;
+    }
+    await setProxyCustomRules(rules);
+  }
+
   // Roaming data safeguard: a foreign keep-alive eSIM can burn chargeable
   // megabytes the moment the baseband registers, so the switch state machine
   // turns mobile data off for the target subscription by default.

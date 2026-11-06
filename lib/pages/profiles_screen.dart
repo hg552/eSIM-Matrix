@@ -36,6 +36,7 @@ import '../services/tag_notification_service.dart';
 import '../models/activation_code.dart';
 import '../theme/app_theme.dart';
 import '../settings/app_settings.dart';
+import '../services/remote_gateway_service.dart';
 import 'notifications_screen.dart';
 
 import '../pages/settings_page.dart';
@@ -68,6 +69,7 @@ import '../widgets/profiles_screen/profile_loading_overlay.dart';
 import '../services/update_notifier.dart';
 import '../utils/update_utils.dart';
 import '../widgets/profiles_screen/profile_list_section.dart';
+import '../widgets/profiles_screen/proxy_node_picker_dialog.dart';
 import '../widgets/profiles_screen/reader_helper.dart';
 import '../widgets/profiles_screen/state_messages.dart' hide ColumnStateMessage;
 import '../widgets/profiles_screen/error_state.dart';
@@ -2861,6 +2863,15 @@ class _ProfilesScreenState extends State<ProfilesScreen>
         reader,
       );
       unawaited(_processNotificationsAfterVerifiedSwitch(reader));
+      if (enable) {
+        // A switch made directly in the profile list must honour the same
+        // per-profile node binding as a remote /use command.
+        unawaited(
+          RemoteGatewayService.instance
+              .applyProxyForProfile(iccid: p.iccid, alias: p.displayName)
+              .catchError((Object _) => null),
+        );
+      }
     } catch (e) {
       if (isOmapiSessionCorruptedError(e)) {
         // OMAPI is unusable until the device reboots, so offer no retry.
@@ -3398,6 +3409,11 @@ class _ProfilesScreenState extends State<ProfilesScreen>
           value: 'tags',
         ),
         AdaptiveContextMenuItem(
+          label: _proxyBindingMenuLabel(profile),
+          icon: Icons.wifi_tethering_outlined,
+          value: 'proxy_node',
+        ),
+        AdaptiveContextMenuItem(
           label: AppLocalizations.of(context)!.copyIccid,
           icon: Icons.copy_outlined,
           value: 'copy_iccid',
@@ -3429,9 +3445,63 @@ class _ProfilesScreenState extends State<ProfilesScreen>
     if (result == 'rename') _renameProfile(profile);
     if (result == 'change_icon') _changeProfileIcon(profile);
     if (result == 'tags') _openTagManager(profile);
+    if (result == 'proxy_node') await _showProxyNodeBindingDialog(profile);
     if (result == 'copy_iccid') _copyIccid(profile);
     if (result == 'transfer') await _handleTransfer(profile);
     if (result == 'delete') _deleteProfile(profile);
+  }
+
+  String _proxyBindingMenuLabel(EuiccProfile profile) {
+    final bound = AppSettings().proxyNodeForIccid(profile.iccid);
+    if (bound == null) return '🌐 指定代理节点';
+    final short = bound.length > 18 ? '${bound.substring(0, 17)}…' : bound;
+    return '🌐 代理节点：$short';
+  }
+
+  /// Binds one eSIM profile to one FlClash / Mihomo node. The binding is keyed
+  /// by ICCID and is read by RemoteGatewayService.applyProxyForProfile on every
+  /// switch, so both remote commands and local switches honour it.
+  Future<void> _showProxyNodeBindingDialog(EuiccProfile profile) async {
+    final settings = AppSettings();
+    final picked = await showDialog<String>(
+      context: context,
+      builder: (context) => ProxyNodePickerDialog(
+        profileName: profile.displayName,
+        iccid: profile.iccid,
+        currentNode: settings.proxyNodeForIccid(profile.iccid),
+        settings: settings,
+      ),
+    );
+    if (picked == null) return;
+    await settings.setProxyNodeForIccid(
+      profile.iccid,
+      picked.isEmpty ? null : picked,
+    );
+
+    var message = picked.isEmpty
+        ? '已清除【${profile.displayName}】的定向节点，切卡时按国别自动匹配。'
+        : '已绑定【${profile.displayName}】→ $picked';
+    if (picked.isNotEmpty &&
+        profile.enabled &&
+        settings.proxyLinkageEnabled) {
+      final applied = await RemoteGatewayService.instance
+          .applyProxyForProfile(
+            iccid: profile.iccid,
+            alias: profile.displayName,
+          )
+          .catchError((Object _) => null);
+      message += applied?.success == true
+          ? '，并已立即切换节点。'
+          : '（控制器未连接，下次切卡时生效）。';
+    }
+    if (!settings.proxyLinkageEnabled) {
+      message += '\n代理联动未启用：请到「短信转发」→「切卡自动化」开启。';
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+    setState(() {});
   }
 
   /// Launches the TS.43 carrier-managed transfer wizard for [profile] and

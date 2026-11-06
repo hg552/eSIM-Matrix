@@ -215,6 +215,10 @@ Telegram 主菜单加入「🛡️ 流量卫士 / 🌐 代理联动 / 📡 接�
 - `ProxyLinkageService` 对接 Clash / Mihomo（FlClash）/ sing-box 的 External Controller（默认 `127.0.0.1:9090`），仅依赖标准 REST：`GET /proxies`、`GET /proxies/{group}`、`PUT /proxies/{group}`。
 - `ProxyMappingResolver` 按「自定义规则 → 国旗 Emoji → 国际区号 → 品牌/关键词 → 区域回退」推导目标节点；两字母国家代码带字母边界守卫（避免 `in` 命中 `Singapore`、`us` 命中 `Russia`），并过滤 `DIRECT`/`REJECT`/剩余流量等非实体节点。
 - 切卡前记录策略组当前节点快照，就绪后按目标卡国别切换；回滚或会话结束时还原快照。控制器离线、密钥错误或分组缺失时只记录告警，绝不阻塞物理切卡。
+- **每卡定向绑定（主页入口）**：主页 Profile 长按菜单 →「🌐 指定代理节点」，从 FlClash 实时节点列表里挑一个具体节点，绑定以 `AppSettings.proxyCustomRules[iccid] = 节点名` 持久化。选「自动匹配」则删除该键，退回按国别推导；控制器离线时降级为手动输入节点名。
+- `RemoteGatewayService.applyProxyForProfile()` 是唯一的选择入口：**显式绑定 > 国别 resolver**（绑定节点若已从订阅池消失则安全回退到 resolver，不报错）。网关切卡（`_switchProfile`）与**主页本地直接切卡**（`profiles_screen` 验证成功后）都调用它，所以从 Bot / Web 控制台 / 主页三处切卡行为一致；若被绑定的卡当前已激活，保存绑定时立即应用一次。
+- Telegram `/proxy` 会列出所有已绑定的卡（ICCID 脱敏）→ 节点，便于核对。
+
 
 ---
 

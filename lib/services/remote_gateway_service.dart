@@ -890,29 +890,70 @@ class RemoteGatewayService {
       secret: settings.proxySecret,
     );
     try {
+      // Keep the pre-switch node so _revert can put it back.
       _proxySnapshot ??= await _proxyLinkage.snapshot(group);
+      await applyProxyForProfile(iccid: target.iccid, alias: target.alias);
+    } catch (e) {
+      _log.warning('Proxy linkage switch failed: $e');
+    }
+  }
+
+  /// Selects the proxy node for one eSIM profile.
+  ///
+  /// An explicit per-profile binding (set from the profile list) wins over the
+  /// country resolver. Also called by the local LPA page after a profile is
+  /// enabled directly in the UI, so remote and local switches honour the same
+  /// binding.
+  Future<ProxySwitchResult?> applyProxyForProfile({
+    required String iccid,
+    String? alias,
+  }) async {
+    final settings = AppSettings();
+    if (!settings.proxyLinkageEnabled) return null;
+    final group = settings.proxyTargetGroup;
+    _proxyLinkage.updateConfig(
+      controllerUrl: settings.proxyControllerUrl,
+      secret: settings.proxySecret,
+    );
+    try {
       final groupInfo = await _proxyLinkage.getGroup(group);
       if (groupInfo == null) {
         _log.warning('Proxy linkage: Group "$group" not found');
-        return;
+        return null;
       }
-      final match = _proxyResolver.resolveNode(
-        candidates: groupInfo.all,
-        iccid: target.iccid,
-        alias: target.alias,
-        customRules: settings.proxyCustomRules,
-      );
-      if (match.matched && match.nodeName != null) {
-        final res = await _proxyLinkage.selectNode(group, match.nodeName!);
-        if (res.success) {
-          _lastLinkedProxyNode = match.nodeName;
-          _log.info('Proxy Linkage: Switched to [${match.nodeName}] for ${target.alias} (${match.reason})');
-        }
+      final bound = settings.proxyCustomRules[iccid]?.trim();
+      final ProxyMatchResult match;
+      if (bound != null && bound.isNotEmpty && groupInfo.all.contains(bound)) {
+        match = ProxyMatchResult(
+          matched: true,
+          nodeName: bound,
+          confidence: 'custom_rule',
+          reason: 'Per-profile binding from the profile list',
+        );
       } else {
-        _log.info('Proxy Linkage: No matching node for ${target.alias}: ${match.reason}');
+        match = _proxyResolver.resolveNode(
+          candidates: groupInfo.all,
+          iccid: iccid,
+          alias: alias,
+          customRules: settings.proxyCustomRules,
+        );
       }
+      if (!match.matched || match.nodeName == null) {
+        _log.info('Proxy linkage: no node for $iccid: ${match.reason}');
+        return null;
+      }
+      final result = await _proxyLinkage.selectNode(group, match.nodeName!);
+      if (result.success) {
+        _lastLinkedProxyNode = match.nodeName;
+        _log.info(
+          'Proxy linkage: switched to [${match.nodeName}] for $iccid '
+          '(${match.reason})',
+        );
+      }
+      return result;
     } catch (e) {
       _log.warning('Proxy linkage switch exception: $e');
+      return null;
     }
   }
 
@@ -2489,6 +2530,18 @@ class RemoteGatewayService {
       if (group.all.length > shown.length) {
         lines.add('…共 ${group.all.length} 个');
       }
+    }
+    final bindings = settings.proxyCustomRules;
+    if (bindings.isNotEmpty) {
+      lines
+        ..add('')
+        ..add('已定向绑定的卡（主页长按卡片 → 指定代理节点）：');
+      bindings.forEach((key, node) {
+        final shown = key.length > 12
+            ? '${key.substring(0, 6)}…${key.substring(key.length - 4)}'
+            : key;
+        lines.add('· $shown → $node');
+      });
     }
     return _TelegramReply(
       lines.join('\n'),
