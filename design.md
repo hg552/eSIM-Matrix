@@ -141,6 +141,18 @@ stateDiagram-v2
 - **网络绑定**：REST HTTP 服务默认探测并**仅绑定 Tailscale / Headscale CGNAT 私网地址**（`100.64.0.0/10` 或 `fd7a:115c:a1e0::/48`），禁止监听公共网络。
 - **Token 校验**：所有 API 请求必须携带 `Authorization: Bearer <token>` 请求头。Token 为 256 位安全伪随机生成（Base64URL 43 字符），使用**恒定时间算法（Constant-time Equality）**比对，防范时序侧信道攻击。
 - **Telegram 限制**：严格比对 `chat.type == private` 以及发送者 ID 是否精确匹配配置的私聊白名单 ID，忽略群组及任何非授权用户的消息。
+### 5.1.1 发布包签名与升级兼容性
+
+已发布的 `ee.nekoko.nlpa2.multi`（v1.3.5）采用 **APK Signature Scheme v2 + 三个签名者**（不是 v1/v2/v3 三方案；实测 v1=false、v2=true、v3/v3.1/v4=false）：
+
+| # | keystore | 证书 | SHA-256 |
+|---|---|---|---|
+| 1 | `community.jks` (`communitykey`) | `C=CN` | `4139278a…026fa` |
+| 2 | `9eSIMCommunityKey.jks` (`key0`) | `CN=esim` | `6966004a…d3a4` |
+| 3 | `sakurasim.jks` (`sakurasim`) | `CN=Unknown,…` | `dd0dddb…eab13` |
+
+三签名由 `scripts/build.py` 的 `--next-signer` 链生成；Gradle 侧 flavor `m` 与 debug/release 都只显式配置了 `esim9`，因此**直接 `flutter build apk` 得到的产物只有 1 个签名者**。签名者集合与已安装应用不一致时覆盖安装会报 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`（且卸载重装会丢本地配置）。任何要覆盖安装到现有设备的包，都必须用三个 keystore 重新 `apksigner sign`，保持 `--v1-signing-enabled false --v2-signing-enabled true --v3-signing-enabled false` 与上述顺序，再用 `apksigner verify --print-certs` 核对三个指纹。
+
 ### 5.2.0 配置入口（去哪里设置）
 
 | 功能 | 入口 | 备注 |
