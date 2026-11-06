@@ -17,8 +17,12 @@ import 'sms_relay_service.dart';
 import 'network_status_service.dart';
 import 'telegram_registry.dart';
 import '../settings/app_settings.dart';
+import 'cellular_data_guardian.dart';
 import 'proxy_linkage_service.dart';
 import 'proxy_mapping_resolver.dart';
+
+/// Distinguishes "argument not supplied" from an explicit null in copyWith.
+const Object _absent = Object();
 
 /// Interface names that carry mobile data. A carrier CGNAT bearer is also
 /// numbered out of 100.64/10, so the address range alone cannot separate it
@@ -117,8 +121,10 @@ class RemoteGatewayService {
   RemoteGatewayService({
     SmsRelayService smsRelay = const SmsRelayService(),
     RemoteProfileControl? profiles,
+    @visibleForTesting InternetAddress? bindAddress,
   }) : _smsRelay = smsRelay,
-       _profiles = profiles ?? LpaRemoteProfileControl();
+       _profiles = profiles ?? LpaRemoteProfileControl(),
+       _bindAddressOverride = bindAddress;
 
   static final RemoteGatewayService instance = RemoteGatewayService();
   static const int port = 8787;
@@ -134,6 +140,10 @@ class RemoteGatewayService {
 
   final SmsRelayService _smsRelay;
   final RemoteProfileControl _profiles;
+
+  /// Tests bind the REST listener to loopback; production always derives the
+  /// address from the Tailscale interface so the API never lands on mobile data.
+  final InternetAddress? _bindAddressOverride;
   HttpClient _telegramHttpClient = _createTelegramHttpClient();
   int _telegramPollGeneration = 0;
 
@@ -161,8 +171,10 @@ class RemoteGatewayService {
   int _maintenanceTickCount = 0;
   final ProxyLinkageService _proxyLinkage = ProxyLinkageService();
   final ProxyMappingResolver _proxyResolver = const ProxyMappingResolver();
+  final CellularDataGuardian _dataGuard = CellularDataGuardian();
   ProxySnapshot? _proxySnapshot;
   String? _lastLinkedProxyNode;
+  DataGuardResult? _lastGuardResult;
 
   /// One maintenance run at a time; the 20-second timer must not overlap them.
   bool _maintenanceInFlight = false;
@@ -350,10 +362,20 @@ class RemoteGatewayService {
             },
       'proxy': {
         'enabled': AppSettings().proxyLinkageEnabled,
+        'controllerUrl': AppSettings().proxyControllerUrl,
         'targetGroup': AppSettings().proxyTargetGroup,
         'currentNode': _lastLinkedProxyNode ?? _proxySnapshot?.node,
         'lastLinkedNode': _lastLinkedProxyNode,
         'snapshotNode': _proxySnapshot?.node,
+      },
+      'dataGuard': {
+        'enabled': AppSettings().dataGuardEnabled,
+        'restoreOnRevert': AppSettings().dataGuardRestoreOnRevert,
+        'enforced': session?.guardEnforced ?? false,
+        'subscriptionId': session?.guardSubscriptionId,
+        'restoredDataEnabled': session?.guardDataEnabledBefore,
+        'restoredRoamingEnabled': session?.guardRoamingEnabledBefore,
+        'lastResult': _lastGuardResult?.toJson(),
       },
       'lastTelegramError': _lastTelegramError,
       'lastSwitchEpochMillis': prefs.getInt(_lastSwitchKey),
@@ -728,13 +750,31 @@ class RemoteGatewayService {
     }
 
     try {
+      // Best effort before the card even resets: if the slot already has a
+      // subscription, its data is off before the new profile can attach.
+      await _applyDataGuard(preferredSlot: _profiles.networkSlotIndex);
       await _profiles.enableProfile(target.iccid);
     } catch (error) {
+      // The guard may already have switched data off for the target slot; a
+      // failed switch must not leave the phone with data disabled and no
+      // session to restore it later.
+      final failed = _session;
+      if (failed != null && failed.guardEnforced) {
+        await _restoreDataGuard(
+          subscriptionId: failed.guardSubscriptionId,
+          dataEnabled: failed.guardDataEnabledBefore,
+          roamingEnabled: failed.guardRoamingEnabledBefore,
+        ).catchError((Object _) {});
+      }
+      _lastGuardResult = null;
       _session = previousSession;
       _readyNotificationSent = previousReady;
       await _saveSession(previousSession);
       rethrow;
     }
+    // Authoritative pass: the SIM reset can restore the ROM's default data
+    // state, so the guard is re-asserted once the new subscription exists.
+    await _applyDataGuard(preferredSlot: _profiles.networkSlotIndex);
     _switchCompletedAtMillis = DateTime.now().millisecondsSinceEpoch;
     await _recordSwitchTime();
     _session = _session!.copyWith(state: 'waiting_for_service');
@@ -794,6 +834,12 @@ class RemoteGatewayService {
       rethrow;
     }
     await _recordSwitchTime();
+    await _restoreDataGuard(
+      subscriptionId: session.guardSubscriptionId,
+      dataEnabled: session.guardDataEnabledBefore,
+      roamingEnabled: session.guardRoamingEnabledBefore,
+    );
+    _lastGuardResult = null;
     _basebandPollTimer?.cancel();
     _basebandPollTimer = null;
     _revertTimer?.cancel();
@@ -808,10 +854,15 @@ class RemoteGatewayService {
     ).catchError((Object _) => null);
     if (auto) {
       final proxyText = restoredProxy != null ? '\n🌐 代理节点已自动恢复为：【$restoredProxy】' : '';
+      final guardText = AppSettings().dataGuardRestoreOnRevert &&
+              (session.guardDataEnabledBefore != null ||
+                  session.guardRoamingEnabledBefore != null)
+          ? '\n🛡️ 流量卫士：已恢复切卡前的移动数据开关状态'
+          : '';
       unawaited(
         _sendTelegramReply(
           _TelegramReply(
-            '🏠 临时接码/保号驻网时间已到，已自动为您切回默认主卡：【$targetDefaultAlias】。$proxyText',
+            '🏠 临时接码/保号驻网时间已到，已自动为您切回默认主卡：【$targetDefaultAlias】。$guardText$proxyText',
             keyboard: const [
               [
                 _TelegramButton('📡 查看基带状态', 'cmd:status'),
@@ -839,9 +890,7 @@ class RemoteGatewayService {
       secret: settings.proxySecret,
     );
     try {
-      if (_proxySnapshot == null) {
-        _proxySnapshot = await _proxyLinkage.snapshot(group);
-      }
+      _proxySnapshot ??= await _proxyLinkage.snapshot(group);
       final groupInfo = await _proxyLinkage.getGroup(group);
       if (groupInfo == null) {
         _log.warning('Proxy linkage: Group "$group" not found');
@@ -909,6 +958,86 @@ class RemoteGatewayService {
     return restoredName;
   }
 
+  /// Turns mobile data (and data roaming) off for the subscription the switch
+  /// targets, persisting the pre-switch state on the session so a revert can put
+  /// it back. Best effort by design: a device without MODIFY_PHONE_STATE and
+  /// without root logs the miss and still performs the card switch.
+  Future<void> _applyDataGuard({required int? preferredSlot}) async {
+    final settings = AppSettings();
+    if (!settings.dataGuardEnabled) return;
+    final session = _session;
+    if (session == null) return;
+    if (session.guardEnforced) {
+      // Already enforced for this session; only re-assert if the platform says
+      // data came back after the card reset.
+      final subId = session.guardSubscriptionId;
+      if (subId == null || subId < 0) return;
+      final states = await _dataGuard.status();
+      final state = states.where((s) => s.subscriptionId == subId).firstOrNull;
+      if (state == null || state.dataEnabled != true) return;
+      final again = await _dataGuard.lockdown(subId);
+      if (again.enforced) {
+        _lastGuardResult = again;
+        _log.info('Data guard re-asserted on sub=$subId after card reset');
+      }
+      return;
+    }
+
+    final subscriptions = _networkStatus?.subscriptions ?? const <NetworkStatusSubscription>[];
+    NetworkStatusSubscription? target;
+    if (preferredSlot != null) {
+      target = subscriptions.where((s) => s.slotIndex == preferredSlot).firstOrNull;
+    }
+    target ??= subscriptions.length == 1 ? subscriptions.single : null;
+    target ??= _selectMatchingSubscription(subscriptions);
+    if (target == null || target.subscriptionId < 0) {
+      _log.fine('Data guard skipped: no subscription for slot $preferredSlot yet');
+      _lastGuardResult = DataGuardResult.skipped(-1);
+      await _saveSession(session.copyWith(guardEnforced: false));
+      return;
+    }
+
+    final result = await _dataGuard.lockdown(target.subscriptionId);
+    _lastGuardResult = result;
+    _session = session.copyWith(
+      guardSubscriptionId: target.subscriptionId,
+      guardDataEnabledBefore: result.before?.dataEnabled,
+      guardRoamingEnabledBefore: result.before?.roamingEnabled,
+      guardEnforced: result.enforced,
+    );
+    await _saveSession(_session);
+    if (result.enforced) {
+      _log.info(
+        'Data guard ON for sub=${target.subscriptionId} '
+        '(slot ${target.slotIndex + 1}, viaApi=${result.viaApi}, viaShell=${result.viaShell})',
+      );
+    } else {
+      _log.warning(
+        'Data guard could not disable data for sub=${target.subscriptionId}: '
+        '${result.error ?? 'no enforcement path'}',
+      );
+    }
+  }
+
+  /// Puts data/roaming back the way they were before the switch.
+  Future<void> _restoreDataGuard({
+    required int? subscriptionId,
+    required bool? dataEnabled,
+    required bool? roamingEnabled,
+  }) async {
+    if (!AppSettings().dataGuardRestoreOnRevert) return;
+    if (subscriptionId == null || subscriptionId < 0) return;
+    if (dataEnabled == null && roamingEnabled == null) return;
+    final result = await _dataGuard.restore(
+      subscriptionId: subscriptionId,
+      dataEnabled: dataEnabled,
+      roamingEnabled: roamingEnabled,
+    );
+    _log.info(
+      'Data guard restore sub=$subscriptionId '
+      '(data=$dataEnabled, roaming=$roamingEnabled) ok=${result.enforced}',
+    );
+  }
 
   void _startBasebandPolling() {
     _basebandPollTimer?.cancel();
@@ -981,9 +1110,20 @@ class RemoteGatewayService {
     _basebandPollTimer = null;
     _session = session.copyWith(state: 'ready');
     unawaited(_saveSession(_session));
+    if (AppSettings().dataGuardEnabled) {
+      // The SIM reset can hand data back to the ROM default; make sure the
+      // guard still holds before the user starts receiving codes.
+      unawaited(
+        _applyDataGuard(preferredSlot: _profiles.networkSlotIndex)
+            .catchError((Object _) {}),
+      );
+    }
     final roaming = subscription.roaming == true ? ' (漫游中)' : '';
     final signal = subscription.signalDbm == null ? '' : '，信号 ${subscription.signalDbm} dBm';
     final carrier = subscription.carrierName == null ? '' : '【${subscription.carrierName}】';
+    final guardText = AppSettings().dataGuardEnabled
+        ? '\n🛡️ 流量卫士：${session.guardEnforced ? '移动数据已锁定关闭（防漫游天价流量）' : '未能关闭移动数据，请手动检查'}'
+        : '';
     final proxyStatusText = AppSettings().proxyLinkageEnabled
         ? (_lastLinkedProxyNode != null
             ? '\n🌐 代理联动：已切换至【$_lastLinkedProxyNode】'
@@ -992,7 +1132,7 @@ class RemoteGatewayService {
     unawaited(
       _sendTelegramReply(
         _TelegramReply(
-          '📡 搜网就绪！\n已成功连接到基站$carrier$roaming$signal。$proxyStatusText\n\n'
+          '📡 搜网就绪！\n已成功连接到基站$carrier$roaming$signal。$guardText$proxyStatusText\n\n'
           '👉 卡片切换成功并已持久生效，现在可以前往目标平台接收验证码了！',
           keyboard: const [
             [
@@ -1317,7 +1457,7 @@ class RemoteGatewayService {
 
   Future<void> _refreshHttpServer() async {
     if (!_running) return;
-    final address = await _findTailscaleAddress();
+    final address = _bindAddressOverride ?? await _findTailscaleAddress();
     // _serverAddress holds the textual form; comparing an InternetAddress to it
     // never matched, so the listener was torn down and rebound every refresh.
     if (address?.address == _serverAddress && _server != null) return;
@@ -1528,6 +1668,57 @@ class RemoteGatewayService {
         if (node is! String) throw const RemoteGatewayException('node_required');
         final res = await _proxyLinkage.selectNode(group, node);
         await _writeJson(request.response, HttpStatus.ok, res.toJson());
+      } else if (request.method == 'GET' && path == '/api/v1/dashboard') {
+        await _writeJson(request.response, HttpStatus.ok, await _dashboardPayload());
+      } else if (request.method == 'GET' && path == '/api/v1/sms/history') {
+        final limit = int.tryParse(request.uri.queryParameters['limit'] ?? '') ?? 50;
+        final entries = await _smsRelay.loadHistory().catchError(
+          (Object _) => const <SmsHistoryEntry>[],
+        );
+        final sorted = entries.toList()
+          ..sort((a, b) => b.receivedAtMillis.compareTo(a.receivedAtMillis));
+        await _writeJson(request.response, HttpStatus.ok, {
+          'messages': sorted.take(limit.clamp(1, 200)).map((entry) => {
+                'id': entry.id,
+                'sender': entry.sender,
+                'body': entry.body,
+                if (entry.otp != null) 'otp': entry.otp,
+                'slotIndex': entry.slotIndex,
+                'carrierName': entry.carrierName,
+                'receivedAtMillis': entry.receivedAtMillis,
+                'mode': entry.mode,
+                'delivered': entry.delivered,
+                if (entry.errorCode != null) 'errorCode': entry.errorCode,
+              }).toList(growable: false),
+        });
+      } else if (request.method == 'POST' && path == '/api/v1/dataguard') {
+        final body = await _readJsonBody(request);
+        final settings = AppSettings();
+        if (body.containsKey('enabled')) {
+          await settings.setDataGuardEnabled(body['enabled'] == true);
+        }
+        if (body.containsKey('restoreOnRevert')) {
+          await settings.setDataGuardRestoreOnRevert(body['restoreOnRevert'] == true);
+        }
+        final capabilities = await _dataGuard.capabilities();
+        await _writeJson(request.response, HttpStatus.ok, {
+          'enabled': settings.dataGuardEnabled,
+          'restoreOnRevert': settings.dataGuardRestoreOnRevert,
+          'capabilities': capabilities.toJson(),
+        });
+      } else if (request.method == 'POST' && path == '/api/v1/dataguard/apply') {
+        final body = await _readJsonBody(request);
+        final requested = (body['subscriptionId'] as num?)?.toInt();
+        final subId = requested ?? _session?.guardSubscriptionId ??
+            (_networkStatus?.subscriptions ?? const <NetworkStatusSubscription>[])
+                .map((s) => s.subscriptionId)
+                .firstWhere((id) => id >= 0, orElse: () => -1);
+        if (subId < 0) {
+          throw const RemoteGatewayException('subscription_not_found');
+        }
+        final result = await _dataGuard.lockdown(subId);
+        _lastGuardResult = result;
+        await _writeJson(request.response, HttpStatus.ok, result.toJson());
       } else {
         await _writeJson(request.response, HttpStatus.notFound, {'error': 'not_found'});
       }
@@ -2655,6 +2846,17 @@ class RemoteGatewayService {
         lines.add('\n🌐 代理联动：⚪ 未启用');
       }
     }
+    if (value['dataGuard'] is Map) {
+      final guard = value['dataGuard'] as Map;
+      if (guard['enabled'] == true) {
+        final enforced = guard['enforced'] == true;
+        lines.add(
+          '\n🛡️ 流量卫士：${enforced ? '🟢 移动数据已锁定关闭' : '⚪ 未锁定（切卡后自动生效）'}',
+        );
+      } else {
+        lines.add('\n🛡️ 流量卫士：⚪ 未启用');
+      }
+    }
     return lines.join('\n');
   }
 
@@ -2786,7 +2988,43 @@ class RemoteGatewayService {
     'alias': profile.alias,
     'enabled': profile.enabled,
     'iccidSuffix': _suffix(profile.iccid),
+    'iccidPrefix': profile.iccid.length >= 6
+        ? profile.iccid.substring(0, 6)
+        : profile.iccid,
   };
+
+  /// One round trip for the web console: everything a dashboard repaint needs,
+  /// ordered so a slow subsystem (Clash, SMS store) cannot fail the whole call.
+  Future<Map<String, Object?>> _dashboardPayload() async {
+    final statusMap = await status();
+    final profiles = await listProfiles().catchError(
+      (Object _) => const <Map<String, Object?>>[],
+    );
+    final history = await _smsRelay.loadHistory().catchError(
+      (Object _) => const <SmsHistoryEntry>[],
+    );
+    final sortedHistory = history.toList()
+      ..sort((a, b) => b.receivedAtMillis.compareTo(a.receivedAtMillis));
+    final guardCapabilities = await _dataGuard.capabilities();
+    final guardStates = await _dataGuard.status();
+    return {
+      'status': statusMap,
+      'profiles': profiles,
+      'messages': sortedHistory.take(20).map((entry) => {
+            'sender': entry.sender,
+            'body': entry.body,
+            if (entry.otp != null) 'otp': entry.otp,
+            'receivedAtMillis': entry.receivedAtMillis,
+            'delivered': entry.delivered,
+            if (entry.errorCode != null) 'errorCode': entry.errorCode,
+          }).toList(growable: false),
+      'dataGuard': {
+        'capabilities': guardCapabilities.toJson(),
+        'subscriptions': guardStates.map((s) => s.toJson()).toList(growable: false),
+      },
+      'generatedAtMillis': DateTime.now().millisecondsSinceEpoch,
+    };
+  }
 
   static String _suffix(String iccid) =>
       iccid.length <= 4 ? iccid : iccid.substring(iccid.length - 4);
@@ -2812,53 +3050,297 @@ class RemoteGatewayService {
 
 
   static const String _dashboardHtml = r'''<!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0f1216">
 <title>eUICC-Nexus</title>
 <style>
-:root{color-scheme:dark;font:16px system-ui,sans-serif;--surface:#171a20;--panel:#20242c;--fg:#edf0f6;--muted:#aab1bf;--accent:#8ab4f8;--border:#343a46}*{box-sizing:border-box}body{margin:0;background:var(--surface);color:var(--fg)}main{max-width:760px;margin:auto;padding:24px}h1{font-size:1.35rem}section{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:16px;margin:14px 0}label{display:block;color:var(--muted);margin:10px 0 6px}input,button{font:inherit;border-radius:9px;border:1px solid var(--border);padding:10px;background:var(--surface);color:var(--fg)}input{width:100%}button{cursor:pointer;color:var(--accent);margin:5px 5px 5px 0}pre{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--muted)}small{color:var(--muted)}
-</style></head>
-<body><main><h1>eUICC-Nexus remote gateway</h1>
-<section><label for="token">API bearer token (kept in this tab only)</label><input id="token" type="password" autocomplete="off"><p><button id="status">Status (Signal / NVRAM / Battery)</button><button id="list">List profiles</button><button id="readers">List readers</button><button id="keepalive">Keep-Alive rules</button><button id="default">Set current as default</button><button id="back">Return to default</button><button id="retrySms">Retry failed SMS</button><button id="proxy">🌐 Proxy Linkage</button></p><pre id="output">Enter the API token to control this device.</pre></section>
-<section><h2>🌐 代理软件联动 (FlClash / Mihomo / sing-box)</h2>
-<label for="proxyUrl">External Controller URL</label><input id="proxyUrl" value="http://127.0.0.1:9090" autocomplete="off">
-<label for="proxySecret">Secret (Optional)</label><input id="proxySecret" type="password" autocomplete="off">
-<label for="proxyGroup">Target Selector Group</label><input id="proxyGroup" value="PROXY" autocomplete="off">
-<p><label><input id="proxyEnabled" type="checkbox" style="width:auto"> 启用切卡自动联动代理节点</label></p>
-<p><label><input id="proxyAutoRestore" type="checkbox" style="width:auto" checked> 临时接码结束回滚时还原原节点</label></p>
-<p><button id="proxyTest">⚡ 测试连接并列出节点</button><button id="proxySave">💾 保存配置</button><button id="proxyQuery">🔍 当前状态</button></p>
-</section>
-<section><label for="profile">Profile index, alias, or ICCID</label><input id="profile" autocomplete="off"><label for="newAlias">New nickname (for Rename)</label><input id="newAlias" autocomplete="off"><p><button id="switch">Switch (Permanent)</button><button id="switchTemp">⏱️ Switch (5-Min OTP)</button><button id="rename">✏️ Rename</button><button id="kaSet">🛡️ Keep-Alive (90d)</button><button id="kaNow">⚡ Keep-Alive Now (3m)</button><button id="deleteReq">🗑️ Request delete</button></p></section>
-<section><label for="readerInput">Reader selector (e.g. 1, 2, SIM2)</label><input id="readerInput" autocomplete="off"><p><button id="selectReader">🔀 Switch Reader</button></p></section>
-<section><label for="deleteToken">Delete confirmation token</label><input id="deleteToken" autocomplete="off"><p><button id="deleteConfirm">Confirm delete</button></p></section>
-<section><label for="ac">Activation code (LPA:1$...)</label><input id="ac" autocomplete="off"><label for="cc">Confirmation code (optional)</label><input id="cc" autocomplete="off"><p><button id="download">Download profile</button><button id="downloadTest">🚀 Download Speedtest Test eSIM</button></p></section>
+:root{color-scheme:dark;--bg:#0f1216;--panel:#171b22;--panel2:#1e232c;--fg:#e9eef7;--muted:#98a2b3;--border:#2a303b;--accent:#7aa2ff;--ok:#3ddc97;--warn:#ffb84d;--err:#ff6b6b;--radius:16px}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(120% 90% at 50% -10%,#1b2230 0%,var(--bg) 55%) no-repeat;background-color:var(--bg);color:var(--fg);font:15px/1.55 system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
+main{max-width:1080px;margin:0 auto;padding:20px 16px 64px}
+header{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:18px}
+.logo{font-size:1.2rem;font-weight:650;letter-spacing:.4px}
+.logo i{color:var(--accent);font-style:normal}
+.pill{font-size:.72rem;padding:4px 10px;border-radius:999px;border:1px solid var(--border);background:var(--panel);color:var(--muted);white-space:nowrap}
+.pill.ok{color:var(--ok);border-color:rgba(61,220,151,.35);background:rgba(61,220,151,.08)}
+.pill.bad{color:var(--err);border-color:rgba(255,107,107,.32);background:rgba(255,107,107,.08)}
+.pill.warn{color:var(--warn);border-color:rgba(255,184,77,.32);background:rgba(255,184,77,.08)}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.card{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--border);border-radius:var(--radius);padding:16px}
+.card h2{margin:0 0 12px;font-size:.76rem;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+.kv{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px dashed rgba(255,255,255,.06);font-size:.9rem}
+.kv:last-child{border-bottom:0}
+.kv span:first-child{color:var(--muted)}
+.kv b{font-weight:600;text-align:right}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.8rem}
+button{font:inherit;font-size:.84rem;border-radius:10px;border:1px solid var(--border);background:var(--panel2);color:var(--fg);padding:8px 12px;cursor:pointer;transition:border-color .15s,color .15s}
+button:hover:not(:disabled){border-color:var(--accent);color:#cddcff}
+button.primary{background:rgba(122,162,255,.14);border-color:rgba(122,162,255,.45);color:#cddcff}
+button.danger{background:rgba(255,107,107,.1);border-color:rgba(255,107,107,.32);color:#ffc7c7}
+button:disabled{opacity:.45;cursor:not-allowed}
+input,select{font:inherit;font-size:.9rem;width:100%;border-radius:10px;border:1px solid var(--border);background:#12161c;color:var(--fg);padding:9px 11px}
+label{display:block;font-size:.76rem;color:var(--muted);margin:10px 0 6px}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.signal{display:inline-flex;align-items:flex-end;gap:2px;height:13px}
+.signal i{width:3px;border-radius:1px;background:var(--border)}
+.signal i.on{background:var(--ok)}
+.big{font-size:1.45rem;font-weight:650;letter-spacing:.3px}
+.profile{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--border);border-radius:13px;background:#12161c;margin-bottom:10px}
+.profile:last-child{margin-bottom:0}
+.profile.active{border-color:rgba(61,220,151,.45);box-shadow:inset 0 0 0 1px rgba(61,220,151,.14)}
+.profile .flag{font-size:1.5rem;line-height:1}
+.profile .meta{flex:1;min-width:0}
+.profile .meta div{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.profile .meta small{color:var(--muted);font-size:.74rem}
+.profile .acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.msg{padding:11px;border-radius:11px;background:#12161c;border:1px solid var(--border);margin-bottom:9px}
+.msg .top{display:flex;justify-content:space-between;gap:8px;font-size:.74rem;color:var(--muted);margin-bottom:5px}
+.msg .body{font-size:.87rem;overflow-wrap:anywhere;white-space:pre-wrap}
+.otp{display:inline-block;font-family:ui-monospace,monospace;font-size:.98rem;letter-spacing:.14em;color:#c8f7dd;background:rgba(61,220,151,.12);border:1px solid rgba(61,220,151,.35);border-radius:8px;padding:1px 8px;cursor:pointer}
+.toast{position:fixed;left:50%;bottom:22px;transform:translate(-50%,20px);background:#20262f;border:1px solid var(--border);border-radius:12px;padding:10px 16px;font-size:.84rem;opacity:0;pointer-events:none;transition:.25s;z-index:9;max-width:92vw}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.toast.err{border-color:rgba(255,107,107,.5);color:#ffd2d2}
+.hide{display:none!important}
+.muted{color:var(--muted);font-size:.82rem}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <div class="logo">eUICC<i>·</i>Nexus</div>
+  <span id="gwPill" class="pill">连接中…</span>
+  <span id="guardPill" class="pill hide">流量卫士</span>
+  <span id="proxyPill" class="pill hide">代理</span>
+  <span style="flex:1"></span>
+  <button id="refresh">刷新</button>
+</header>
+
+<div id="login" class="card">
+  <h2>API Token</h2>
+  <input id="token" type="password" placeholder="Bearer token" autocomplete="off">
+  <div class="row"><button class="primary" id="loginBtn">进入控制台</button></div>
+  <p class="muted" style="margin:10px 0 0">令牌仅保存在当前标签页的 sessionStorage 中。</p>
+</div>
+
+<div id="app" class="hide">
+  <div class="grid">
+    <div class="card"><h2>当前会话</h2><div id="sessionBox"></div></div>
+    <div class="card"><h2>基带与设备</h2><div id="deviceBox"></div></div>
+    <div class="card"><h2>流量卫士</h2><div id="guardBox"></div></div>
+    <div class="card"><h2>代理联动</h2><div id="proxyBox"></div></div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <h2>Profile 矩阵</h2>
+    <div id="profilesBox"></div>
+  </div>
+
+  <div class="grid" style="margin-top:14px">
+    <div class="card"><h2>短信与验证码</h2><div id="smsBox"></div></div>
+    <div class="card"><h2>高级操作</h2><div id="advancedBox"></div></div>
+  </div>
+</div>
+<div id="toast" class="toast"></div>
+</main>
 <script>
-const token=document.querySelector('#token'),output=document.querySelector('#output');
-async function api(path,method='GET',body){const response=await fetch(path,{method,headers:{Authorization:'Bearer '+token.value,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});const data=await response.json();if(!response.ok)throw new Error(data.error||('HTTP '+response.status));return data}
-async function show(path,method='GET',body){try{output.textContent=JSON.stringify(await api(path,method,body),null,2)}catch(error){output.textContent='Request failed: '+error.message}}
-document.querySelector('#status').onclick=()=>show('/api/v1/status');
-document.querySelector('#list').onclick=()=>show('/api/v1/profiles');
-document.querySelector('#readers').onclick=()=>show('/api/v1/readers');
-document.querySelector('#keepalive').onclick=()=>show('/api/v1/keepalive');
-document.querySelector('#default').onclick=()=>show('/api/v1/default','POST',{});
-document.querySelector('#back').onclick=()=>show('/api/v1/back','POST',{});
-document.querySelector('#retrySms').onclick=()=>show('/api/v1/sms/retry','POST',{});
-document.querySelector('#switch').onclick=()=>show('/api/v1/switch','POST',{profile:document.querySelector('#profile').value});
-document.querySelector('#switchTemp').onclick=()=>show('/api/v1/switch','POST',{profile:document.querySelector('#profile').value,temporaryMinutes:5});
-document.querySelector('#rename').onclick=()=>show('/api/v1/rename','POST',{profile:document.querySelector('#profile').value,alias:document.querySelector('#newAlias').value});
-document.querySelector('#kaSet').onclick=()=>show('/api/v1/keepalive','POST',{profile:document.querySelector('#profile').value,intervalDays:90});
-document.querySelector('#kaNow').onclick=()=>show('/api/v1/keepalive','POST',{profile:document.querySelector('#profile').value,runNow:true});
-document.querySelector('#selectReader').onclick=()=>show('/api/v1/reader','POST',{reader:document.querySelector('#readerInput').value});
-document.querySelector('#deleteReq').onclick=()=>show('/api/v1/delete/request','POST',{profile:document.querySelector('#profile').value});
-document.querySelector('#deleteConfirm').onclick=()=>show('/api/v1/delete/confirm','POST',{token:document.querySelector('#deleteToken').value});
-document.querySelector('#download').onclick=()=>show('/api/v1/download','POST',{activationCode:document.querySelector('#ac').value,confirmationCode:document.querySelector('#cc').value||undefined});
-document.querySelector('#downloadTest').onclick=()=>{document.querySelector('#ac').value='LPA:1$rsp.truphone.com$QRF-SPEEDTEST';show('/api/v1/download','POST',{activationCode:'LPA:1$rsp.truphone.com$QRF-SPEEDTEST'})};
-document.querySelector('#proxy').onclick=()=>show('/api/v1/proxy');
-document.querySelector('#proxyQuery').onclick=()=>show('/api/v1/proxy');
-document.querySelector('#proxyTest').onclick=()=>show('/api/v1/proxy/test','POST',{controllerUrl:document.querySelector('#proxyUrl').value,secret:document.querySelector('#proxySecret').value});
-document.querySelector('#proxySave').onclick=()=>show('/api/v1/proxy/config','POST',{enabled:document.querySelector('#proxyEnabled').checked,controllerUrl:document.querySelector('#proxyUrl').value,secret:document.querySelector('#proxySecret').value,targetGroup:document.querySelector('#proxyGroup').value,autoRestore:document.querySelector('#proxyAutoRestore').checked});
-</script></main></body></html>''';
+const $=(s,r=document)=>r.querySelector(s);
+const FLAG={US:'🇺🇸',HK:'🇭🇰',TW:'🇹🇼',JP:'🇯🇵',SG:'🇸🇬',GB:'🇬🇧',EE:'🇪🇪',DE:'🇩🇪',CA:'🇨🇦',AU:'🇦🇺',FR:'🇫🇷',KR:'🇰🇷',NL:'🇳🇱',TH:'🇹🇭',MY:'🇲🇾',PH:'🇵🇭',VN:'🇻🇳',CN:'🇨🇳',IN:'🇮🇳',TR:'🇹🇷',BR:'🇧🇷',RU:'🇷🇺'};
+const KEYWORDS=[[/(?:^|[^a-z])(us|usa|america)(?:[^a-z]|$)|美国|美卡|saily|t-mobile|verizon|at&t|洛杉矶|硅谷|纽约/i,'US'],[/hong\s*kong|香港|港卡|csl|clubsim|(?<![a-z])hk(?![a-z])/i,'HK'],[/taiwan|台湾|中華|中华|(?<![a-z])tw(?![a-z])/i,'TW'],[/japan|日本|docomo|softbank|(?<![a-z])jp(?![a-z])/i,'JP'],[/singapore|新加坡|(?<![a-z])sg(?![a-z])/i,'SG'],[/estonia|爱沙尼亚|elisa|(?<![a-z])ee(?![a-z])/i,'EE'],[/united\s*kingdom|britain|英国|giffgaff|vodafone|(?<![a-z])(uk|gb)(?![a-z])/i,'GB'],[/germany|德国|telekom|(?<![a-z])de(?![a-z])/i,'DE'],[/canada|加拿大|(?<![a-z])ca(?![a-z])/i,'CA'],[/australia|澳洲|澳大利亚|(?<![a-z])au(?![a-z])/i,'AU'],[/france|法国|(?<![a-z])fr(?![a-z])/i,'FR'],[/korea|韩国|(?<![a-z])kr(?![a-z])/i,'KR'],[/netherlands|荷兰|(?<![a-z])nl(?![a-z])/i,'NL'],[/thailand|泰国|(?<![a-z])th(?![a-z])/i,'TH'],[/malaysia|马来|(?<![a-z])my(?![a-z])/i,'MY'],[/philippines|菲律宾|(?<![a-z])ph(?![a-z])/i,'PH'],[/vietnam|越南|(?<![a-z])vn(?![a-z])/i,'VN'],[/中国|china|(?<![a-z])cn(?![a-z])/i,'CN']];
+const PREFIX={'204':'NL','208':'FR','214':'ES','222':'IT','228':'CH','232':'AT','234':'GB','235':'GB','238':'DK','240':'SE','242':'NO','244':'FI','248':'EE','250':'RU','255':'UA','262':'DE','268':'PT','272':'IE','274':'IS','276':'AL','278':'MT','280':'CY','282':'GE','286':'TR','302':'CA','310':'US','311':'US','312':'US','313':'US','314':'US','315':'US','316':'US','334':'MX','404':'IN','405':'IN','406':'IN','410':'PK','413':'LK','414':'MM','415':'LB','416':'JO','417':'SY','418':'IQ','419':'KW','420':'SA','421':'YE','422':'OM','424':'AE','425':'IL','426':'BH','427':'QA','428':'MN','429':'NP','430':'AE','431':'AE','432':'IR','440':'JP','441':'JP','450':'KR','452':'VN','454':'HK','455':'MO','456':'KH','457':'LA','460':'CN','461':'CN','466':'TW','467':'KP','470':'BD','472':'MV','502':'MY','505':'AU','510':'ID','514':'TL','515':'PH','520':'TH','525':'SG','528':'BN','530':'NZ','536':'NR','537':'PG','539':'TO','540':'SB','541':'VU','542':'FJ','544':'AS','546':'NC','547':'PF','548':'CK','549':'WS','550':'FM','551':'MH','552':'PW','553':'TV','555':'NU','602':'EG','603':'DZ','604':'MA','605':'TN','606':'LY','607':'GM','608':'SN','609':'MR','610':'ML','611':'GN','612':'CI','613':'BF','614':'NE','615':'TG','616':'BJ','617':'MU','618':'LR','619':'SL','620':'GH','621':'NG','622':'TD','623':'CF','624':'CM','625':'CV','626':'ST','627':'GQ','628':'GA','629':'CG','630':'CD','631':'AO','632':'GW','633':'SC','634':'SD','635':'RW','636':'ET','637':'SO','638':'DJ','639':'KE','640':'TZ','641':'UG','642':'BI','643':'MZ','645':'ZM','646':'MG','647':'RE','648':'ZW','649':'NA','650':'MW','651':'LS','652':'BW','653':'SZ','654':'KM','655':'ZA','657':'ER','659':'SS','702':'BZ','704':'GT','706':'SV','708':'HN','710':'NI','712':'CR','714':'PA','716':'PE','722':'AR','724':'BR','730':'CL','732':'CO','734':'VE','736':'BO','738':'GY','740':'EC','742':'GF','744':'PY','746':'SR','748':'UY','750':'FK'};
+const S={token:sessionStorage.getItem('nexus_token')||'',data:null,timer:null,busy:false,proxyCfg:null};
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function toast(msg,isErr){const t=$('#toast');t.textContent=msg;t.className='toast show'+(isErr?' err':'');clearTimeout(t._h);t._h=setTimeout(()=>t.className='toast',2600)}
+async function api(path,method='GET',body){
+  const res=await fetch(path,{method,headers:{Authorization:'Bearer '+S.token,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
+  const text=await res.text();
+  let data={};try{data=text?JSON.parse(text):{}}catch(_){data={raw:text}}
+  if(!res.ok)throw new Error(data.error||('HTTP '+res.status));
+  return data;
+}
+function decodeFlag(s){const m=String(s||'').match(/[\u{1F1E6}-\u{1F1FF}]{2}/u);if(!m)return null;return[...m[0]].map(c=>String.fromCharCode(c.codePointAt(0)-0x1F1E6+65)).join('')}
+function countryOf(alias,prefix){
+  const flag=decodeFlag(alias);if(flag&&FLAG[flag])return flag;
+  if(prefix&&PREFIX[prefix])return PREFIX[prefix];
+  for(const[re,code]of KEYWORDS)if(re.test(alias||''))return code;
+  return null;
+}
+function flagOf(alias,prefix){const c=countryOf(alias,prefix);return c?(FLAG[c]||'🌐'):'🌐'}
+function signalBars(dbm){const n=dbm==null?0:dbm>=-70?4:dbm>=-85?3:dbm>=-100?2:dbm>=-110?1:0;return '<span class="signal">'+[3,6,9,12].map((h,i)=>'<i class="'+(i<n?'on':'')+'" style="height:'+h+'px"></i>').join('')+'</span>'}
+function fmtEpoch(ms){if(!ms)return '—';const d=new Date(ms);const p=n=>String(n).padStart(2,'0');return p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes())}
+function fmtRemain(sec){if(sec==null)return null;const s=Math.max(0,sec|0);const m=Math.floor(s/60);return m+'分'+String(s%60).padStart(2,'0')+'秒'}
+
+function render(){
+  const d=S.data||{},st=d.status||{},session=st.session,network=st.network,device=st.device,card=st.card,proxy=st.proxy,guard=st.dataGuard;
+  $('#gwPill').textContent=st.gateway==='running'?'网关运行中':'网关已停止';
+  $('#gwPill').className='pill '+(st.gateway==='running'?'ok':'bad');
+  if(guard){$('#guardPill').classList.remove('hide');$('#guardPill').textContent=guard.enabled?(guard.enforced?'流量卫士 · 已锁定':'流量卫士 · 待触发'):'流量卫士 · 关闭';$('#guardPill').className='pill '+(guard.enabled?(guard.enforced?'ok':'warn'):'')}
+  if(proxy){$('#proxyPill').classList.remove('hide');$('#proxyPill').textContent='代理 · '+(proxy.enabled?(proxy.currentNode||'已启用'):'关闭');$('#proxyPill').className='pill '+(proxy.enabled?'ok':'')}
+
+  // session
+  const sb=[];
+  if(session){
+    const stateText=session.state==='waiting_for_service'?'⏳ 基带搜网握手中':session.state==='ready'?'🟢 已就绪':'🔄 切换中';
+    sb.push('<div class="big">'+esc(session.target||'—')+'</div>');
+    sb.push('<div class="kv"><span>状态</span><b>'+stateText+'</b></div>');
+    if(session.returnTo)sb.push('<div class="kv"><span>回滚目标</span><b>'+esc(session.returnTo)+'</b></div>');
+    const rem=fmtRemain(session.remainingSeconds);
+    if(rem)sb.push('<div class="kv"><span>剩余时间</span><b>'+rem+' 后自动回主卡</b></div>');
+    else sb.push('<div class="kv"><span>会话模式</span><b>长驻生效</b></div>');
+  }else{
+    sb.push('<div class="big">常驻待机</div>');
+    sb.push('<div class="muted" style="margin-top:6px">当前无临时接码会话。</div>');
+  }
+  if(st.defaultProfile)sb.push('<div class="kv"><span>默认主卡</span><b>'+esc(st.defaultProfile)+'</b></div>');
+  if(st.keepAliveCount!=null)sb.push('<div class="kv"><span>保号任务</span><b>'+st.keepAliveCount+' 条</b></div>');
+  sb.push('<div class="row"><button data-act="back" class="primary">🏠 切回默认主卡</button><button data-act="default">📌 设当前为默认</button><button data-act="retry">🔄 补发未送达</button></div>');
+  $('#sessionBox').innerHTML=sb.join('');
+
+  // device
+  const db=[];
+  if(device&&device.batteryPercent!=null){
+    db.push('<div class="kv"><span>电量</span><b>'+device.batteryPercent+'% '+(device.charging?'⚡ 充电中':'⚠️ 未充电')+'</b></div>');
+    if(device.temperatureCelsius!=null)db.push('<div class="kv"><span>温度</span><b>'+Number(device.temperatureCelsius).toFixed(1)+' °C</b></div>');
+    if(device.networkType)db.push('<div class="kv"><span>网络类型</span><b>'+esc(device.networkType)+'</b></div>');
+  }
+  if(network){
+    db.push('<div class="kv"><span>SIM 槽位</span><b>SIM '+(network.slot||'?')+'</b></div>');
+    db.push('<div class="kv"><span>注册状态</span><b>'+esc(network.registration||'—')+(network.roaming?' · 漫游':'')+'</b></div>');
+    if(network.carrier)db.push('<div class="kv"><span>运营商</span><b>'+esc(network.carrier)+'</b></div>');
+    if(network.signalDbm!=null)db.push('<div class="kv"><span>信号</span><b>'+signalBars(network.signalDbm)+' '+network.signalDbm+' dBm</b></div>');
+  }else{
+    db.push('<div class="muted">暂无活动订阅或正在搜网。</div>');
+  }
+  if(card&&card.eid)db.push('<div class="kv"><span>EID</span><b class="mono">'+esc(card.eid)+'</b></div>');
+  if(card&&card.freeNonVolatileMemoryBytes!=null)db.push('<div class="kv"><span>芯片剩余空间</span><b>'+(card.freeNonVolatileMemoryBytes/1024).toFixed(1)+' KB</b></div>');
+  if(st.selectedReader)db.push('<div class="kv"><span>读卡器</span><b>'+esc(st.selectedReader)+'</b></div>');
+  $('#deviceBox').innerHTML=db.join('')||'<div class="muted">无数据</div>';
+
+  // guard
+  const gb=[];const caps=(d.dataGuard&&d.dataGuard.capabilities)||{};
+  if(guard){
+    gb.push('<div class="kv"><span>开关</span><b>'+(guard.enabled?'🟢 已启用':'⚪ 已关闭')+'</b></div>');
+    gb.push('<div class="kv"><span>本次会话强制</span><b>'+(guard.enforced?'🟢 移动数据已关闭':'⚪ 未强制')+'</b></div>');
+    gb.push('<div class="kv"><span>回滚时恢复</span><b>'+(guard.restoreOnRevert?'是':'否')+'</b></div>');
+  }
+  gb.push('<div class="kv"><span>MODIFY_PHONE_STATE</span><b>'+(caps.modifyPhoneState?'✔ 可用':'✘ 不可用')+'</b></div>');
+  gb.push('<div class="kv"><span>Root su</span><b>'+(caps.root?'✔ 可用':'✘ 不可用')+'</b></div>');
+  if(!caps.canEnforce)gb.push('<div class="muted" style="margin-top:8px;color:var(--warn)">当前构建无法自动关闭移动数据，请手动在系统设置中关闭数据漫游。</div>');
+  const subs=(d.dataGuard&&d.dataGuard.subscriptions)||[];
+  subs.forEach(s=>{gb.push('<div class="kv"><span>SIM '+(s.slotIndex+1)+' 数据</span><b>'+(s.dataEnabled==null?'未知':(s.dataEnabled?'🟢 开启':'⚪ 关闭'))+(s.roamingEnabled?' · 漫游开启':'')+'</b></div>')});
+  gb.push('<div class="row"><button data-act="guardToggle" class="'+(guard&&guard.enabled?'':'primary')+'">'+(guard&&guard.enabled?'关闭流量卫士':'启用流量卫士')+'</button><button data-act="guardApply" '+(caps.canEnforce?'':'disabled')+'>立即锁定当前卡</button></div>');
+  $('#guardBox').innerHTML=gb.join('');
+
+  // proxy
+  const pb=[];
+  if(proxy){
+    pb.push('<div class="kv"><span>联动状态</span><b>'+(proxy.enabled?'🟢 已启用':'⚪ 未启用')+'</b></div>');
+    pb.push('<div class="kv"><span>策略组</span><b>'+esc(proxy.targetGroup||'—')+'</b></div>');
+    pb.push('<div class="kv"><span>当前节点</span><b>'+esc(proxy.currentNode||'—')+'</b></div>');
+    if(proxy.snapshotNode)pb.push('<div class="kv"><span>切卡前快照</span><b>'+esc(proxy.snapshotNode)+'</b></div>');
+  }
+  const cfg=S.proxyCfg||{};
+  pb.push('<label for="pUrl">External Controller</label><input id="pUrl" value="'+esc(cfg.controllerUrl||proxy&&proxy.controllerUrl||'http://127.0.0.1:9090')+'">');
+  pb.push('<label for="pSecret">Secret（留空则不修改）</label><input id="pSecret" type="password" placeholder="••••••">');
+  pb.push('<label for="pGroup">Selector Group</label><input id="pGroup" value="'+esc(cfg.targetGroup||proxy&&proxy.targetGroup||'PROXY')+'">');
+  pb.push('<div class="row"><button data-act="proxySave" class="primary">保存并启用</button><button data-act="proxyTest">测试连接</button></div>');
+  $('#proxyBox').innerHTML=pb.join('');
+
+  // profiles
+  const profiles=d.profiles||[];
+  $('#profilesBox').innerHTML=profiles.length?profiles.map((p,i)=>{
+    const flag=flagOf(p.alias,p.iccidPrefix);
+    return '<div class="profile'+(p.enabled?' active':'')+'"><div class="flag">'+flag+'</div><div class="meta"><div>'+esc(p.alias||('Profile '+(i+1)))+'</div><small class="mono">'+(p.iccidSuffix?('尾号 '+esc(p.iccidSuffix)):'')+(p.enabled?' · 当前激活':'')+'</small></div><div class="acts">'+
+      (p.enabled?'<button disabled>已激活</button>':'<button data-act="switch5" data-idx="'+(i+1)+'" class="primary">⏱️ 5分钟接码</button><button data-act="switchPerm" data-idx="'+(i+1)+'">常驻</button>')+
+      '<button data-act="kaNow" data-idx="'+(i+1)+'">⚡保号</button></div></div>';
+  }).join(''):'<div class="muted">卡内暂无 Profile。</div>';
+
+  // sms
+  const messages=d.messages||[];
+  $('#smsBox').innerHTML=messages.length?messages.map(m=>{
+    let body=esc(m.body);
+    if(m.otp)body=body.split(esc(m.otp)).join('<span class="otp" data-act="copyOtp" data-otp="'+esc(m.otp)+'">'+esc(m.otp)+'</span>');
+    return '<div class="msg"><div class="top"><span>'+esc(m.sender)+'</span><span>'+fmtEpoch(m.receivedAtMillis)+(m.delivered?' · 已转发':' · 待重试')+'</span></div><div class="body">'+body+'</div></div>';
+  }).join(''):'<div class="muted">暂无短信记录。</div>';
+
+  // advanced
+  const opts=profiles.map((p,i)=>'<option value="'+(i+1)+'">'+esc((p.alias||('Profile '+(i+1)))+' (尾号 '+(p.iccidSuffix||'?'))+'</option>').join('');
+  $('#advancedBox').innerHTML=
+    '<label for="aProfile">目标 Profile</label><select id="aProfile">'+opts+'</select>'+
+    '<label for="aAlias">新备注名（重命名）</label><input id="aAlias" placeholder="例如 Saily US">'+
+    '<div class="row"><button data-act="rename">✏️ 重命名</button><button data-act="kaSet">🛡️ 每90天保号</button><button data-act="deleteReq" class="danger">🗑️ 申请删除</button></div>'+
+    '<label for="aToken">删除确认令牌</label><input id="aToken" placeholder="由“申请删除”返回">'+
+    '<div class="row"><button data-act="deleteConfirm" class="danger">确认删除</button></div>'+
+    '<label for="aAc">激活码 LPA:1$…</label><input id="aAc" placeholder="LPA:1$smdp$matching-id">'+
+    '<label for="aCc">确认码（可选）</label><input id="aCc">'+
+    '<div class="row"><button data-act="download" class="primary">⬇️ 下载并启用</button><button data-act="reader">🔀 切换读卡器</button></div>';
+}
+
+async function refresh(quiet){
+  if(S.busy)return;S.busy=true;
+  try{
+    S.data=await api('/api/v1/dashboard');
+    $('#login').classList.add('hide');$('#app').classList.remove('hide');
+    render();
+  }catch(e){
+    if(!quiet)toast('刷新失败：'+e.message,true);
+    if(/401|unauthorized|invalid_token/i.test(e.message)){$('#login').classList.remove('hide');$('#app').classList.add('hide')}
+  }finally{S.busy=false}
+}
+
+document.addEventListener('click',async ev=>{
+  const btn=ev.target.closest('[data-act]');if(!btn)return;
+  const act=btn.dataset.act;
+  const idx=btn.dataset.idx;
+  const run=async(fn,okMsg)=>{btn.disabled=true;try{const r=await fn();toast(okMsg||'完成');await refresh(true);return r}catch(e){toast(e.message,true)}finally{btn.disabled=false}};
+  if(act==='back')return run(()=>api('/api/v1/back','POST',{}),'已切回默认主卡');
+  if(act==='default')return run(()=>api('/api/v1/default','POST',{}),'已设为默认主卡');
+  if(act==='retry')return run(()=>api('/api/v1/sms/retry','POST',{}),'已触发补发');
+  if(act==='switch5')return run(()=>api('/api/v1/switch','POST',{profile:String(idx),temporaryMinutes:5}),'已开始切卡（5分钟后回滚）');
+  if(act==='switchPerm')return run(()=>api('/api/v1/switch','POST',{profile:String(idx)}),'已开始常驻切卡');
+  if(act==='kaNow')return run(()=>api('/api/v1/keepalive','POST',{profile:String(idx),runNow:true}),'保号任务已启动');
+  if(act==='kaSet')return run(()=>api('/api/v1/keepalive','POST',{profile:$('#aProfile').value,intervalDays:90}),'已设定 90 天保号');
+  if(act==='rename')return run(()=>api('/api/v1/rename','POST',{profile:$('#aProfile').value,alias:$('#aAlias').value}),'已重命名');
+  if(act==='deleteReq')return run(async()=>{const r=await api('/api/v1/delete/request','POST',{profile:$('#aProfile').value});$('#aToken').value=r.token||'';return r},'删除令牌已生成');
+  if(act==='deleteConfirm')return run(()=>api('/api/v1/delete/confirm','POST',{token:$('#aToken').value}),'已删除');
+  if(act==='download')return run(()=>api('/api/v1/download','POST',{activationCode:$('#aAc').value,confirmationCode:$('#aCc').value||undefined}),'下载已开始');
+  if(act==='reader')return run(()=>api('/api/v1/reader','POST',{reader:'2'}),'已切换读卡器');
+  if(act==='guardToggle')return run(()=>api('/api/v1/dataguard','POST',{enabled:!(S.data&&S.data.status&&S.data.status.dataGuard&&S.data.status.dataGuard.enabled)}),'流量卫士已更新');
+  if(act==='guardApply')return run(()=>api('/api/v1/dataguard/apply','POST',{}),'已锁定当前卡数据');
+  if(act==='proxyTest')return run(async()=>{const r=await api('/api/v1/proxy/test','POST',{controllerUrl:$('#pUrl').value,secret:$('#pSecret').value||undefined});toast(r.alive?('连接成功 · '+(r.version||'ok')):('连接失败 · '+(r.error||'')),!r.alive);return r});
+  if(act==='proxySave')return run(async()=>{
+    const body={enabled:true,controllerUrl:$('#pUrl').value,targetGroup:$('#pGroup').value};
+    if($('#pSecret').value)body.secret=$('#pSecret').value;
+    await api('/api/v1/proxy/config','POST',body);S.proxyCfg=body;return body;
+  },'代理联动已保存并启用');
+  if(act==='copyOtp'){
+    const otp=btn.dataset.otp||'';
+    try{await navigator.clipboard.writeText(otp);toast('验证码 '+otp+' 已复制')}catch(_){toast('验证码：'+otp)}
+    return;
+  }
+});
+
+$('#loginBtn').onclick=async()=>{
+  S.token=$('#token').value.trim();sessionStorage.setItem('nexus_token',S.token);
+  await refresh();
+  if(!$('#app').classList.contains('hide')){startTimer();toast('已连接')}
+};
+$('#token').addEventListener('keydown',e=>{if(e.key==='Enter')$('#loginBtn').click()});
+$('#refresh').onclick=()=>refresh();
+
+function startTimer(){
+  if(S.timer)clearInterval(S.timer);
+  S.timer=setInterval(()=>{if(!document.hidden)refresh(true)},8000);
+}
+(async()=>{
+  if(!S.token){$('#login').classList.remove('hide');return}
+  await refresh();
+  if(!$('#app').classList.contains('hide'))startTimer();
+})();
+</script>
+</body></html>''';
 }
 
 class _RemoteDefault {
@@ -2893,6 +3375,10 @@ class _RemoteSession {
     required this.defaultAlias,
     required this.readerId,
     required this.deadlineEpochMillis,
+    this.guardSubscriptionId,
+    this.guardDataEnabledBefore,
+    this.guardRoamingEnabledBefore,
+    this.guardEnforced = false,
   });
 
   final String state;
@@ -2903,11 +3389,22 @@ class _RemoteSession {
   final String readerId;
   final int deadlineEpochMillis;
 
+  /// Subscription the data safeguard locked down for this session, and the
+  /// state it found first, so a revert restores the phone exactly as it was.
+  final int? guardSubscriptionId;
+  final bool? guardDataEnabledBefore;
+  final bool? guardRoamingEnabledBefore;
+  final bool guardEnforced;
+
   _RemoteSession copyWith({
     String? state,
     String? targetAlias,
     String? defaultIccid,
     String? defaultAlias,
+    Object? guardSubscriptionId = _absent,
+    Object? guardDataEnabledBefore = _absent,
+    Object? guardRoamingEnabledBefore = _absent,
+    bool? guardEnforced,
   }) => _RemoteSession(
     state: state ?? this.state,
     targetIccid: targetIccid,
@@ -2916,6 +3413,16 @@ class _RemoteSession {
     defaultAlias: defaultAlias ?? this.defaultAlias,
     readerId: readerId,
     deadlineEpochMillis: deadlineEpochMillis,
+    guardSubscriptionId: guardSubscriptionId == _absent
+        ? this.guardSubscriptionId
+        : guardSubscriptionId as int?,
+    guardDataEnabledBefore: guardDataEnabledBefore == _absent
+        ? this.guardDataEnabledBefore
+        : guardDataEnabledBefore as bool?,
+    guardRoamingEnabledBefore: guardRoamingEnabledBefore == _absent
+        ? this.guardRoamingEnabledBefore
+        : guardRoamingEnabledBefore as bool?,
+    guardEnforced: guardEnforced ?? this.guardEnforced,
   );
 
   Map<String, Object?> toJson() => {
@@ -2926,6 +3433,10 @@ class _RemoteSession {
     'defaultAlias': defaultAlias,
     'readerId': readerId,
     'deadlineEpochMillis': deadlineEpochMillis,
+    'guardSubscriptionId': guardSubscriptionId,
+    'guardDataEnabledBefore': guardDataEnabledBefore,
+    'guardRoamingEnabledBefore': guardRoamingEnabledBefore,
+    'guardEnforced': guardEnforced,
   };
 
   factory _RemoteSession.fromJson(Object? value) {
@@ -2948,6 +3459,16 @@ class _RemoteSession {
       defaultAlias: map['defaultAlias']! as String,
       readerId: map['readerId']! as String,
       deadlineEpochMillis: map['deadlineEpochMillis']! as int,
+      guardSubscriptionId: map['guardSubscriptionId'] is int
+          ? map['guardSubscriptionId'] as int
+          : null,
+      guardDataEnabledBefore: map['guardDataEnabledBefore'] is bool
+          ? map['guardDataEnabledBefore'] as bool
+          : null,
+      guardRoamingEnabledBefore: map['guardRoamingEnabledBefore'] is bool
+          ? map['guardRoamingEnabledBefore'] as bool
+          : null,
+      guardEnforced: map['guardEnforced'] == true,
     );
   }
 }

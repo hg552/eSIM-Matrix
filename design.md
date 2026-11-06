@@ -153,15 +153,46 @@ stateDiagram-v2
 
 #### REST API 接口定义
 - `GET /`：内置轻量暗色系 Web 控制台（无外网静态资源依赖）。
+- `GET /api/v1/dashboard`：控制台首屏聚合数据（状态、Profile 矩阵、最近短信、流量卫士状态），一次往返完成整屏重绘。
 - `GET /api/v1/status`：获取当前网关状态与 SIM 卡注册详情 JSON。
 - `GET /api/v1/profiles`：枚举当前卡片 Profile 清单。
 - `POST /api/v1/default`：锁定当前卡为回滚卡。
-- `POST /api/v1/switch`（JSON: `{"profile": "alias_or_iccid"}`）：发起切卡。
+- `POST /api/v1/switch`（JSON: `{"profile": "alias_or_iccid", "temporaryMinutes": 5}`）：发起切卡。
 - `POST /api/v1/back`：强制回滚至默认卡。
+- `GET /api/v1/sms/history?limit=N`：按时间倒序返回短信记录（含提取到的 OTP 与投递状态）。
+- `GET /api/v1/proxy` / `POST /api/v1/proxy/config` / `POST /api/v1/proxy/test` / `POST /api/v1/proxy/switch`：代理联动查询、配置、连通性测试与手动切节点。
+- `POST /api/v1/dataguard`（JSON: `{"enabled": true, "restoreOnRevert": true}`）：漫游流量安全锁开关。
+- `POST /api/v1/dataguard/apply`：立即对当前会话（或指定 `subscriptionId`）关闭移动数据；无订阅时返回 `subscription_not_found`，绝不伪报成功。
 
 ---
 
-## 6. 关于保号引擎（Keep-Alive）的工程决策说明
+## 6. 漫游流量安全锁（Roaming Data Safeguard）
+
+**动机**：跨国保号卡在本地漫游时按 MB 计费，系统后台同步、应用更新或 Play 服务任意一次联网即可产生高额账单。接码只需 CS/IMS 短信信道，不需要分组数据。
+
+**实现**：`CellularDataGuardianPlugin`（Kotlin，MethodChannel `ee.nekoko.data_guard`）+ `CellularDataGuardian`（Dart 门面）。
+
+- **执行路径分级**：
+  1. 反射调用 `TelephonyManager.setDataEnabled(subId, false)` / `setDataRoamingEnabled(subId, false)`（需要 `MODIFY_PHONE_STATE`，特权构建自带）；
+  2. 上述不可用时回退 `su -c svc data disable`（仅对默认数据卡有效，作为尽力而为的兜底）；
+  3. 两者皆不可用时**明确上报未强制**，由 Telegram 与 Web 控制台提示用户手动关闭数据漫游。
+- **时序**：`_switchProfile` 在 `enableProfile` 前做一次尽力而为的锁定，`enableProfile` 返回后再做一次权威复核（SIM 复位可能把数据开关恢复成 ROM 默认）；基带进入 `ready` 时再复核一次，防止系统层重新打开数据。
+- **快照与回滚**：会话在 `_RemoteSession` 中持久化 `guardSubscriptionId`、切卡前的 `dataEnabled`/`roamingEnabled` 与 `guardEnforced`；`_revert` 成功后按快照恢复。切换失败时也立即恢复，避免出现「数据已关闭但没有会话负责恢复」的悬挂状态。
+- **验证边界**：订阅级开关需要真实 SIM/eUICC 才能观测生效；无 SIM 的模拟器只能验证通道、能力探测与降级语义。
+
+---
+
+## 7. 代理联动（Proxy Linkage）
+
+**动机**：出网 IP 与 SIM 归属地不一致是跨境平台风控的高危信号。
+
+- `ProxyLinkageService` 对接 Clash / Mihomo（FlClash）/ sing-box 的 External Controller（默认 `127.0.0.1:9090`），仅依赖标准 REST：`GET /proxies`、`GET /proxies/{group}`、`PUT /proxies/{group}`。
+- `ProxyMappingResolver` 按「自定义规则 → 国旗 Emoji → 国际区号 → 品牌/关键词 → 区域回退」推导目标节点；两字母国家代码带字母边界守卫（避免 `in` 命中 `Singapore`、`us` 命中 `Russia`），并过滤 `DIRECT`/`REJECT`/剩余流量等非实体节点。
+- 切卡前记录策略组当前节点快照，就绪后按目标卡国别切换；回滚或会话结束时还原快照。控制器离线、密钥错误或分组缺失时只记录告警，绝不阻塞物理切卡。
+
+---
+
+## 8. 关于保号引擎（Keep-Alive）的工程决策说明
 
 在当前架构中，**周期性定时切卡保号引擎（Cron Keep-Alive）在首期 MVP 中明确不做自动化执行**，原因如下：
 1. **基带与漫游握手不确定性**：跨国实体卡在境外漫游搜网时，部分运营商要求手动触发网络注册或甚至由于基带兼容性无法建立漫游上下文；若在无人值守时后台自动轮巡多张卡，单卡搜网超时会导致整体轮巡堵塞。

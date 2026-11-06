@@ -19,6 +19,7 @@ class MainApplication : Application() {
         engine.plugins.add(OmapiPlugin())
         engine.plugins.add(TelephonyPlugin())
         engine.plugins.add(NetworkStatusPlugin())
+        engine.plugins.add(CellularDataGuardianPlugin())
         engine.plugins.add(SmsRelayPlugin())
         engine.plugins.add(CertificatePlugin())
         engine.plugins.add(QrtrPlugin())

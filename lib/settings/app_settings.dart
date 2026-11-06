@@ -570,6 +570,27 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Roaming data safeguard: a foreign keep-alive eSIM can burn chargeable
+  // megabytes the moment the baseband registers, so the switch state machine
+  // turns mobile data off for the target subscription by default.
+  bool _dataGuardEnabled = true;
+  bool get dataGuardEnabled => _dataGuardEnabled;
+
+  bool _dataGuardRestoreOnRevert = true;
+  bool get dataGuardRestoreOnRevert => _dataGuardRestoreOnRevert;
+
+  Future<void> setDataGuardEnabled(bool value) async {
+    _dataGuardEnabled = value;
+    await _prefs?.setBool('dataGuardEnabled', value);
+    notifyListeners();
+  }
+
+  Future<void> setDataGuardRestoreOnRevert(bool value) async {
+    _dataGuardRestoreOnRevert = value;
+    await _prefs?.setBool('dataGuardRestoreOnRevert', value);
+    notifyListeners();
+  }
+
 
   List<String> get remoCardUrls => _remoCardUrls;
 
@@ -835,6 +856,9 @@ class AppSettings extends ChangeNotifier {
     _proxySecret = _prefs?.getString('proxySecret');
     _proxyTargetGroup = _prefs?.getString('proxyTargetGroup') ?? 'PROXY';
     _proxyAutoRestore = _prefs?.getBool('proxyAutoRestore') ?? true;
+    _dataGuardEnabled = _prefs?.getBool('dataGuardEnabled') ?? true;
+    _dataGuardRestoreOnRevert =
+        _prefs?.getBool('dataGuardRestoreOnRevert') ?? true;
     final rulesJson = _prefs?.getString('proxyCustomRules');
     if (rulesJson != null) {
       try {

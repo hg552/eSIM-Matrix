@@ -9,6 +9,12 @@ import 'package:nlpa2/services/proxy_mapping_resolver.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  // flutter_test installs an HttpOverrides client that answers 400 to every
+  // request, which would make these loopback integration tests meaningless.
+  setUpAll(() {
+    HttpOverrides.global = null;
+  });
+
   group('ProxyMappingResolver', () {
     const resolver = ProxyMappingResolver();
 

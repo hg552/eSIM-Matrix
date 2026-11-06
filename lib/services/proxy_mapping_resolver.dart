@@ -30,33 +30,105 @@ class ProxyMappingResolver {
   const ProxyMappingResolver();
 
   static final RegExp _metaNodePattern = RegExp(
-    r'(?i)(direct|reject|compatible|traffic|expire|官网|剩余|到期|重置|套餐|群|发布|维护|故障|测试|test|auto|fallback|loadbalance|urltest|roundrobin)',
+    r'(direct|reject|compatible|traffic|expire|官网|剩余|到期|重置|套餐|群|发布|维护|故障|测试|test|auto|fallback|loadbalance|urltest|roundrobin)',
+    caseSensitive: false,
   );
 
-  /// Standard country keyword regexes used to match node names in Clash subscriptions.
+  /// Country keyword regexes for Clash node names.
+  ///
+  /// Dart's [RegExp] has no inline `(?i)` flag, so every pattern is compiled
+  /// with [caseSensitive] false. Two-letter codes carry letter guards because
+  /// a bare `in`/`us`/`ca` would otherwise match inside other words
+  /// ("Singapore" contains "in", "Russia" contains "us").
   static final Map<String, RegExp> _countryNodePatterns = {
-    'US': RegExp(r'(?i)(us|united\s*states|america|美国|美|洛杉矶|硅谷|波特兰|西雅图|芝加哥|纽约|达拉斯|圣何塞|凤凰城|迈阿密|休斯顿)'),
-    'HK': RegExp(r'(?i)(hk|hong\s*kong|hongkong|香港|港)'),
-    'TW': RegExp(r'(?i)(tw|taiwan|台湾|台|台北|新北|台中|高雄)'),
-    'JP': RegExp(r'(?i)(jp|japan|日本|日|东京|大阪|名古屋|福冈|埼玉)'),
-    'SG': RegExp(r'(?i)(sg|singapore|新加坡|狮城|新)'),
-    'GB': RegExp(r'(?i)(gb|uk|united\s*kingdom|britain|英国|英|伦敦|曼彻斯特)'),
-    'EE': RegExp(r'(?i)(ee|estonia|爱沙尼亚)'),
-    'DE': RegExp(r'(?i)(de|germany|德国|德|法兰克福|柏林|慕尼黑)'),
-    'CA': RegExp(r'(?i)(ca|canada|加拿大|加|多伦多|温哥华|蒙特利尔)'),
-    'AU': RegExp(r'(?i)(au|australia|澳大利亚|澳洲|澳|悉尼|墨尔本|布里斯班)'),
-    'FR': RegExp(r'(?i)(fr|france|法国|法|巴黎)'),
-    'KR': RegExp(r'(?i)(kr|korea|韩国|韩|首尔)'),
-    'NL': RegExp(r'(?i)(nl|netherlands|荷兰|阿姆斯特丹)'),
-    'TH': RegExp(r'(?i)(th|thailand|泰国|泰|曼谷)'),
-    'MY': RegExp(r'(?i)(my|malaysia|马来西亚|吉隆坡)'),
-    'PH': RegExp(r'(?i)(ph|philippines|菲律宾|马尼拉)'),
-    'VN': RegExp(r'(?i)(vn|vietnam|越南|河内|胡志明)'),
-    'TR': RegExp(r'(?i)(tr|turkey|土耳其|伊斯坦布尔)'),
-    'IN': RegExp(r'(?i)(in|india|印度|孟买)'),
-    'BR': RegExp(r'(?i)(br|brazil|巴西|圣保罗)'),
-    'RU': RegExp(r'(?i)(ru|russia|俄罗斯|莫斯科)'),
-    'EU': RegExp(r'(?i)(eu|europe|欧洲|欧)'),
+    'US': RegExp(
+      r'(?<![a-z])us(?![a-z])|united\s*states|america|美国|美西|美东|洛杉矶|硅谷|波特兰|西雅图|芝加哥|纽约|达拉斯|圣何塞|凤凰城|迈阿密|休斯顿',
+      caseSensitive: false,
+    ),
+    'HK': RegExp(
+      r'(?<![a-z])hk(?![a-z])|hong\s*kong|香港|港卡|港',
+      caseSensitive: false,
+    ),
+    'TW': RegExp(
+      r'(?<![a-z])tw(?![a-z])|taiwan|台湾|台灣|台北|新北|台中|高雄',
+      caseSensitive: false,
+    ),
+    'JP': RegExp(
+      r'(?<![a-z])jp(?![a-z])|japan|日本|东京|東京|大阪|名古屋|福冈|埼玉',
+      caseSensitive: false,
+    ),
+    'SG': RegExp(
+      r'(?<![a-z])sg(?![a-z])|singapore|新加坡|狮城|獅城',
+      caseSensitive: false,
+    ),
+    'GB': RegExp(
+      r'(?<![a-z])(uk|gb)(?![a-z])|united\s*kingdom|britain|england|英国|英國|伦敦|倫敦|曼彻斯特',
+      caseSensitive: false,
+    ),
+    'EE': RegExp(
+      r'(?<![a-z])ee(?![a-z])|estonia|爱沙尼亚',
+      caseSensitive: false,
+    ),
+    'DE': RegExp(
+      r'(?<![a-z])de(?![a-z])|germany|德国|德國|法兰克福|柏林|慕尼黑',
+      caseSensitive: false,
+    ),
+    'CA': RegExp(
+      r'(?<![a-z])ca(?![a-z])|canada|加拿大|多伦多|温哥华|蒙特利尔',
+      caseSensitive: false,
+    ),
+    'AU': RegExp(
+      r'(?<![a-z])au(?![a-z])|australia|澳大利亚|澳洲|悉尼|墨尔本|布里斯班',
+      caseSensitive: false,
+    ),
+    'FR': RegExp(
+      r'(?<![a-z])fr(?![a-z])|france|法国|法國|巴黎',
+      caseSensitive: false,
+    ),
+    'KR': RegExp(
+      r'(?<![a-z])kr(?![a-z])|korea|韩国|韓國|首尔|首爾',
+      caseSensitive: false,
+    ),
+    'NL': RegExp(
+      r'(?<![a-z])nl(?![a-z])|netherlands|荷兰|荷蘭|阿姆斯特丹',
+      caseSensitive: false,
+    ),
+    'TH': RegExp(
+      r'(?<![a-z])th(?![a-z])|thailand|泰国|泰國|曼谷',
+      caseSensitive: false,
+    ),
+    'MY': RegExp(
+      r'(?<![a-z])my(?![a-z])|malaysia|马来西亚|吉隆坡',
+      caseSensitive: false,
+    ),
+    'PH': RegExp(
+      r'(?<![a-z])ph(?![a-z])|philippines|菲律宾|菲律賓|马尼拉',
+      caseSensitive: false,
+    ),
+    'VN': RegExp(
+      r'(?<![a-z])vn(?![a-z])|vietnam|越南|河内|胡志明',
+      caseSensitive: false,
+    ),
+    'TR': RegExp(
+      r'(?<![a-z])tr(?![a-z])|turkey|土耳其|伊斯坦布尔',
+      caseSensitive: false,
+    ),
+    'IN': RegExp(
+      r'(?<![a-z])in(?![a-z])|india|印度|孟买',
+      caseSensitive: false,
+    ),
+    'BR': RegExp(
+      r'(?<![a-z])br(?![a-z])|brazil|巴西|圣保罗',
+      caseSensitive: false,
+    ),
+    'RU': RegExp(
+      r'(?<![a-z])ru(?![a-z])|russia|俄罗斯|莫斯科',
+      caseSensitive: false,
+    ),
+    'EU': RegExp(
+      r'(?<![a-z])eu(?![a-z])|europe|欧洲|歐盟|欧盟',
+      caseSensitive: false,
+    ),
   };
 
   /// Fallback regional hierarchy when exact country node does not exist in subscription.
