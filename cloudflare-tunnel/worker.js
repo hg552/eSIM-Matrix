@@ -1,5 +1,5 @@
 /**
- * eUICC-Nexus Cloudflare Worker End-to-End Encrypted SMS Tunnel & Live Web Dashboard
+ * eSIM-Matrix Cloudflare Worker End-to-End Encrypted SMS Tunnel & Live Web Dashboard
  *
  * Zero-Knowledge Architecture:
  * - Phone encrypts SMS payload locally with AES-256-GCM.
@@ -298,7 +298,7 @@ function renderDashboardHtml() {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>eUICC-Nexus 实时接码看板</title>
+  <title>eSIM-Matrix 实时接码看板</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
   <style>
     :root {
@@ -540,7 +540,7 @@ function renderDashboardHtml() {
     <header class="header">
       <div class="brand">
         <div class="brand-icon">⚡</div>
-        <span>eUICC-Nexus</span>
+        <span>eSIM-Matrix</span>
       </div>
       <div id="deviceStatus" class="status-badge offline">
         <span class="status-dot"></span>

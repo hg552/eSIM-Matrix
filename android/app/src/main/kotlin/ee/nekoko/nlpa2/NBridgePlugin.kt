@@ -158,7 +158,7 @@ class NBridgePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     private fun callProvider(method: String, extras: Bundle?): Map<String, Any?> {
         if (BuildConfig.FLAVOR == "nexus") {
-            throw IllegalStateException("OTBridge access is disabled in the eUICC-Nexus build")
+            throw IllegalStateException("OTBridge access is disabled in the eSIM-Matrix build")
         }
         val appContext = context ?: throw IllegalStateException("Context unavailable")
         val authority = DEFAULT_AUTHORITY

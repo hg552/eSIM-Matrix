@@ -296,7 +296,7 @@ abstract class AppLocalizations {
   /// No description provided for @smsRelayUnavailable.
   ///
   /// In en, this message translates to:
-  /// **'SMS forwarding is included only in the eUICC-Nexus Android APK. This build cannot receive SMS.'**
+  /// **'SMS forwarding is included only in the eSIM-Matrix Android APK. This build cannot receive SMS.'**
   String get smsRelayUnavailable;
 
   /// No description provided for @smsRelayPermissionRequired.

@@ -108,7 +108,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get smsRelayUnavailable =>
-      '短信转发只包含在 eUICC-Nexus Android APK 中；此版本不能接收短信。';
+      '短信转发只包含在 eSIM-Matrix Android APK 中；此版本不能接收短信。';
 
   @override
   String get smsRelayPermissionRequired => '需要接收短信权限';

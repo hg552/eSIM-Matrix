@@ -13,7 +13,7 @@
 //
 // Usage:
 //   node scripts/publish_update_feed.mjs --apk <apk> --version 1.3.4 --build 134 \
-//        --tag v1.3.4 [--changelog <file>] [--repo MIY-Y/eUICC-Nexus] \
+//        --tag v1.4.0 [--changelog <file>] [--repo hg552/eSIM-Matrix] \
 //        [--channel multi] [--out update_feed.json]
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -31,7 +31,7 @@ const version = arg('version');
 const build = Number(arg('build'));
 const tag = arg('tag');
 const changelogFile = arg('changelog');
-const repo = arg('repo', 'MIY-Y/eUICC-Nexus');
+const repo = arg('repo', 'hg552/eSIM-Matrix');
 const channel = arg('channel', 'multi');
 const out = arg('out', 'update_feed.json');
 const sdkRoot = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || '';

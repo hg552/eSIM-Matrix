@@ -1,4 +1,4 @@
-# eUICC-Nexus 架构设计与技术规范 (design.md)
+# eSIM-Matrix 架构设计与技术规范 (design.md)
 
 ## 1. 项目背景与设计目标
 
@@ -32,7 +32,7 @@ flowchart TD
         TGUser[Telegram App] -->|Private Command Whitelist| TGBot[Telegram Bot Poller]
     end
 
-    subgraph 守护网关核心 [eUICC-Nexus Engine: Dart Headless Runtime]
+    subgraph 守护网关核心 [eSIM-Matrix Engine: Dart Headless Runtime]
         RestAPI --> GatewayService[RemoteGatewayService]
         TGBot --> GatewayService
         GatewayService --> ProfileCtrl[RemoteProfileControl]
@@ -202,7 +202,7 @@ Telegram 主菜单加入「🛡️ 流量卫士 / 🌐 代理联动 / 📡 接�
 
 若终端激活境外本地卡（如香港 ClubSim）且出口代理切至香港，但系统底层 GPS 仍上报国内或返回空坐标，极易在风控引擎中触发「代理环境与传感器地理位置冲突」的欺诈标记。
 
-因此，eUICC-Nexus 构建了 **Profile + Proxy + Location 三维一体化联动引擎 (3D Linkage Engine)**：
+因此，eSIM-Matrix 构建了 **Profile + Proxy + Location 三维一体化联动引擎 (3D Linkage Engine)**：
 
 ```
                     ┌─────────────────────────┐
@@ -237,7 +237,7 @@ Telegram 主菜单加入「🛡️ 流量卫士 / 🌐 代理联动 / 📡 接�
 - **机制与权限**：
   - 基于 Android 官方标准 `LocationManager` Test Provider 体系；
   - 在 `AndroidManifest.xml` 中静态声明 `android.permission.ACCESS_MOCK_LOCATION`（标记 `tools:ignore="MockLocation"`）；
-  - 首次使用需用户在 Android 系统「开发者选项」→「选择模拟位置信息应用」中勾选 `eUICC-Nexus`（包名 `ee.nekoko.nlpa2.multi`）。
+  - 首次使用需用户在 Android 系统「开发者选项」→「选择模拟位置信息应用」中勾选 `eSIM-Matrix`（包名 `ee.nekoko.nlpa2.multi`）。
 - **运行期探针**：
   - 调用 `AppOpsManager.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_MOCK_LOCATION, Process.myUid(), packageName)`（API 29+）或 `checkOpNoThrow` 动态检查授权状态（`isMockApp()`）；未授权时向用户提示明确的开启指引。
 - **Provider 注册与周期注入**：

@@ -188,7 +188,7 @@ void main() {
         ],
       );
 
-      expect(report, contains('eUICC-Nexus Diagnostic Report'));
+      expect(report, contains('eSIM-Matrix Diagnostic Report'));
       expect(report, contains('1. Application Info'));
       expect(report, contains('2. Diagnosis Hints'));
       expect(report, contains('3. Reader Discovery Breakdown'));

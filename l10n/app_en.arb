@@ -36,7 +36,7 @@
   "smsRelayTitle": "SMS relay",
   "smsRelaySubtitle": "Forward incoming SMS to your HTTPS webhook or Telegram destination.",
   "smsRelayPrivacy": "When enabled, every incoming SMS sender, full text (possibly verification codes), and available SIM slot/subscription/carrier metadata is sent to the selected HTTPS webhook or Telegram chat. Group and channel members may see these messages. The app does not retain SMS content or log it. Use only destinations you control.",
-  "smsRelayUnavailable": "SMS forwarding is included only in the eUICC-Nexus Android APK. This build cannot receive SMS.",
+  "smsRelayUnavailable": "SMS forwarding is included only in the eSIM-Matrix Android APK. This build cannot receive SMS.",
   "smsRelayPermissionRequired": "SMS reception permission is required",
   "smsRelayPermissionHelp": "Grant RECEIVE_SMS so Android can deliver incoming messages to this app. The app does not request SMS history or SMS sending permission.",
   "smsRelayGrantPermission": "Grant SMS permission",

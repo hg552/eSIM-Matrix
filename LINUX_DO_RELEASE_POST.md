@@ -1,7 +1,7 @@
 # 【开源发布】eSIM-Matrix：让闲置 Android 备用机化身海外 3D 异构环境网关（远程切卡/基带监听/短信接码/FlClash代理+定位三维联动/定时保号）
 
-> **开源地址**：[https://github.com/MIY-Y/eSIM-Matrix](https://github.com/MIY-Y/eSIM-Matrix)  
-> **开源协议**：[MIT License](https://github.com/MIY-Y/eSIM-Matrix/blob/main/LICENSE)  
+> **开源地址**：[https://github.com/hg552/eSIM-Matrix](https://github.com/hg552/eSIM-Matrix)  
+> **开源协议**：[MIT License](https://github.com/hg552/eSIM-Matrix/blob/main/LICENSE)  
 > **论坛致敬**：特别致敬 **LINUX DO (https://linux.do)** 社区！真诚、友善、团结、专业，愿与各位佬友共同探索搞机与数字游民工具的极致体验。
 
 ---
@@ -156,7 +156,7 @@
 
 ### 2. 获取安装包（三证书合一开箱即用）
 去 GitHub Release 页面下载最新 APK：
-👉 **GitHub Releases 下载**：[https://github.com/MIY-Y/eSIM-Matrix/releases](https://github.com/MIY-Y/eSIM-Matrix/releases)
+👉 **GitHub Releases 下载**：[https://github.com/hg552/eSIM-Matrix/releases](https://github.com/hg552/eSIM-Matrix/releases)
 
 > **💡 免折腾亮点**：本项目的 Release 安装包已将 **ESTK (`c47350...`)**、**9eSIM (`d1c0f4...`)**、**SakuraSIM (`65d057...`)** 三大主流品牌的 ARA-M 出厂认证证书全部内置并签名。**插卡即用，完全不需要拿电脑读卡器往卡里费劲写入 ARA-M 规则！**
 
@@ -189,7 +189,7 @@
 ## 0x05 开源协议与鸣谢致敬
 
 本项目崇尚真正的自由软件精神：
-- **开源协议**：严格采用宽松友好的 **[MIT License](https://github.com/MIY-Y/eSIM-Matrix/blob/main/LICENSE)**，保留版权声明即可自由商用、魔改与分发；
+- **开源协议**：严格采用宽松友好的 **[MIT License](https://github.com/hg552/eSIM-Matrix/blob/main/LICENSE)**，保留版权声明即可自由商用、魔改与分发；
 - **上游项目致敬**：
   - 核心底层能力基于 [iebb/NekokoLPA2](https://github.com/iebb/NekokoLPA2)（及其子项目 [OTBridge](https://github.com/iebb/OTBridge)、[remocard](https://github.com/iebb/remocard)），向 iebb 佬在 eUICC 开源领域的卓越贡献致敬；
   - 架构设计参考了 [cyDione/eSIM-SMS-Forwarder](https://github.com/cyDione/eSIM-SMS-Forwarder) 与 [SmsForwarder](https://github.com/pppscn/SmsForwarder) 的优秀思路；
@@ -204,7 +204,7 @@
 
 各位佬友在使用过程中如果遇到机型兼容性、OMAPI 读取异常、或者有更好玩的 3D 联动玩法想法，欢迎在贴子下方留言交流！
 
-- **项目 Repo**：[https://github.com/MIY-Y/eSIM-Matrix](https://github.com/MIY-Y/eSIM-Matrix)
+- **项目 Repo**：[https://github.com/hg552/eSIM-Matrix](https://github.com/hg552/eSIM-Matrix)
 - 如果觉得好用，欢迎佬友们动动发财的小手点个 **Star ⭐️** 支持一下！
 - 有 Bug 或需求直接在 GitHub 提 Issue / PR，或者在 LINUX DO 本帖直接盖楼，看到都会第一时间回复并修复！
 

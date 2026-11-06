@@ -36,7 +36,7 @@
   "smsRelayTitle": "短信转发",
   "smsRelaySubtitle": "将收到的短信转发到你配置的 HTTPS Webhook 或 Telegram 目的地。",
   "smsRelayPrivacy": "启用后，发送者、完整短信正文（可能含验证码）及可用的卡槽、订阅 ID、运营商信息会发送到所选 HTTPS Webhook 或 Telegram 会话。群组和频道成员可能看到这些消息。本应用不保存短信正文，也不写入日志；只配置你本人控制的目的地。",
-  "smsRelayUnavailable": "短信转发只包含在 eUICC-Nexus Android APK 中；此版本不能接收短信。",
+  "smsRelayUnavailable": "短信转发只包含在 eSIM-Matrix Android APK 中；此版本不能接收短信。",
   "smsRelayPermissionRequired": "需要接收短信权限",
   "smsRelayPermissionHelp": "需要 RECEIVE_SMS 才能接收 Android 投递的入站短信。本应用不请求读取短信历史或发送短信的权限。",
   "smsRelayGrantPermission": "授予短信权限",

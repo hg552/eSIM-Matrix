@@ -113,7 +113,7 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get smsRelayUnavailable =>
-      'SMS forwarding is included only in the eUICC-Nexus Android APK. This build cannot receive SMS.';
+      'SMS forwarding is included only in the eSIM-Matrix Android APK. This build cannot receive SMS.';
 
   @override
   String get smsRelayPermissionRequired =>

@@ -37,10 +37,10 @@ RUST_LIB="librust_lib_nlpa2.so"
 
 # This project publishes its own feed; upstream's default would advertise
 # upstream releases under a different package name.
-UPDATE_FEED_URL="${UPDATE_FEED_URL:-https://raw.githubusercontent.com/MIY-Y/eUICC-Nexus/main/update_feed.json}"
+UPDATE_FEED_URL="${UPDATE_FEED_URL:-https://raw.githubusercontent.com/hg552/eSIM-Matrix/main/update_feed.json}"
 
 # The name shown in the update dialog and the window title.
-APP_DISPLAY_NAME="${APP_DISPLAY_NAME:-eUICC-Nexus}"
+APP_DISPLAY_NAME="${APP_DISPLAY_NAME:-eSIM-Matrix}"
 
 echo "==> toolchain"
 rustup --version

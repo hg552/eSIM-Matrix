@@ -197,7 +197,7 @@ def main():
             # advertise upstream releases, which are a different package.
             feed_args = [
                 "--dart-define=APP_UPDATE_FEED_URL="
-                "https://raw.githubusercontent.com/MIY-Y/eUICC-Nexus/main/update_feed.json"
+                "https://raw.githubusercontent.com/hg552/eSIM-Matrix/main/update_feed.json"
             ]
             # Android
             run_cmd([

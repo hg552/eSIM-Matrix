@@ -486,8 +486,8 @@ class SmsRelayPlugin :
                     SmsRelayStore.recordDelivery(
                         appContext!!,
                         delivered = true,
-                        sender = "eUICC-Nexus 测试",
-                        body = "这是一条来自 eUICC-Nexus 的 Telegram 转发连通性测试消息。",
+                        sender = "eSIM-Matrix 测试",
+                        body = "这是一条来自 eSIM-Matrix 的 Telegram 转发连通性测试消息。",
                         mode = SmsRelayMode.TELEGRAM,
                     )
                     Handler(Looper.getMainLooper()).post { result.success(true) }
@@ -532,8 +532,8 @@ class SmsRelayPlugin :
                         endpoint,
                         channelId,
                         token,
-                        "eUICC-Nexus 验证通道",
-                        "【eUICC-Nexus】您正在验证 Cloudflare 加密隧道接码看板，验证码为：888666，打通即享零知识安全接码。",
+                        "eSIM-Matrix 验证通道",
+                        "【eSIM-Matrix】您正在验证 Cloudflare 加密隧道接码看板，验证码为：888666，打通即享零知识安全接码。",
                         SmsRelayOrigin(1, 0, "TestCarrier"),
                         System.currentTimeMillis(),
                     )
@@ -541,8 +541,8 @@ class SmsRelayPlugin :
                         SmsRelayStore.recordDelivery(
                             appContext!!,
                             delivered = true,
-                            sender = "eUICC-Nexus 验证通道",
-                            body = "这是一条来自 eUICC-Nexus 的 CF Worker 隧道测试消息。",
+                            sender = "eSIM-Matrix 验证通道",
+                            body = "这是一条来自 eSIM-Matrix 的 CF Worker 隧道测试消息。",
                             mode = SmsRelayMode.CF_WORKER,
                         )
                         Handler(Looper.getMainLooper()).post { result.success(true) }

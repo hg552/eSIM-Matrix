@@ -124,7 +124,7 @@ internal object TelegramBotClient {
     fun sendTestMessage(rawToken: String, rawChatId: String) {
         val token = normalizeToken(rawToken)
         val chatId = TelegramChatIdValidator.normalize(rawChatId).toLong()
-        sendText(token, chatId, "eUICC-Nexus SMS relay test")
+        sendText(token, chatId, "eSIM-Matrix SMS relay test")
     }
 
     internal fun parsePrivateStartChat(responseJson: String): TelegramPrivateChat? {

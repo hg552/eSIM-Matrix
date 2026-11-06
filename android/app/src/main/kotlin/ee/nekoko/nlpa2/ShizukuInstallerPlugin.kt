@@ -250,7 +250,7 @@ class ShizukuInstallerPlugin :
                     connectTimeout = 15000
                     readTimeout = 20000
                     setRequestProperty("Accept", "application/vnd.github+json")
-                    setRequestProperty("User-Agent", "eUICC-Nexus")
+                    setRequestProperty("User-Agent", "eSIM-Matrix")
                 }
         try {
             if (connection.responseCode != 200) return null
@@ -275,7 +275,7 @@ class ShizukuInstallerPlugin :
                     instanceFollowRedirects = false
                     connectTimeout = 15000
                     readTimeout = 60000
-                    setRequestProperty("User-Agent", "eUICC-Nexus")
+                    setRequestProperty("User-Agent", "eSIM-Matrix")
                 }
             try {
                 val code = connection.responseCode

@@ -177,7 +177,7 @@ internal class RemoteGatewayForegroundService : Service() {
         manager.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_ID,
-                "eUICC-Nexus 常驻服务",
+                "eSIM-Matrix 常驻服务",
                 NotificationManager.IMPORTANCE_LOW,
             ).apply {
                 description = "保持私有 eSIM 远程切卡与短信转发服务常驻"
@@ -203,7 +203,7 @@ internal class RemoteGatewayForegroundService : Service() {
         }
         return builder
             .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
-            .setContentTitle("eUICC-Nexus 正在运行")
+            .setContentTitle("eSIM-Matrix 正在运行")
             .setContentText("短信实时转发与远程切卡网关已就绪")
             .setCategory(Notification.CATEGORY_SERVICE)
             .setOngoing(true)

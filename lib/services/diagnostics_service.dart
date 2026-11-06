@@ -310,7 +310,7 @@ class DiagnosticsService {
     final buf = StringBuffer();
 
     buf.writeln('================================================================');
-    buf.writeln('eUICC-Nexus Diagnostic Report / 诊断与排查报告');
+    buf.writeln('eSIM-Matrix Diagnostic Report / 诊断与排查报告');
     buf.writeln('Timestamp: ${at.toIso8601String()}');
     buf.writeln('Notice: Sensitive numbers (ICCID/EID/tokens) are masked for privacy.');
     buf.writeln('================================================================');

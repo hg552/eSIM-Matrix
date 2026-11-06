@@ -4,7 +4,7 @@
   <b>基于 Android 备用机的远程多国 eSIM (eUICC) 切卡、基带漫游监控、3D 异构海外环境联动（SIM + 代理 + 虚拟定位）与短信/验证码转发网关</b><br/>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" alt="MIT License" /></a>
   <a href="https://github.com/iebb/NekokoLPA2"><img src="https://img.shields.io/badge/Upstream-NekokoLPA2-6E56CF?style=flat-square" alt="Based on NekokoLPA2" /></a>
-  <a href="https://github.com/MIY-Y/eSIM-Matrix/releases"><img src="https://img.shields.io/badge/Release-v1.3.5-orange?style=flat-square" alt="Release v1.3.5" /></a>
+  <a href="https://github.com/hg552/eSIM-Matrix/releases"><img src="https://img.shields.io/badge/Release-v1.4.0-orange?style=flat-square" alt="Release v1.4.0" /></a>
   <a href="https://linux.do"><img src="https://img.shields.io/badge/Community-LINUX%20DO-f09433?style=flat-square" alt="LINUX DO 社区" /></a>
 </p>
 
@@ -33,7 +33,7 @@
 
 ## 3 分钟快速上手
 
-1. **安装授权**：将 eUICC 芯片插入备用机（推荐插在 `SIM 2` 槽），下载安装 [Releases 中的最新版 APK](https://github.com/MIY-Y/eSIM-Matrix/releases)（**全签名合一版**：单个安装包内置 ESTK `c47350...` + 9eSIM `d1c0f4...` + SakuraSIM `65d057...` 三套证书）；在 App 内授予电话、短信、定位与通知权限，将系统省电策略设为**「无限制」**。
+1. **安装授权**：将 eUICC 芯片插入备用机（推荐插在 `SIM 2` 槽），下载安装 [Releases 中的最新版 APK](https://github.com/hg552/eSIM-Matrix/releases)（**全签名合一版**：单个安装包内置 ESTK `c47350...` + 9eSIM `d1c0f4...` + SakuraSIM `65d057...` 三套证书）；在 App 内授予电话、短信、定位与通知权限，将系统省电策略设为**「无限制」**。
 2. **绑定 Telegram Bot**：
    - 找 [`@BotFather`](https://t.me/BotFather) 发送 `/newbot` 创建机器人并复制 **Bot Token**；
    - 在 Telegram 给你的机器人发送一次 `/start`；
@@ -117,7 +117,7 @@
 
 ### 2. 快速使用步骤
 1. **插卡识别**：将 ESTKme 插入手机 SIM 槽（推荐插在闲置的 `SIM 2` 槽）；
-2. **安装应用**：安装 [Releases 最新版 APK](https://github.com/MIY-Y/eUICC-Nexus/releases)（内置 ESTK 官方出厂 ARA-M 证书 `C47350...`）；
+2. **安装应用**：安装 [Releases 最新版 APK](https://github.com/hg552/eSIM-Matrix/releases)（内置 ESTK 官方出厂 ARA-M 证书 `C47350...`）；
 3. **读取卡片**：打开 App，首页将通过手机系统内置 OMAPI 自动读取卡内所有 Profile、芯片剩余闪存空间 (`Free NVRAM KB`) 与 `EID`；
 4. **远程切卡与保号**：绑定 Telegram Bot 后，即可远程通过 `/list` 随时切卡，或通过 `/keepalive` 配置每 90/180 天全自动驻网保号。
 
@@ -130,7 +130,7 @@
 
 | 配置项 (Field) | 填写内容 (Value) | 说明 |
 | :--- | :--- | :--- |
-| **规则名称 (Name)** | `eUICC-Nexus` 或 `NekokoLPA` | 自定义标识名称 |
+| **规则名称 (Name)** | `eSIM-Matrix` 或 `NekokoLPA` | 自定义标识名称 |
 | **应用 AID (Target AID)** | `A0000005591010FFFFFFFF8900000100` | GSMA ISD-R 根应用 AID（部分工具若支持通配可填 `FFFFFFFFFFFF`） |
 | **证书哈希 (SHA-1)** | **`C47350C7BA682B34A3E584A0D58463EA42B1AD73`** | **【必填】ESTK / NekokoLPA 官方证书指纹** |
 | **证书哈希 (SHA-256)** | `4139278AACCE8338C03DC9A6B0172C1880E0A4949FF3E05292C2E781765026FA` | 备用（部分新版 GlobalPlatform ARA-M 工具要求 SHA-256 时填入） |
@@ -165,7 +165,7 @@ C47350C7BA682B34A3E584A0D58463EA42B1AD73
   - 将 ESTK 卡插入电脑 PC/SC 智能卡读卡器，打开 EasyEUICC ➔ 切换到「ARA-M Rules」标签页 ➔ 点击「Add」➔ 粘贴上述 SHA-1 保存即可。
 
 ### 4. ESTKme MAX 双芯片 (SE0 ⇄ SE1) 切换
-ESTK MAX 内部拥有两颗独立的物理安全元件。在 eUICC-Nexus 中无需拔卡即可自由切换管理两颗芯片：
+ESTK MAX 内部拥有两颗独立的物理安全元件。在 eSIM-Matrix 中无需拔卡即可自由切换管理两颗芯片：
 - **App 端切换**：进入 App 首页，点击顶部读卡器栏，在下拉菜单中直接点选 **`ESTK Max SE0 (主芯片)`** 或 **`ESTK Max SE1 (副芯片)`**，系统将自动重新枚举并展示对应芯片内的 Profile 列表；
 - **Telegram 远程切换**：发送 `/readers` 指令，机器人会弹出卡槽与芯片切换按钮，点击对应按钮即可秒级远程切至目标芯片。
 
@@ -184,14 +184,14 @@ ESTK MAX 内部拥有两颗独立的物理安全元件。在 eUICC-Nexus 中无�
     - **配置步骤**：
       1. 打开手机「设置」➔「关于手机」➔ 连续点击「版本号」7 次进入「开发者模式」；
       2. 进入「开发者选项」➔ 找到「选择模拟位置信息应用」(Select mock location app)；
-      3. 在应用列表中选中 **eUICC-Nexus**（`ee.nekoko.nlpa2.multi`）；
-      4. 返回 eUICC-Nexus App「短信转发」页 ➔「虚拟定位联动」，伪装方案选择「系统模拟位置」，开启开关后点击「测试定位注入」验证香港尖沙咀坐标是否生效。
+      3. 在应用列表中选中 **eSIM-Matrix**（`ee.nekoko.nlpa2.multi`）；
+      4. 返回 eSIM-Matrix App「短信转发」页 ➔「虚拟定位联动」，伪装方案选择「系统模拟位置」，开启开关后点击「测试定位注入」验证香港尖沙咀坐标是否生效。
   - **方案二：Shizuku 底层 FusedLocation 模式 (高级，免 Root 系统级静默伪装)**
     - **实现原理**：利用 Shizuku 具备的系统 Shell 权限，静默授予 `cmd appops set ee.nekoko.nlpa2.multi android:mock_location allow`，并直接向底层的 `fused` 融合定位引擎与系统 Provider 注入经纬度。
     - **核心优势**：**无需在系统开发者选项中将本应用选为模拟位置**，彻底避免被部分海外高风控 App 探测到“已启用模拟位置”或在开发者选项中留痕，伪装度极高。
     - **配置步骤**：
       1. 手机安装并启动 [Shizuku](https://shizuku.rikka.app/)（已 Root 手机一键启动；未 Root 手机连接电脑执行一次 `adb shell sh .../start.sh`，或在 Android 11+ 上使用「无线调试」一键配对启动）；
-      2. 打开 eUICC-Nexus 并在 Shizuku 授权弹窗中点击「允许」；
+      2. 打开 eSIM-Matrix 并在 Shizuku 授权弹窗中点击「允许」；
       3. 在 App「短信转发」页中将定位方案切换为「Shizuku 底层 FusedLocation」并开启联动。
   - **安全自动注销**：开启「回滚时停止模拟定位」后，当 5 分钟接码结束、用户发送 `/back` 或在控制台切回默认主卡时，网关会自动注销测试 Provider 并关闭虚拟定位，手机立刻恢复真实的物理 GPS。
 
@@ -343,7 +343,7 @@ Bot 回复：
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────┐
-│ eUICC-Nexus Web Console          [网关运行中] [流量卫士·锁定] [代理·香港01] │
+│ eSIM-Matrix Web Console          [网关运行中] [流量卫士·锁定] [代理·香港01] │
 ├────────────────────────────────────────────────────────────────────────┤
 │ 📌 当前活跃会话                                                         │
 │ • 卡片：【Saily US】 (89012...) · 状态：🟢 已就绪                       │
