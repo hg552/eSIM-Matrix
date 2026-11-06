@@ -826,6 +826,9 @@ class RemoteGatewayService {
             await _profiles.purgeSwitchNotifications();
           }).catchError((Object _) {}),
         );
+        if (AppSettings().mockLocationAutoRestore) {
+          await stopMockLocation().catchError((Object _) => false);
+        }
       }
       return {'state': 'reverted', 'profile': targetDefaultAlias};
     }
@@ -858,6 +861,9 @@ class RemoteGatewayService {
       targetDefaultIccid: targetDefaultIccid,
       targetDefaultAlias: targetDefaultAlias,
     ).catchError((Object _) => null);
+    if (AppSettings().mockLocationAutoRestore) {
+      await stopMockLocation().catchError((Object _) => false);
+    }
     if (auto) {
       final proxyText = restoredProxy != null ? '\n🌐 代理节点已自动恢复为：【$restoredProxy】' : '';
       final guardText = AppSettings().dataGuardRestoreOnRevert &&
@@ -865,10 +871,13 @@ class RemoteGatewayService {
                   session.guardRoamingEnabledBefore != null)
           ? '\n🛡️ 流量卫士：已恢复切卡前的移动数据开关状态'
           : '';
+      final locText = AppSettings().mockLocationAutoRestore
+          ? '\n📍 虚拟定位：已恢复真实系统 GPS 定位'
+          : '';
       unawaited(
         _sendTelegramReply(
           _TelegramReply(
-            '🏠 临时接码/保号驻网时间已到，已自动为您切回默认主卡：【$targetDefaultAlias】。$guardText$proxyText',
+            '🏠 临时接码/保号驻网时间已到，已自动为您切回默认主卡：【$targetDefaultAlias】。$guardText$proxyText$locText',
             keyboard: const [
               [
                 _TelegramButton('📡 查看基带状态', 'cmd:status'),

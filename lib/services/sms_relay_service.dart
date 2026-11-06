@@ -81,8 +81,9 @@ class TelegramPrivateChat {
   const TelegramPrivateChat({required this.chatId, required this.displayName});
 
   factory TelegramPrivateChat.fromPlatform(Object? value) {
-    if (value is! Map)
+    if (value is! Map) {
       throw const FormatException('Invalid Telegram chat response');
+    }
     final map = Map<Object?, Object?>.from(value);
     final chatId = map['chatId'];
     final displayName = map['displayName'];

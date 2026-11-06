@@ -1090,6 +1090,7 @@ class _SmsRelayPageState extends State<SmsRelayPage>
               ),
               const SizedBox(height: 8),
               DropdownButtonFormField<String>(
+                // ignore: deprecated_member_use
                 value: _mockLocationMode,
                 decoration: InputDecoration(
                   labelText: '定位伪装方案',
@@ -1244,8 +1245,8 @@ class _SmsRelayPageState extends State<SmsRelayPage>
                   final item = _history[index];
                   final slotLabel = item.slotIndex != null ? 'SIM ${item.slotIndex! + 1}' : null;
                   final originParts = <String>[
-                    if (slotLabel != null) slotLabel,
-                    if (item.carrierName != null) item.carrierName!,
+                    ?slotLabel,
+                    ?item.carrierName,
                   ];
                   final originText = originParts.isEmpty ? '本机接收' : originParts.join(' · ');
                   final statusText = item.delivered
@@ -1721,6 +1722,7 @@ class _SmsRelayPageState extends State<SmsRelayPage>
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
+                      // ignore: deprecated_member_use
                       value: _mode,
                       decoration: InputDecoration(
                         labelText: l10n.smsRelayDestination,

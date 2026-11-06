@@ -10,7 +10,7 @@ final _log = Logger('ZxingDecoder');
 Future<String?> decodeQrWithZxing(String path) async {
   try {
     final bytes = await io.File(path).readAsBytes();
-    return decodeQrBytesWithZxing(bytes);
+    return await decodeQrBytesWithZxing(bytes);
   } catch (e) {
     _log.warning("zxing_lib file read failed: $e");
     return null;

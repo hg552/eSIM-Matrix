@@ -93,6 +93,7 @@ class MockLocationPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
     }
 
+    @Suppress("DEPRECATION")
     private fun isMockApp(): Boolean {
         val context = appContext ?: return false
         val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager ?: return false
@@ -104,7 +105,6 @@ class MockLocationPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     context.packageName
                 )
             } else {
-                @Suppress("DEPRECATION")
                 appOps.checkOpNoThrow(
                     AppOpsManager.OPSTR_MOCK_LOCATION,
                     Process.myUid(),
@@ -126,18 +126,32 @@ class MockLocationPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
     }
 
+    private fun executeShizukuProcess(vararg cmd: String): java.lang.Process? {
+        if (!isShizukuAvailable()) return null
+        return try {
+            val method = (Shizuku::class.java.declaredMethods + Shizuku::class.java.methods)
+                .firstOrNull { it.name == "newProcess" }
+            if (method != null) {
+                method.isAccessible = true
+                val args = when (method.parameterCount) {
+                    1 -> arrayOf(cmd)
+                    3 -> arrayOf(cmd, null, null)
+                    else -> arrayOf(cmd, null, null)
+                }
+                method.invoke(null, *args) as? java.lang.Process
+            } else {
+                null
+            }
+        } catch (e: Throwable) {
+            Log.v(TAG, "executeShizukuProcess failed: ${e.message}")
+            null
+        }
+    }
+
     private fun grantMockViaShizuku(): Boolean {
         val pkg = appContext?.packageName ?: return false
-        if (!isShizukuAvailable()) return false
         return try {
-            val cmd = arrayOf("cmd", "appops", "set", pkg, "android:mock_location", "allow")
-            val method = Shizuku::class.java.getMethod(
-                "newProcess",
-                Array<String>::class.java,
-                Array<String>::class.java,
-                String::class.java
-            )
-            val p = method.invoke(null, cmd, null, null) as? java.lang.Process
+            val p = executeShizukuProcess("cmd", "appops", "set", pkg, "android:mock_location", "allow")
             p?.waitFor() == 0
         } catch (e: Throwable) {
             Log.w(TAG, "grantMockViaShizuku failed", e)
@@ -283,15 +297,8 @@ class MockLocationPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     private fun runShizukuCmd(vararg cmd: String) {
-        if (!isShizukuAvailable()) return
         try {
-            val method = Shizuku::class.java.getMethod(
-                "newProcess",
-                Array<String>::class.java,
-                Array<String>::class.java,
-                String::class.java
-            )
-            val p = method.invoke(null, cmd, null, null) as? java.lang.Process
+            val p = executeShizukuProcess(*cmd)
             p?.waitFor()
         } catch (_: Throwable) {}
     }
