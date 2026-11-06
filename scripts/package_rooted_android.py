@@ -7,8 +7,8 @@ import re
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-APP_PATH = "system/priv-app/ee.nekoko.nlpa2/NekokoLPA.apk"
-PERMISSION_PATH = "system/etc/permissions/privapp-permissions-ee.nekoko.nlpa2.xml"
+APP_PATH = "system/priv-app/io.github.hg552.esimmatrix.privileged/NekokoLPA.apk"
+PERMISSION_PATH = "system/etc/permissions/privapp-permissions-io.github.hg552.esimmatrix.xml"
 
 
 def package(apk, output, version, template=ROOT / "magisk_template"):
@@ -26,7 +26,7 @@ def package(apk, output, version, template=ROOT / "magisk_template"):
     files = {
         "module.prop": prop.encode(),
         "customize.sh": (template / "customize.sh").read_bytes(),
-        PERMISSION_PATH: (template / "privapp-permissions-ee.nekoko.nlpa2.xml").read_bytes(),
+        PERMISSION_PATH: (template / "privapp-permissions-io.github.hg552.esimmatrix.xml").read_bytes(),
         APP_PATH: Path(apk).read_bytes(),
     }
     for source in (template / "META-INF").rglob("*"):

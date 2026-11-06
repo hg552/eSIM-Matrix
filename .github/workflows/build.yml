@@ -16,8 +16,8 @@ permissions:
   contents: write
 
 env:
-  ANDROID_ARTIFACT_PREFIX: ee.nekoko.nlpa2.community
-  DESKTOP_PACKAGE_ID: ee.nekoko.nlpa2
+  ANDROID_ARTIFACT_PREFIX: io.github.hg552.esimmatrix.community
+  DESKTOP_PACKAGE_ID: io.github.hg552.esimmatrix
   # Pinned so a stable-channel release cannot change the toolchain under us:
   # 3.47.2 turned Flutter's Gradle/AGP/Kotlin minimums from warnings into
   # errors. Bump deliberately, together with the versions in android/.

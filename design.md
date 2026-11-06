@@ -143,7 +143,7 @@ stateDiagram-v2
 - **Telegram 限制**：严格比对 `chat.type == private` 以及发送者 ID 是否精确匹配配置的私聊白名单 ID，忽略群组及任何非授权用户的消息。
 ### 5.1.1 发布包签名与升级兼容性
 
-已发布的 `ee.nekoko.nlpa2.multi`（v1.3.5）采用 **APK Signature Scheme v2 + 三个签名者**（不是 v1/v2/v3 三方案；实测 v1=false、v2=true、v3/v3.1/v4=false）：
+已发布的 `io.github.hg552.esimmatrix.multi`（v1.4.0）采用 **APK Signature Scheme v2 + 三个签名者**（不是 v1/v2/v3 三方案；实测 v1=false、v2=true、v3/v3.1/v4=false）：
 
 | # | keystore | 证书 | SHA-256 |
 |---|---|---|---|
@@ -237,7 +237,7 @@ Telegram 主菜单加入「🛡️ 流量卫士 / 🌐 代理联动 / 📡 接�
 - **机制与权限**：
   - 基于 Android 官方标准 `LocationManager` Test Provider 体系；
   - 在 `AndroidManifest.xml` 中静态声明 `android.permission.ACCESS_MOCK_LOCATION`（标记 `tools:ignore="MockLocation"`）；
-  - 首次使用需用户在 Android 系统「开发者选项」→「选择模拟位置信息应用」中勾选 `eSIM-Matrix`（包名 `ee.nekoko.nlpa2.multi`）。
+  - 首次使用需用户在 Android 系统「开发者选项」→「选择模拟位置信息应用」中勾选 `eSIM-Matrix`（包名 `io.github.hg552.esimmatrix.multi`）。
 - **运行期探针**：
   - 调用 `AppOpsManager.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_MOCK_LOCATION, Process.myUid(), packageName)`（API 29+）或 `checkOpNoThrow` 动态检查授权状态（`isMockApp()`）；未授权时向用户提示明确的开启指引。
 - **Provider 注册与周期注入**：

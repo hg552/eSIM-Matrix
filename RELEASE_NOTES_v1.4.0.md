@@ -4,7 +4,7 @@
 
 ### 📦 安装包特性
 - **三证书合一**：单个 APK 同时内置 ESTK（`C47350...`）、9eSIM（`D1C0F4...`）、SakuraSIM（`65D057...`）三套 ARA-M 出厂证书，插卡即用，无需电脑读卡器写规则。
-- **包名**：`ee.nekoko.nlpa2.multi`（与旧版一致，可直接覆盖升级，数据不丢）。
+- **包名（applicationId）**：`io.github.hg552.esimmatrix.multi`（全新独立包名，与原版 NekokoLPA 2 完全隔离，可同机共存）。
 
 ### ✨ 3D 异构海外环境联动
 - **维度一 · SIM 身份与物理基带**：秒级 Profile 热切换、5 分钟临时接卡自动回滚、CS 语音域 + PS 数据域双域搜网状态机。

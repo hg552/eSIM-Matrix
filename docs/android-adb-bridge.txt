@@ -69,7 +69,7 @@ The command
 The connect screen shows, for the installed package <pkg>:
 
     adb shell "CLASSPATH=\$(pm path <pkg> | sed -n 's/^package://p' | head -n1) \
-        app_process / ee.nekoko.nlpa2.AdbBridgeStarter <pkg>"
+        app_process / io.github.hg552.esimmatrix.AdbBridgeStarter <pkg>"
 
 It carries no secret and downloads nothing; it resolves the installed APK by
 package each time. The one argument names the app's provider. The helper lives

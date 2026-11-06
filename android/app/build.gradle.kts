@@ -9,7 +9,7 @@ plugins {
 // NLPA_* signing overrides belong to private brand builds, not this recipe.
 
 android {
-    namespace = "ee.nekoko.nlpa2"
+    namespace = "io.github.hg552.esimmatrix"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -64,27 +64,27 @@ android {
     productFlavors {
         create("community") {
             dimension = "version"
-            applicationId = "ee.nekoko.nlpa2.open"
+            applicationId = "io.github.hg552.esimmatrix.community"
             manifestPlaceholders["appName"] = "NekokoLPA 2 Community"
             signingConfig = signingConfigs.getByName("community")
         }
 
         create("nexus") {
             dimension = "version"
-            applicationId = "ee.nekoko.nlpa2.nexus"
+            applicationId = "io.github.hg552.esimmatrix.nexus"
             manifestPlaceholders["appName"] = "eSIM-Matrix"
             signingConfig = signingConfigs.getByName("community")
         }
         create("m") {
             dimension = "version"
-            applicationId = "ee.nekoko.nlpa2.multi"
+            applicationId = "io.github.hg552.esimmatrix.multi"
             manifestPlaceholders["appName"] = "eSIM-Matrix"
             signingConfig = signingConfigs.getByName("esim9")
         }
 
         create("privileged") {
             dimension = "version"
-            applicationId = "ee.nekoko.nlpa2"
+            applicationId = "io.github.hg552.esimmatrix.privileged"
             manifestPlaceholders["appName"] = "NekokoLPA 2 Community Rooted"
             signingConfig = signingConfigs.getByName("community")
         }
@@ -105,7 +105,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "ee.nekoko.nlpa2.open"
+        applicationId = "io.github.hg552.esimmatrix"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

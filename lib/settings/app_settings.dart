@@ -76,7 +76,7 @@ class AppSettings extends ChangeNotifier {
   String get commitHash => kCommitHash;
   String get versionDisplay => _version.startsWith('beta') ? _version : 'v$_version b$_buildNumber';
   String get packageName =>
-      _packageName.isNotEmpty ? _packageName : 'ee.nekoko.nlpa2.multi';
+      _packageName.isNotEmpty ? _packageName : 'io.github.hg552.esimmatrix.multi';
 
   String _flavorFileVariant = '';
 

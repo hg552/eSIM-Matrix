@@ -184,10 +184,10 @@ ESTK MAX 内部拥有两颗独立的物理安全元件。在 eSIM-Matrix 中无�
     - **配置步骤**：
       1. 打开手机「设置」➔「关于手机」➔ 连续点击「版本号」7 次进入「开发者模式」；
       2. 进入「开发者选项」➔ 找到「选择模拟位置信息应用」(Select mock location app)；
-      3. 在应用列表中选中 **eSIM-Matrix**（`ee.nekoko.nlpa2.multi`）；
+      3. 在应用列表中选中 **eSIM-Matrix**（`io.github.hg552.esimmatrix.multi`）；
       4. 返回 eSIM-Matrix App「短信转发」页 ➔「虚拟定位联动」，伪装方案选择「系统模拟位置」，开启开关后点击「测试定位注入」验证香港尖沙咀坐标是否生效。
   - **方案二：Shizuku 底层 FusedLocation 模式 (高级，免 Root 系统级静默伪装)**
-    - **实现原理**：利用 Shizuku 具备的系统 Shell 权限，静默授予 `cmd appops set ee.nekoko.nlpa2.multi android:mock_location allow`，并直接向底层的 `fused` 融合定位引擎与系统 Provider 注入经纬度。
+    - **实现原理**：利用 Shizuku 具备的系统 Shell 权限，静默授予 `cmd appops set io.github.hg552.esimmatrix.multi android:mock_location allow`，并直接向底层的 `fused` 融合定位引擎与系统 Provider 注入经纬度。
     - **核心优势**：**无需在系统开发者选项中将本应用选为模拟位置**，彻底避免被部分海外高风控 App 探测到“已启用模拟位置”或在开发者选项中留痕，伪装度极高。
     - **配置步骤**：
       1. 手机安装并启动 [Shizuku](https://shizuku.rikka.app/)（已 Root 手机一键启动；未 Root 手机连接电脑执行一次 `adb shell sh .../start.sh`，或在 Android 11+ 上使用「无线调试」一键配对启动）；

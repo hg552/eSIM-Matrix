@@ -65,7 +65,7 @@ class LocalNotificationService {
     const fln.WindowsInitializationSettings initializationSettingsWindows =
         fln.WindowsInitializationSettings(
           appName: 'nlpa2',
-          appUserModelId: 'ee.nekoko.nlpa2',
+          appUserModelId: 'io.github.hg552.esimmatrix',
           guid: '5d6d4a8f-0b1f-4b8b-bd7b-8d7f9c9b5c2a',
         );
 
