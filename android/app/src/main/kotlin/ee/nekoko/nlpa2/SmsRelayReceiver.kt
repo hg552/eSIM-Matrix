@@ -116,9 +116,10 @@ internal class SmsRelayReceiver : BroadcastReceiver() {
         }
 
         fun retryUndelivered(context: Context, targetId: String? = null): Int {
-            val settings = runCatching { SmsRelayStore.load(context.applicationContext) }.getOrNull() ?: return 0
+            val appContext = context.applicationContext ?: context
+            val settings = runCatching { SmsRelayStore.load(appContext) }.getOrNull() ?: return 0
             if (!settings.enabled || settings.token.isNullOrBlank()) return 0
-            val items = SmsRelayStore.loadHistory(context.applicationContext)
+            val items = SmsRelayStore.loadHistory(appContext)
             var deliveredCount = 0
             var attempted = 0
             for (item in items) {
@@ -137,7 +138,7 @@ internal class SmsRelayReceiver : BroadcastReceiver() {
                 val receivedAtMillis = (item["receivedAtMillis"] as? Number)?.toLong() ?: System.currentTimeMillis()
                 val origin = SmsRelayOrigin(null, slotIndex, carrierName)
                 val err = deliverSingle(settings, sender, body, origin, receivedAtMillis)
-                SmsRelayStore.markDelivered(context.applicationContext, id, err == null, err)
+                SmsRelayStore.markDelivered(appContext, id, err == null, err)
                 if (err == null) deliveredCount++
                 attempted++
             }

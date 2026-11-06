@@ -206,6 +206,9 @@ internal object SmsRelayStore {
         }
         require(!token.isNullOrBlank()) { "token_required" }
         require(token.toByteArray(Charsets.UTF_8).size <= MAX_TOKEN_BYTES) { "token_too_large" }
+        if (mode == SmsRelayMode.CF_WORKER) {
+            require(SmsRelayCfWorkerClient.parseSecretKeyBytes(token) != null) { "invalid_cf_secret" }
+        }
 
         val editor = preferences(context).edit()
             .putString(KEY_MODE, mode)
