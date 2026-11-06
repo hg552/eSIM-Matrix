@@ -16,6 +16,9 @@ import 'remote_profile_controller.dart';
 import 'sms_relay_service.dart';
 import 'network_status_service.dart';
 import 'telegram_registry.dart';
+import '../settings/app_settings.dart';
+import 'proxy_linkage_service.dart';
+import 'proxy_mapping_resolver.dart';
 
 /// Interface names that carry mobile data. A carrier CGNAT bearer is also
 /// numbered out of 100.64/10, so the address range alone cannot separate it
@@ -156,6 +159,10 @@ class RemoteGatewayService {
   bool? _wasCharging;
   int _lastHealthAlertMillis = 0;
   int _maintenanceTickCount = 0;
+  final ProxyLinkageService _proxyLinkage = ProxyLinkageService();
+  final ProxyMappingResolver _proxyResolver = const ProxyMappingResolver();
+  ProxySnapshot? _proxySnapshot;
+  String? _lastLinkedProxyNode;
 
   /// One maintenance run at a time; the 20-second timer must not overlap them.
   bool _maintenanceInFlight = false;
@@ -341,6 +348,13 @@ class RemoteGatewayService {
               'signalDbm': active.signalDbm,
               'error': active.error,
             },
+      'proxy': {
+        'enabled': AppSettings().proxyLinkageEnabled,
+        'targetGroup': AppSettings().proxyTargetGroup,
+        'currentNode': _lastLinkedProxyNode ?? _proxySnapshot?.node,
+        'lastLinkedNode': _lastLinkedProxyNode,
+        'snapshotNode': _proxySnapshot?.node,
+      },
       'lastTelegramError': _lastTelegramError,
       'lastSwitchEpochMillis': prefs.getInt(_lastSwitchKey),
     };
@@ -706,6 +720,12 @@ class RemoteGatewayService {
     _wasInServiceBeforeSwitch = wasInService;
     _sawDisconnectAfterSwitch = false;
     await _saveSession(_session);
+    _lastLinkedProxyNode = null;
+    if (AppSettings().proxyLinkageEnabled) {
+      unawaited(_triggerProxySwitch(target).catchError((Object e) {
+        _log.warning('Proxy linkage switch failed: $e');
+      }));
+    }
 
     try {
       await _profiles.enableProfile(target.iccid);
@@ -782,11 +802,16 @@ class RemoteGatewayService {
     _session = null;
     _readyNotificationSent = false;
     await _saveSession(null);
+    final restoredProxy = await _triggerProxyRestore(
+      targetDefaultIccid: targetDefaultIccid,
+      targetDefaultAlias: targetDefaultAlias,
+    ).catchError((Object _) => null);
     if (auto) {
+      final proxyText = restoredProxy != null ? '\n🌐 代理节点已自动恢复为：【$restoredProxy】' : '';
       unawaited(
         _sendTelegramReply(
           _TelegramReply(
-            '🏠 临时接码/保号驻网时间已到，已自动为您切回默认主卡：【$targetDefaultAlias】。',
+            '🏠 临时接码/保号驻网时间已到，已自动为您切回默认主卡：【$targetDefaultAlias】。$proxyText',
             keyboard: const [
               [
                 _TelegramButton('📡 查看基带状态', 'cmd:status'),
@@ -805,6 +830,85 @@ class RemoteGatewayService {
     final result = {'state': 'reverted', 'profile': targetDefaultAlias};
     return result;
   }
+  Future<void> _triggerProxySwitch(RemoteProfileEntry target) async {
+    final settings = AppSettings();
+    if (!settings.proxyLinkageEnabled) return;
+    final group = settings.proxyTargetGroup;
+    _proxyLinkage.updateConfig(
+      controllerUrl: settings.proxyControllerUrl,
+      secret: settings.proxySecret,
+    );
+    try {
+      if (_proxySnapshot == null) {
+        _proxySnapshot = await _proxyLinkage.snapshot(group);
+      }
+      final groupInfo = await _proxyLinkage.getGroup(group);
+      if (groupInfo == null) {
+        _log.warning('Proxy linkage: Group "$group" not found');
+        return;
+      }
+      final match = _proxyResolver.resolveNode(
+        candidates: groupInfo.all,
+        iccid: target.iccid,
+        alias: target.alias,
+        customRules: settings.proxyCustomRules,
+      );
+      if (match.matched && match.nodeName != null) {
+        final res = await _proxyLinkage.selectNode(group, match.nodeName!);
+        if (res.success) {
+          _lastLinkedProxyNode = match.nodeName;
+          _log.info('Proxy Linkage: Switched to [${match.nodeName}] for ${target.alias} (${match.reason})');
+        }
+      } else {
+        _log.info('Proxy Linkage: No matching node for ${target.alias}: ${match.reason}');
+      }
+    } catch (e) {
+      _log.warning('Proxy linkage switch exception: $e');
+    }
+  }
+
+  Future<String?> _triggerProxyRestore({
+    String? targetDefaultIccid,
+    String? targetDefaultAlias,
+  }) async {
+    final settings = AppSettings();
+    if (!settings.proxyLinkageEnabled || !settings.proxyAutoRestore) return null;
+    final group = settings.proxyTargetGroup;
+    _proxyLinkage.updateConfig(
+      controllerUrl: settings.proxyControllerUrl,
+      secret: settings.proxySecret,
+    );
+    String? restoredName;
+    try {
+      if (_proxySnapshot != null) {
+        final res = await _proxyLinkage.restore(_proxySnapshot!);
+        if (res.success) {
+          restoredName = _proxySnapshot!.node;
+          _log.info('Proxy Linkage: Restored original node to [$restoredName]');
+        }
+        _proxySnapshot = null;
+      } else if (targetDefaultAlias != null) {
+        final groupInfo = await _proxyLinkage.getGroup(group);
+        if (groupInfo != null) {
+          final match = _proxyResolver.resolveNode(
+            candidates: groupInfo.all,
+            iccid: targetDefaultIccid,
+            alias: targetDefaultAlias,
+            customRules: settings.proxyCustomRules,
+          );
+          if (match.matched && match.nodeName != null) {
+            final res = await _proxyLinkage.selectNode(group, match.nodeName!);
+            if (res.success) restoredName = match.nodeName;
+          }
+        }
+      }
+    } catch (e) {
+      _log.warning('Proxy linkage restore exception: $e');
+    }
+    _lastLinkedProxyNode = null;
+    return restoredName;
+  }
+
 
   void _startBasebandPolling() {
     _basebandPollTimer?.cancel();
@@ -880,10 +984,15 @@ class RemoteGatewayService {
     final roaming = subscription.roaming == true ? ' (漫游中)' : '';
     final signal = subscription.signalDbm == null ? '' : '，信号 ${subscription.signalDbm} dBm';
     final carrier = subscription.carrierName == null ? '' : '【${subscription.carrierName}】';
+    final proxyStatusText = AppSettings().proxyLinkageEnabled
+        ? (_lastLinkedProxyNode != null
+            ? '\n🌐 代理联动：已切换至【$_lastLinkedProxyNode】'
+            : '\n🌐 代理联动：已就绪')
+        : '';
     unawaited(
       _sendTelegramReply(
         _TelegramReply(
-          '📡 搜网就绪！\n已成功连接到基站$carrier$roaming$signal。\n\n'
+          '📡 搜网就绪！\n已成功连接到基站$carrier$roaming$signal。$proxyStatusText\n\n'
           '👉 卡片切换成功并已持久生效，现在可以前往目标平台接收验证码了！',
           keyboard: const [
             [
@@ -1353,6 +1462,72 @@ class RemoteGatewayService {
         await _writeJson(request.response, HttpStatus.ok, await confirmDeleteProfile(token));
       } else if (request.method == 'POST' && path == '/api/v1/back') {
         await _writeJson(request.response, HttpStatus.ok, await revertProfile());
+      } else if (request.method == 'GET' && path == '/api/v1/proxy') {
+        final settings = AppSettings();
+        _proxyLinkage.updateConfig(
+          controllerUrl: settings.proxyControllerUrl,
+          secret: settings.proxySecret,
+        );
+        final currentNode = await _proxyLinkage.getCurrentNode(settings.proxyTargetGroup);
+        final groups = await _proxyLinkage.getSelectorGroups();
+        await _writeJson(request.response, HttpStatus.ok, {
+          'enabled': settings.proxyLinkageEnabled,
+          'controllerUrl': settings.proxyControllerUrl,
+          'targetGroup': settings.proxyTargetGroup,
+          'autoRestore': settings.proxyAutoRestore,
+          'currentNode': currentNode,
+          'lastLinkedNode': _lastLinkedProxyNode,
+          'snapshotNode': _proxySnapshot?.node,
+          'selectorGroups': groups.map((g) => g.name).toList(),
+          'customRules': settings.proxyCustomRules,
+        });
+      } else if (request.method == 'POST' && path == '/api/v1/proxy/test') {
+        final body = await _readJsonBody(request).catchError((_) => <String, Object?>{});
+        final testUrl = body['controllerUrl'] as String? ?? AppSettings().proxyControllerUrl;
+        final testSecret = body['secret'] as String? ?? AppSettings().proxySecret;
+        final testService = ProxyLinkageService(controllerUrl: testUrl, secret: testSecret);
+        final conn = await testService.testConnection();
+        final groups = conn.alive ? await testService.getSelectorGroups() : const <ProxyGroupInfo>[];
+        await _writeJson(request.response, HttpStatus.ok, {
+          'alive': conn.alive,
+          'version': conn.version,
+          'error': conn.error,
+          'groups': groups.map((g) => {'name': g.name, 'now': g.now, 'all': g.all}).toList(),
+        });
+      } else if (request.method == 'POST' && path == '/api/v1/proxy/config') {
+        final body = await _readJsonBody(request);
+        final settings = AppSettings();
+        if (body.containsKey('enabled')) {
+          await settings.setProxyLinkageEnabled(body['enabled'] == true);
+        }
+        if (body['controllerUrl'] is String) {
+          await settings.setProxyControllerUrl(body['controllerUrl'] as String);
+        }
+        if (body.containsKey('secret')) {
+          await settings.setProxySecret(body['secret'] as String?);
+        }
+        if (body['targetGroup'] is String) {
+          await settings.setProxyTargetGroup(body['targetGroup'] as String);
+        }
+        if (body.containsKey('autoRestore')) {
+          await settings.setProxyAutoRestore(body['autoRestore'] == true);
+        }
+        if (body['customRules'] is Map) {
+          final map = (body['customRules'] as Map).map((k, v) => MapEntry(k.toString(), v.toString()));
+          await settings.setProxyCustomRules(map);
+        }
+        _proxyLinkage.updateConfig(
+          controllerUrl: settings.proxyControllerUrl,
+          secret: settings.proxySecret,
+        );
+        await _writeJson(request.response, HttpStatus.ok, {'status': 'saved'});
+      } else if (request.method == 'POST' && path == '/api/v1/proxy/switch') {
+        final body = await _readJsonBody(request);
+        final group = (body['group'] as String?) ?? AppSettings().proxyTargetGroup;
+        final node = body['node'];
+        if (node is! String) throw const RemoteGatewayException('node_required');
+        final res = await _proxyLinkage.selectNode(group, node);
+        await _writeJson(request.response, HttpStatus.ok, res.toJson());
       } else {
         await _writeJson(request.response, HttpStatus.notFound, {'error': 'not_found'});
       }
@@ -2470,6 +2645,16 @@ class RemoteGatewayService {
     } else {
       lines.add('\n📡 基带网络状态：暂无活动订阅或正在搜网');
     }
+    if (value['proxy'] is Map) {
+      final proxy = value['proxy'] as Map;
+      if (proxy['enabled'] == true) {
+        final node = proxy['currentNode'] ?? proxy['lastLinkedNode'];
+        final nodeStr = node != null && node.toString().isNotEmpty ? '【$node】' : '已就绪';
+        lines.add('\n🌐 代理联动 (FlClash / Mihomo)：🟢 $nodeStr (策略组: ${proxy['targetGroup']})');
+      } else {
+        lines.add('\n🌐 代理联动：⚪ 未启用');
+      }
+    }
     return lines.join('\n');
   }
 
@@ -2635,7 +2820,15 @@ class RemoteGatewayService {
 :root{color-scheme:dark;font:16px system-ui,sans-serif;--surface:#171a20;--panel:#20242c;--fg:#edf0f6;--muted:#aab1bf;--accent:#8ab4f8;--border:#343a46}*{box-sizing:border-box}body{margin:0;background:var(--surface);color:var(--fg)}main{max-width:760px;margin:auto;padding:24px}h1{font-size:1.35rem}section{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:16px;margin:14px 0}label{display:block;color:var(--muted);margin:10px 0 6px}input,button{font:inherit;border-radius:9px;border:1px solid var(--border);padding:10px;background:var(--surface);color:var(--fg)}input{width:100%}button{cursor:pointer;color:var(--accent);margin:5px 5px 5px 0}pre{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--muted)}small{color:var(--muted)}
 </style></head>
 <body><main><h1>eUICC-Nexus remote gateway</h1>
-<section><label for="token">API bearer token (kept in this tab only)</label><input id="token" type="password" autocomplete="off"><p><button id="status">Status (Signal / NVRAM / Battery)</button><button id="list">List profiles</button><button id="readers">List readers</button><button id="keepalive">Keep-Alive rules</button><button id="default">Set current as default</button><button id="back">Return to default</button><button id="retrySms">Retry failed SMS</button></p><pre id="output">Enter the API token to control this device.</pre></section>
+<section><label for="token">API bearer token (kept in this tab only)</label><input id="token" type="password" autocomplete="off"><p><button id="status">Status (Signal / NVRAM / Battery)</button><button id="list">List profiles</button><button id="readers">List readers</button><button id="keepalive">Keep-Alive rules</button><button id="default">Set current as default</button><button id="back">Return to default</button><button id="retrySms">Retry failed SMS</button><button id="proxy">🌐 Proxy Linkage</button></p><pre id="output">Enter the API token to control this device.</pre></section>
+<section><h2>🌐 代理软件联动 (FlClash / Mihomo / sing-box)</h2>
+<label for="proxyUrl">External Controller URL</label><input id="proxyUrl" value="http://127.0.0.1:9090" autocomplete="off">
+<label for="proxySecret">Secret (Optional)</label><input id="proxySecret" type="password" autocomplete="off">
+<label for="proxyGroup">Target Selector Group</label><input id="proxyGroup" value="PROXY" autocomplete="off">
+<p><label><input id="proxyEnabled" type="checkbox" style="width:auto"> 启用切卡自动联动代理节点</label></p>
+<p><label><input id="proxyAutoRestore" type="checkbox" style="width:auto" checked> 临时接码结束回滚时还原原节点</label></p>
+<p><button id="proxyTest">⚡ 测试连接并列出节点</button><button id="proxySave">💾 保存配置</button><button id="proxyQuery">🔍 当前状态</button></p>
+</section>
 <section><label for="profile">Profile index, alias, or ICCID</label><input id="profile" autocomplete="off"><label for="newAlias">New nickname (for Rename)</label><input id="newAlias" autocomplete="off"><p><button id="switch">Switch (Permanent)</button><button id="switchTemp">⏱️ Switch (5-Min OTP)</button><button id="rename">✏️ Rename</button><button id="kaSet">🛡️ Keep-Alive (90d)</button><button id="kaNow">⚡ Keep-Alive Now (3m)</button><button id="deleteReq">🗑️ Request delete</button></p></section>
 <section><label for="readerInput">Reader selector (e.g. 1, 2, SIM2)</label><input id="readerInput" autocomplete="off"><p><button id="selectReader">🔀 Switch Reader</button></p></section>
 <section><label for="deleteToken">Delete confirmation token</label><input id="deleteToken" autocomplete="off"><p><button id="deleteConfirm">Confirm delete</button></p></section>
@@ -2661,6 +2854,10 @@ document.querySelector('#deleteReq').onclick=()=>show('/api/v1/delete/request','
 document.querySelector('#deleteConfirm').onclick=()=>show('/api/v1/delete/confirm','POST',{token:document.querySelector('#deleteToken').value});
 document.querySelector('#download').onclick=()=>show('/api/v1/download','POST',{activationCode:document.querySelector('#ac').value,confirmationCode:document.querySelector('#cc').value||undefined});
 document.querySelector('#downloadTest').onclick=()=>{document.querySelector('#ac').value='LPA:1$rsp.truphone.com$QRF-SPEEDTEST';show('/api/v1/download','POST',{activationCode:'LPA:1$rsp.truphone.com$QRF-SPEEDTEST'})};
+document.querySelector('#proxy').onclick=()=>show('/api/v1/proxy');
+document.querySelector('#proxyQuery').onclick=()=>show('/api/v1/proxy');
+document.querySelector('#proxyTest').onclick=()=>show('/api/v1/proxy/test','POST',{controllerUrl:document.querySelector('#proxyUrl').value,secret:document.querySelector('#proxySecret').value});
+document.querySelector('#proxySave').onclick=()=>show('/api/v1/proxy/config','POST',{enabled:document.querySelector('#proxyEnabled').checked,controllerUrl:document.querySelector('#proxyUrl').value,secret:document.querySelector('#proxySecret').value,targetGroup:document.querySelector('#proxyGroup').value,autoRestore:document.querySelector('#proxyAutoRestore').checked});
 </script></main></body></html>''';
 }
 

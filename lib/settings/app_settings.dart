@@ -511,6 +511,65 @@ class AppSettings extends ChangeNotifier {
     }
     notifyListeners();
   }
+  // Proxy Linkage Settings (Clash / FlClash / sing-box)
+  bool _proxyLinkageEnabled = false;
+  bool get proxyLinkageEnabled => _proxyLinkageEnabled;
+
+  String _proxyControllerUrl = 'http://127.0.0.1:9090';
+  String get proxyControllerUrl => _proxyControllerUrl;
+
+  String? _proxySecret;
+  String? get proxySecret => _proxySecret;
+
+  String _proxyTargetGroup = 'PROXY';
+  String get proxyTargetGroup => _proxyTargetGroup;
+
+  bool _proxyAutoRestore = true;
+  bool get proxyAutoRestore => _proxyAutoRestore;
+
+  Map<String, String> _proxyCustomRules = {};
+  Map<String, String> get proxyCustomRules => Map.unmodifiable(_proxyCustomRules);
+
+  Future<void> setProxyLinkageEnabled(bool value) async {
+    _proxyLinkageEnabled = value;
+    await _prefs?.setBool('proxyLinkageEnabled', value);
+    notifyListeners();
+  }
+
+  Future<void> setProxyControllerUrl(String value) async {
+    _proxyControllerUrl = value;
+    await _prefs?.setString('proxyControllerUrl', value);
+    notifyListeners();
+  }
+
+  Future<void> setProxySecret(String? value) async {
+    _proxySecret = value?.trim().isEmpty == true ? null : value?.trim();
+    if (_proxySecret == null) {
+      await _prefs?.remove('proxySecret');
+    } else {
+      await _prefs?.setString('proxySecret', _proxySecret!);
+    }
+    notifyListeners();
+  }
+
+  Future<void> setProxyTargetGroup(String value) async {
+    _proxyTargetGroup = value;
+    await _prefs?.setString('proxyTargetGroup', value);
+    notifyListeners();
+  }
+
+  Future<void> setProxyAutoRestore(bool value) async {
+    _proxyAutoRestore = value;
+    await _prefs?.setBool('proxyAutoRestore', value);
+    notifyListeners();
+  }
+
+  Future<void> setProxyCustomRules(Map<String, String> rules) async {
+    _proxyCustomRules = Map<String, String>.from(rules);
+    await _prefs?.setString('proxyCustomRules', jsonEncode(_proxyCustomRules));
+    notifyListeners();
+  }
+
 
   List<String> get remoCardUrls => _remoCardUrls;
 
@@ -770,6 +829,21 @@ class AppSettings extends ChangeNotifier {
     _remoCardUrls = await DatabaseService().getRemoteServers();
 
     await BleManager().init();
+
+    _proxyLinkageEnabled = _prefs?.getBool('proxyLinkageEnabled') ?? false;
+    _proxyControllerUrl = _prefs?.getString('proxyControllerUrl') ?? 'http://127.0.0.1:9090';
+    _proxySecret = _prefs?.getString('proxySecret');
+    _proxyTargetGroup = _prefs?.getString('proxyTargetGroup') ?? 'PROXY';
+    _proxyAutoRestore = _prefs?.getBool('proxyAutoRestore') ?? true;
+    final rulesJson = _prefs?.getString('proxyCustomRules');
+    if (rulesJson != null) {
+      try {
+        final decoded = jsonDecode(rulesJson);
+        if (decoded is Map) {
+          _proxyCustomRules = decoded.map((k, v) => MapEntry(k.toString(), v.toString()));
+        }
+      } catch (_) {}
+    }
 
 
     if (!vowifiEnabled) {
