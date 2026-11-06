@@ -23,8 +23,14 @@ class RootedModuleTest(unittest.TestCase):
         module.package(self.apk, self.output, "2.4.0+600")
         with zipfile.ZipFile(self.output) as archive:
             self.assertEqual(archive.read(module.APP_PATH), self.apk.read_bytes())
-            self.assertIn(b'package="ee.nekoko.nlpa2"', archive.read(module.PERMISSION_PATH))
-            self.assertIn(b"/system/priv-app/ee.nekoko.nlpa2", archive.read("customize.sh"))
+            self.assertIn(
+                b'package="io.github.hg552.esimmatrix.privileged"',
+                archive.read(module.PERMISSION_PATH),
+            )
+            self.assertIn(
+                b"/system/priv-app/io.github.hg552.esimmatrix.privileged",
+                archive.read("customize.sh"),
+            )
             self.assertIn(b"version=v2.4.0\nversionCode=600", archive.read("module.prop"))
             self.assertEqual(archive.getinfo("customize.sh").external_attr >> 16, 0o100755)
 
