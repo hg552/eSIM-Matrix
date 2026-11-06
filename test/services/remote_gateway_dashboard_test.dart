@@ -7,6 +7,7 @@ import 'package:nlpa2/services/network_status_service.dart';
 import 'package:nlpa2/services/remote_gateway_service.dart';
 import 'package:nlpa2/services/remote_profile_controller.dart';
 import 'package:nlpa2/services/sms_relay_service.dart';
+import 'package:nlpa2/settings/app_settings.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 const String _token = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'; // 43 chars
@@ -28,6 +29,8 @@ void main() {
 
     setUp(() async {
       SharedPreferences.setMockInitialValues({});
+      await AppSettings().setDataGuardEnabled(true);
+      await AppSettings().setProxyLinkageEnabled(false);
       profiles = _Profiles();
       relay = _Relay();
       service = RemoteGatewayService(
@@ -150,6 +153,71 @@ void main() {
       final result = await post('/api/v1/dataguard/apply');
       expect(result.status, HttpStatus.conflict);
       expect((result.body! as Map)['error'], 'subscription_not_found');
+    });
+
+    Map<String, Object?> textCommand(String name, [String argument = '']) {
+      final text = argument.isEmpty ? '/$name' : '/$name $argument';
+      return {
+        'update_id': 900,
+        'message': {
+          'message_id': 900,
+          'from': {'id': 10000001, 'is_bot': false},
+          'chat': {'id': 10000001, 'type': 'private'},
+          'text': text,
+        },
+      };
+    }
+
+    test('guard command reports state and the real enforcement capability', () async {
+      final payload = await service.handleTelegramUpdateForTesting(
+        textCommand('guard'),
+        '10000001',
+      );
+      final text = '${payload!['text']}';
+      expect(text, contains('流量卫士'));
+      expect(text, contains('强制能力'));
+      // The test host has no MODIFY_PHONE_STATE and no root, so the reply must
+      // state that enforcement is unavailable rather than imply it worked.
+      expect(text, contains('不可用'));
+      final rows = (payload['reply_markup'] as Map)['inline_keyboard'] as List;
+      expect(rows, isNotEmpty);
+    });
+
+    test('guard_toggle flips the persisted setting', () async {
+      final before = AppSettings().dataGuardEnabled;
+      await service.handleTelegramUpdateForTesting(
+        textCommand('guard_toggle'),
+        '10000001',
+      );
+      expect(AppSettings().dataGuardEnabled, isNot(before));
+    });
+
+    test('proxy command explains the controller state and where to configure it', () async {
+      final payload = await service.handleTelegramUpdateForTesting(
+        textCommand('proxy'),
+        '10000001',
+      );
+      final text = '${payload!['text']}';
+      expect(text, contains('代理联动'));
+      expect(text, contains('控制器'));
+      expect(text, contains('配置入口'));
+      // No Clash controller runs in the test host: it must say disconnected.
+      expect(text, contains('未连接'));
+    });
+
+    test('tunnel command surfaces the Cloudflare channel with a masked id', () async {
+      final payload = await service.handleTelegramUpdateForTesting(
+        textCommand('tunnel'),
+        '10000001',
+      );
+      final text = '${payload!['text']}';
+      expect(text, contains('Cloudflare 加密隧道'));
+      expect(text, contains('通道 ID'));
+      expect(text, contains('加密存储'));
+      expect(text, contains('配置位置'));
+      // The full channel id must never be printed back to the chat.
+      expect(text, isNot(contains('ch_7a4c947e0aa1')));
+      expect(text, contains('ch_7a4…0aa1'));
     });
   });
 }
@@ -286,6 +354,22 @@ class _Relay extends SmsRelayService {
       errorCode: 'network_error',
     ),
   ];
+
+  @override
+  Future<SmsRelayConfiguration> loadConfiguration() async =>
+      const SmsRelayConfiguration(
+        mode: SmsRelayMode.cfWorker,
+        enabled: true,
+        endpoint: 'https://nexus-relay.example.workers.dev',
+        telegramChatId: null,
+        cfChannelId: 'ch_7a4c947e0aa1',
+        tokenConfigured: true,
+        webhookTokenConfigured: false,
+        telegramTokenConfigured: false,
+        cfTokenConfigured: true,
+        lastDeliveryAtMillis: null,
+        lastDeliveryError: null,
+      );
 
   @override
   Future<int> retryFailedHistory({String? id}) async => 1;

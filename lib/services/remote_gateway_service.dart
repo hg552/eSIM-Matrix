@@ -2063,7 +2063,7 @@ class RemoteGatewayService {
         ? ''
         : trimmedText.substring(firstNewline + 1).trim();
     final command = RegExp(
-      r'^/(start|help|menu|list|status|use|use_temp|back|default|rename|keepalive|keepalive_now|readers|reader|retry_sms|download|download_test|delete|delete_confirm|delete_cancel|announce)(?:@[A-Za-z0-9_]+)?(?:\s+(.*))?$',
+      r'^/(start|help|menu|list|status|use|use_temp|back|default|rename|keepalive|keepalive_now|readers|reader|retry_sms|download|download_test|delete|delete_confirm|delete_cancel|announce|guard|guard_toggle|guard_now|proxy|proxy_toggle|proxy_group|proxy_node|tunnel)(?:@[A-Za-z0-9_]+)?(?:\s+(.*))?$',
       caseSensitive: false,
     ).firstMatch(commandLine);
     if (command == null) return null;
@@ -2201,6 +2201,13 @@ class RemoteGatewayService {
     [
       _TelegramButton('📌 设当前卡为主卡', 'cmd:default'),
       _TelegramButton('🔄 补发未送达短信', 'cmd:retry_sms'),
+    ],
+    [
+      _TelegramButton('🛡️ 流量卫士', 'cmd:guard'),
+      _TelegramButton('🌐 代理联动', 'cmd:proxy'),
+    ],
+    [
+      _TelegramButton('📡 接码通道状态', 'cmd:tunnel'),
     ],
   ];
 
@@ -2368,6 +2375,265 @@ class RemoteGatewayService {
     ]);
     return _TelegramReply(buffer.toString().trimRight(), keyboard: rows);
   }
+  Future<_TelegramReply> _buildGuardReply({String? header}) async {
+    final settings = AppSettings();
+    final session = _session ?? await _loadSession();
+    final caps = await _dataGuard.capabilities();
+    final capabilityText = caps.canEnforce
+        ? '✔ 可用${[
+            if (caps.telephonyApis) '特权 API',
+            if (caps.root) 'root',
+          ].map((e) => '（$e）').join()}'
+        : '✘ 不可用（需特权构建或 root，否则只能手动关闭数据漫游）';
+    final lines = <String>[
+      if (header != null && header.isNotEmpty) ...[header, ''],
+      '🛡️ 流量卫士（切到国外卡时自动关闭移动数据）',
+      '',
+      '开关：${settings.dataGuardEnabled ? '🟢 已启用' : '⚪ 已关闭'}',
+      '回滚恢复：${settings.dataGuardRestoreOnRevert ? '是（按切卡前状态还原）' : '否'}',
+      if (session == null)
+        '本次会话：无常驻会话'
+      else
+        '本次会话：${session.guardEnforced ? '🟢 已锁定订阅 ${session.guardSubscriptionId}' : '⚪ 未锁定'}',
+      '强制能力：$capabilityText',
+      if (_lastGuardResult != null)
+        '最近一次：${_lastGuardResult!.enforced ? '已关闭数据（${_lastGuardResult!.viaApi ? '特权 API' : 'root'}）' : '未强制${_lastGuardResult!.error == null ? '' : '（${_lastGuardResult!.error}）'}'}',
+    ];
+    return _TelegramReply(
+      lines.join('\n'),
+      keyboard: [
+        [
+          _TelegramButton(
+            settings.dataGuardEnabled ? '⚪ 关闭流量卫士' : '🛡️ 启用流量卫士',
+            'cmd:guard_toggle',
+          ),
+          _TelegramButton('⚡ 立即锁定当前卡', 'cmd:guard_now'),
+        ],
+        const [
+          _TelegramButton('🌐 代理联动', 'cmd:proxy'),
+          _TelegramButton('📡 查看状态', 'cmd:status'),
+        ],
+      ],
+    );
+  }
+
+  /// Turns mobile data off right now, for the session's subscription when one is
+  /// known, otherwise for the only active subscription.
+  Future<String> _applyGuardNow() async {
+    final session = _session ?? await _loadSession();
+    var subId = session?.guardSubscriptionId ?? -1;
+    if (subId < 0) {
+      subId = (_networkStatus?.subscriptions ?? const <NetworkStatusSubscription>[])
+          .map((s) => s.subscriptionId)
+          .firstWhere((id) => id >= 0, orElse: () => -1);
+    }
+    if (subId < 0) {
+      return '⚠️ 未找到可用订阅（无 SIM 或基带未上报），无法锁定移动数据。';
+    }
+    final result = await _dataGuard.lockdown(subId);
+    _lastGuardResult = result;
+    if (result.enforced) {
+      return '✅ 已关闭订阅 $subId 的移动数据'
+          '（${result.viaApi ? '特权 API' : 'root'}）。'
+          '${result.before?.roamingEnabled == true ? '数据漫游也一并关闭。' : ''}';
+    }
+    return '⚠️ 未能关闭数据：'
+        '${result.error ?? '当前构建没有强制能力，请手动在系统设置里关闭数据漫游'}。';
+  }
+
+  Future<_TelegramReply> _buildProxyReply({String? header}) async {
+    final settings = AppSettings();
+    _proxyLinkage.updateConfig(
+      controllerUrl: settings.proxyControllerUrl,
+      secret: settings.proxySecret,
+    );
+    final conn = await _proxyLinkage.testConnection();
+    final groups = conn.alive
+        ? await _proxyLinkage.getSelectorGroups()
+        : const <ProxyGroupInfo>[];
+    final group = groups
+        .where((g) => g.name == settings.proxyTargetGroup)
+        .firstOrNull;
+    final current = group?.now ??
+        (conn.alive
+            ? await _proxyLinkage.getCurrentNode(settings.proxyTargetGroup)
+            : null);
+    final connectionText = conn.alive
+        ? '🟢 ${conn.version ?? '已连接'}'
+        : (conn.error?.contains('unauthorized') == true
+            ? '⚪ 未连接（Secret 错误）'
+            : '⚪ 未连接（请检查 FlClash / Mihomo 的外部控制是否已开启）');
+    final lines = <String>[
+      if (header != null && header.isNotEmpty) ...[header, ''],
+      '🌐 代理联动（FlClash / Mihomo / sing-box）',
+      '',
+      '开关：${settings.proxyLinkageEnabled ? '🟢 已启用' : '⚪ 已关闭'}',
+      '控制器：${settings.proxyControllerUrl}（$connectionText）',
+      '策略组：${settings.proxyTargetGroup}'
+          '${conn.alive && group == null ? '（该组不存在）' : ''}',
+      if (current != null && current.isNotEmpty) '当前节点：$current',
+      if (_lastLinkedProxyNode != null) '本次会话已切至：$_lastLinkedProxyNode',
+      '回滚还原：${settings.proxyAutoRestore ? '是' : '否'}',
+      '',
+      '配置入口：App「短信转发」页 → 切卡自动化卡片；'
+      'FlClash 侧需开启「外部控制」。',
+    ];
+    if (group != null && group.all.isNotEmpty) {
+      final shown = group.all.take(8).toList();
+      lines
+        ..add('')
+        ..add('可用节点（发 /proxy_node 序号或名称切换）：');
+      for (var i = 0; i < shown.length; i++) {
+        lines.add('${i + 1}. ${shown[i]}');
+      }
+      if (group.all.length > shown.length) {
+        lines.add('…共 ${group.all.length} 个');
+      }
+    }
+    return _TelegramReply(
+      lines.join('\n'),
+      keyboard: [
+        [
+          _TelegramButton(
+            settings.proxyLinkageEnabled ? '⚪ 关闭代理联动' : '🌐 启用代理联动',
+            'cmd:proxy_toggle',
+          ),
+          const _TelegramButton('🔄 刷新节点', 'cmd:proxy'),
+        ],
+        const [
+          _TelegramButton('🛡️ 流量卫士', 'cmd:guard'),
+          _TelegramButton('📡 查看状态', 'cmd:status'),
+        ],
+      ],
+    );
+  }
+
+  Future<_TelegramReply> _switchProxyNode(String rawArgument) async {
+    final settings = AppSettings();
+    _proxyLinkage.updateConfig(
+      controllerUrl: settings.proxyControllerUrl,
+      secret: settings.proxySecret,
+    );
+    final group = settings.proxyTargetGroup;
+    if (!settings.proxyLinkageEnabled) {
+      return _TelegramReply(
+        '⚪ 代理联动当前是关闭状态，切换节点不会生效。\n先发 /proxy 启用。',
+        keyboard: const [
+          [_TelegramButton('🌐 代理联动设置', 'cmd:proxy')],
+        ],
+      );
+    }
+    if (rawArgument.isEmpty) {
+      return await _buildProxyReply(header: '💡 用法：/proxy_node <序号或名称>');
+    }
+    final info = await _proxyLinkage.getGroup(group);
+    if (info == null) {
+      return _TelegramReply(
+        '⚠️ 未找到策略组【$group】。发 /proxy 查看控制器与分组状态，'
+        '或用 /proxy_group <名称> 指定。',
+        keyboard: const [
+          [_TelegramButton('🌐 代理联动设置', 'cmd:proxy')],
+        ],
+      );
+    }
+    String? node = info.all.where((n) => n == rawArgument).firstOrNull;
+    final index = int.tryParse(rawArgument);
+    if (node == null && index != null && index >= 1 && index <= info.all.length) {
+      node = info.all[index - 1];
+    }
+    node ??= info.all
+        .where((n) => n.toLowerCase().contains(rawArgument.toLowerCase()))
+        .firstOrNull;
+    if (node == null) {
+      final listed = info.all.take(8).toList();
+      return _TelegramReply(
+        '⚠️ 在【$group】里找不到「$rawArgument」。\n'
+        '${listed.map((n) => '· $n').join('\n')}',
+        keyboard: const [
+          [_TelegramButton('🌐 代理联动设置', 'cmd:proxy')],
+        ],
+      );
+    }
+    final result = await _proxyLinkage.selectNode(group, node);
+    return _TelegramReply(
+      result.success
+          ? '✅ 已把【$group】切到节点：【$node】'
+          : '⚠️ 切换失败：${result.error ?? 'unknown'}',
+      keyboard: const [
+        [
+          _TelegramButton('🌐 代理联动设置', 'cmd:proxy'),
+          _TelegramButton('📡 查看状态', 'cmd:status'),
+        ],
+      ],
+    );
+  }
+
+  /// Where the SMS path actually goes: this answers "my CF tunnel is configured
+  /// where?" from the bot, instead of leaving it to the app UI only.
+  Future<_TelegramReply> _buildTunnelReply() async {
+    final config = await _smsRelay.loadConfiguration();
+    final history = await _smsRelay.loadHistory().catchError(
+      (_) => const <SmsHistoryEntry>[],
+    );
+    final delivered = history.where((h) => h.delivered).length;
+    final failed = history.length - delivered;
+    final modeLabel = switch (config.mode) {
+      SmsRelayMode.cfWorker => 'Cloudflare 加密隧道（Web 接码）',
+      SmsRelayMode.telegram => 'Telegram Bot',
+      _ => 'Webhook',
+    };
+    String mask(String? value) {
+      if (value == null || value.isEmpty) return '未配置';
+      if (value.length <= 8) return value;
+      return '${value.substring(0, 6)}…${value.substring(value.length - 4)}';
+    }
+
+    final lines = <String>[
+      '📡 接码通道状态',
+      '',
+      '模式：$modeLabel（${config.enabled ? '🟢 已启用' : '⚪ 未启用'}）',
+    ];
+    if (config.mode == SmsRelayMode.cfWorker) {
+      lines
+        ..add('Worker 地址：${config.endpoint ?? '未配置'}')
+        ..add('通道 ID：${mask(config.cfChannelId)}')
+        ..add('通道密钥：${config.cfTokenConfigured ? '🟢 已配置（加密存储）' : '⚪ 未配置'}');
+    } else if (config.mode == SmsRelayMode.telegram) {
+      lines.add('目标 Chat：${mask(config.telegramChatId)}');
+    } else {
+      lines
+        ..add('回调地址：${config.endpoint ?? '未配置'}')
+        ..add('签名密钥：${config.webhookTokenConfigured ? '🟢 已配置' : '⚪ 未配置'}');
+    }
+    if (config.lastDeliveryAtMillis != null) {
+      final at = DateTime.fromMillisecondsSinceEpoch(
+        config.lastDeliveryAtMillis!,
+      );
+      lines.add(
+        '最近投递：${at.month.toString().padLeft(2, '0')}-'
+        '${at.day.toString().padLeft(2, '0')} '
+        '${at.hour.toString().padLeft(2, '0')}:'
+        '${at.minute.toString().padLeft(2, '0')}',
+      );
+    }
+    if (config.lastDeliveryError != null) {
+      lines.add('最近错误：${config.lastDeliveryError}');
+    }
+    lines
+      ..add('历史记录：已转发 $delivered 条，待补发 $failed 条')
+      ..add('')
+      ..add('配置位置：App「短信转发」页 → 目标通道 → Cloudflare 加密隧道');
+    return _TelegramReply(
+      lines.join('\n'),
+      keyboard: const [
+        [
+          _TelegramButton('🔄 补发未送达', 'cmd:retry_sms'),
+          _TelegramButton('📡 查看状态', 'cmd:status'),
+        ],
+      ],
+    );
+  }
+
   Future<_TelegramReply> _executeTelegramCommand(
     String name,
     String argument,
@@ -2576,6 +2842,51 @@ class RemoteGatewayService {
               ],
             ],
           );
+        case 'guard':
+          return await _buildGuardReply();
+        case 'guard_toggle':
+          final guardSettings = AppSettings();
+          await guardSettings.setDataGuardEnabled(!guardSettings.dataGuardEnabled);
+          return await _buildGuardReply(
+            header: guardSettings.dataGuardEnabled ? '✅ 流量卫士已启用' : '⚪ 流量卫士已关闭',
+          );
+        case 'guard_now':
+          final applied = await _applyGuardNow();
+          return _TelegramReply(
+            applied,
+            keyboard: const [
+              [
+                _TelegramButton('🛡️ 流量卫士设置', 'cmd:guard'),
+                _TelegramButton('📡 查看状态', 'cmd:status'),
+              ],
+            ],
+          );
+        case 'proxy':
+          return await _buildProxyReply();
+        case 'proxy_toggle':
+          final proxySettings = AppSettings();
+          await proxySettings.setProxyLinkageEnabled(
+            !proxySettings.proxyLinkageEnabled,
+          );
+          return await _buildProxyReply(
+            header: proxySettings.proxyLinkageEnabled
+                ? '✅ 代理联动已启用'
+                : '⚪ 代理联动已关闭',
+          );
+        case 'proxy_group':
+          if (argument.trim().isEmpty) {
+            return await _buildProxyReply(
+              header: '💡 用法：/proxy_group <策略组名>，例如 /proxy_group PROXY',
+            );
+          }
+          await AppSettings().setProxyTargetGroup(argument.trim());
+          return await _buildProxyReply(
+            header: '✅ 目标策略组已设为【${argument.trim()}】',
+          );
+        case 'proxy_node':
+          return await _switchProxyNode(argument.trim());
+        case 'tunnel':
+          return await _buildTunnelReply();
         case 'announce':
           return await _executeTelegramAnnouncement(argument);
         case 'back':

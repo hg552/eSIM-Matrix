@@ -141,6 +141,17 @@ stateDiagram-v2
 - **网络绑定**：REST HTTP 服务默认探测并**仅绑定 Tailscale / Headscale CGNAT 私网地址**（`100.64.0.0/10` 或 `fd7a:115c:a1e0::/48`），禁止监听公共网络。
 - **Token 校验**：所有 API 请求必须携带 `Authorization: Bearer <token>` 请求头。Token 为 256 位安全伪随机生成（Base64URL 43 字符），使用**恒定时间算法（Constant-time Equality）**比对，防范时序侧信道攻击。
 - **Telegram 限制**：严格比对 `chat.type == private` 以及发送者 ID 是否精确匹配配置的私聊白名单 ID，忽略群组及任何非授权用户的消息。
+### 5.2.0 配置入口（去哪里设置）
+
+| 功能 | 入口 | 备注 |
+|---|---|---|
+| Cloudflare 加密隧道（Web 接码） | App「短信转发」页 → 目标通道 → **Cloudflare 加密隧道 (Web接码)** | 同页填 Worker 地址、通道 ID、通道密钥（密钥加密存 AndroidKeyStore）；`/tunnel` 查当前通道状态，不回显完整通道 ID 与密钥 |
+| 流量卫士（切卡关移动数据） | App「短信转发」页 → **切卡自动化** 卡片；或 Telegram `/guard` | `/guard_toggle` 切换开关、`/guard_now` 立即锁定当前卡 |
+| 代理自动切节点 | App「短信转发」页 → **切卡自动化** 卡片；或 Telegram `/proxy` | 卡片含 Controller 地址、Secret、策略组、测试连接；`/proxy_toggle` 开关、`/proxy_group <名称>` 改组、`/proxy_node <序号或名称>` 手动切节点 |
+| 以上全部 | Web 控制台（Tailnet `http://<ip>:8787/`）同名卡片 | 需先接入 Tailscale，REST 才监听 |
+
+Telegram 主菜单加入「🛡️ 流量卫士 / 🌐 代理联动 / 📡 接码通道状态」三个按钮；**新增文本命令必须同步加入 `_handleTelegramMessage` 的命令白名单正则**，否则消息会被静默忽略。
+
 
 ### 5.2 交互指令规范
 
@@ -150,6 +161,9 @@ stateDiagram-v2
 - `/default`：将当前已激活的 Profile 设定为默认回滚卡。
 - `/use <alias|iccid>`：切换至目标卡，等待驻网并保持选择，直到明确回切。
 - `/back`：提前结束接码会话，立刻切回默认卡。
+- `/guard`：流量卫士状态（开关、回滚恢复、本次会话锁定情况、强制能力）；`/guard_toggle` 切换；`/guard_now` 立即锁定当前卡。
+- `/proxy`：代理联动状态（控制器连通性、策略组、当前节点、可用节点列表）；`/proxy_toggle` 开关；`/proxy_group <名称>` 改组；`/proxy_node <序号或名称>` 手动切节点。
+- `/tunnel`：接码通道状态（CF Worker 地址、脱敏通道 ID、密钥配置状态、最近投递与失败数），并提示配置入口。
 
 #### REST API 接口定义
 - `GET /`：内置轻量暗色系 Web 控制台（无外网静态资源依赖）。

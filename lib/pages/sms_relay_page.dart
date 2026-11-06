@@ -6,8 +6,10 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../l10n/app_localizations.dart';
+import '../services/proxy_linkage_service.dart';
 import '../services/sms_relay_service.dart';
 import '../services/remote_gateway_service.dart';
+import '../settings/app_settings.dart';
 import '../widgets/styled_header_scaffold.dart';
 
 class SmsRelayPage extends StatefulWidget {
@@ -54,11 +56,109 @@ class _SmsRelayPageState extends State<SmsRelayPage>
   bool _runningCardOp = false;
   String? _remoteOpStatus;
 
+  // Switch automation: roaming data guard + proxy linkage. These are stored in
+  // AppSettings and applied by RemoteGatewayService on every profile switch.
+  final TextEditingController _proxyUrlController = TextEditingController();
+  final TextEditingController _proxySecretController = TextEditingController();
+  final TextEditingController _proxyGroupController = TextEditingController();
+  bool _guardEnabled = true;
+  bool _guardRestoreOnRevert = true;
+  bool _proxyEnabled = false;
+  bool _proxyAutoRestore = true;
+  bool _linkageBusy = false;
+  String? _linkageStatus;
+  bool _linkageStatusIsError = false;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _hydrateLinkage();
     unawaited(_load());
+  }
+
+  void _hydrateLinkage() {
+    final settings = AppSettings();
+    _proxyUrlController.text = settings.proxyControllerUrl;
+    _proxySecretController.text = settings.proxySecret ?? '';
+    _proxyGroupController.text = settings.proxyTargetGroup;
+    _guardEnabled = settings.dataGuardEnabled;
+    _guardRestoreOnRevert = settings.dataGuardRestoreOnRevert;
+    _proxyEnabled = settings.proxyLinkageEnabled;
+    _proxyAutoRestore = settings.proxyAutoRestore;
+  }
+
+  Future<void> _saveLinkage() async {
+    final settings = AppSettings();
+    setState(() {
+      _linkageBusy = true;
+      _linkageStatus = null;
+    });
+    try {
+      await settings.setDataGuardEnabled(_guardEnabled);
+      await settings.setDataGuardRestoreOnRevert(_guardRestoreOnRevert);
+      await settings.setProxyLinkageEnabled(_proxyEnabled);
+      await settings.setProxyAutoRestore(_proxyAutoRestore);
+      await settings.setProxyControllerUrl(_proxyUrlController.text.trim());
+      await settings.setProxyTargetGroup(
+        _proxyGroupController.text.trim().isEmpty
+            ? 'PROXY'
+            : _proxyGroupController.text.trim(),
+      );
+      if (_proxySecretController.text.trim().isNotEmpty) {
+        await settings.setProxySecret(_proxySecretController.text.trim());
+      }
+      if (!mounted) return;
+      setState(() {
+        _linkageStatus = '已保存。切卡时会按下述开关自动执行。';
+        _linkageStatusIsError = false;
+        _proxySecretController.clear();
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _linkageStatus = '保存失败：$error';
+        _linkageStatusIsError = true;
+      });
+    } finally {
+      if (mounted) setState(() => _linkageBusy = false);
+    }
+  }
+
+  Future<void> _testProxyController() async {
+    setState(() {
+      _linkageBusy = true;
+      _linkageStatus = '正在连接 External Controller…';
+      _linkageStatusIsError = false;
+    });
+    final service = ProxyLinkageService(
+      controllerUrl: _proxyUrlController.text.trim().isEmpty
+          ? 'http://127.0.0.1:9090'
+          : _proxyUrlController.text.trim(),
+      secret: _proxySecretController.text.trim().isEmpty
+          ? AppSettings().proxySecret
+          : _proxySecretController.text.trim(),
+    );
+    try {
+      final result = await service.testConnection();
+      final groups = result.alive ? await service.getSelectorGroups() : const <ProxyGroupInfo>[];
+      if (!mounted) return;
+      setState(() {
+        _linkageStatusIsError = !result.alive;
+        _linkageStatus = result.alive
+            ? '连接成功：${result.version ?? 'ok'}；可选策略组 ${groups.length} 个'
+                '${groups.isEmpty ? '' : '（${groups.map((g) => g.name).take(5).join('、')}）'}'
+            : '连接失败：${result.error ?? 'unknown'}。请检查 FlClash/Mihomo 是否已开启外部控制。';
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _linkageStatus = '连接失败：$error';
+        _linkageStatusIsError = true;
+      });
+    } finally {
+      if (mounted) setState(() => _linkageBusy = false);
+    }
   }
 
   @override
@@ -70,6 +170,9 @@ class _SmsRelayPageState extends State<SmsRelayPage>
     _chatIdController.dispose();
     _activationCodeController.dispose();
     _confirmationCodeController.dispose();
+    _proxyUrlController.dispose();
+    _proxySecretController.dispose();
+    _proxyGroupController.dispose();
     super.dispose();
   }
 
@@ -775,6 +878,167 @@ class _SmsRelayPageState extends State<SmsRelayPage>
     final dt = DateTime.fromMillisecondsSinceEpoch(millis).toLocal();
     String two(int n) => n.toString().padLeft(2, '0');
     return '${dt.year}-${two(dt.month)}-${two(dt.day)} ${two(dt.hour)}:${two(dt.minute)}:${two(dt.second)}';
+  }
+
+  /// Settings for what the gateway does automatically on every profile switch:
+  /// turn mobile data off for the roaming card, and move the proxy node to the
+  /// card's country. Both are applied by RemoteGatewayService, so this card only
+  /// writes AppSettings.
+  Widget _buildLinkageCard() {
+    final theme = Theme.of(context);
+    final subtle = theme.colorScheme.onSurfaceVariant;
+    final fieldBorder = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+    );
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.bolt_outlined, color: theme.colorScheme.primary),
+                const SizedBox(width: 8),
+                Text(
+                  '切卡自动化（流量卫士 / 代理联动）',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: theme.colorScheme.onSurface,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '每次切到国外保号卡时自动执行：关闭该卡移动数据，防止漫游偷跑流量；'
+              '并把 FlClash / Mihomo 的节点切到与卡归属地一致的国家。',
+              style: TextStyle(fontSize: 12, color: subtle),
+            ),
+            const Divider(height: 24),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('流量卫士：切卡时关闭移动数据'),
+              subtitle: Text(
+                '需要特权构建（MODIFY_PHONE_STATE）或 root；'
+                '都没有时只提示、不强制',
+                style: TextStyle(fontSize: 12, color: subtle),
+              ),
+              value: _guardEnabled,
+              onChanged: _linkageBusy
+                  ? null
+                  : (value) => setState(() => _guardEnabled = value),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('切回默认卡时恢复数据开关'),
+              subtitle: Text(
+                '按切卡前记录的状态还原，不会把主卡数据永久关掉',
+                style: TextStyle(fontSize: 12, color: subtle),
+              ),
+              value: _guardRestoreOnRevert,
+              onChanged: _linkageBusy
+                  ? null
+                  : (value) => setState(() => _guardRestoreOnRevert = value),
+            ),
+            const Divider(height: 24),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('代理联动：按卡国别自动切节点'),
+              subtitle: Text(
+                '需在 FlClash / Mihomo 里开启「外部控制」；'
+                '控制器不可达时只告警，不影响切卡',
+                style: TextStyle(fontSize: 12, color: subtle),
+              ),
+              value: _proxyEnabled,
+              onChanged: _linkageBusy
+                  ? null
+                  : (value) => setState(() => _proxyEnabled = value),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('回滚时还原切卡前的节点'),
+              value: _proxyAutoRestore,
+              onChanged: _linkageBusy
+                  ? null
+                  : (value) => setState(() => _proxyAutoRestore = value),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _proxyUrlController,
+              enabled: !_linkageBusy,
+              decoration: InputDecoration(
+                labelText: 'External Controller 地址',
+                hintText: 'http://127.0.0.1:9090',
+                border: fieldBorder,
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _proxySecretController,
+              enabled: !_linkageBusy,
+              obscureText: true,
+              decoration: InputDecoration(
+                labelText: 'Secret（留空保持原值）',
+                border: fieldBorder,
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _proxyGroupController,
+              enabled: !_linkageBusy,
+              decoration: InputDecoration(
+                labelText: '策略组名称',
+                hintText: 'PROXY / 🚀 节点选择',
+                border: fieldBorder,
+                isDense: true,
+              ),
+            ),
+            if (_linkageStatus != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                _linkageStatus!,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: _linkageStatusIsError
+                      ? theme.colorScheme.error
+                      : theme.colorScheme.primary,
+                ),
+              ),
+            ],
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: _linkageBusy ? null : _saveLinkage,
+                    icon: _linkageBusy
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.save_outlined),
+                    label: const Text('保存'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _linkageBusy ? null : _testProxyController,
+                    icon: const Icon(Icons.wifi_tethering),
+                    label: const Text('测试连接'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _buildHistoryCard(AppLocalizations l10n) {
@@ -1628,6 +1892,8 @@ class _SmsRelayPageState extends State<SmsRelayPage>
             ],
             const SizedBox(height: 12),
             _buildHistoryCard(l10n),
+            const SizedBox(height: 12),
+            _buildLinkageCard(),
             const SizedBox(height: 12),
             _buildRemoteOpsCard(),
           ],
