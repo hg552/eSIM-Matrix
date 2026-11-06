@@ -16,6 +16,7 @@ import '../utils/imei_codec.dart';
 import '../version.dart';
 import '../config.dart';
 import 'build_capabilities.dart';
+import '../services/location_mapping_resolver.dart';
 import 'package:yaml/yaml.dart';
 
 class BrowserTabConfig {
@@ -639,6 +640,31 @@ class AppSettings extends ChangeNotifier {
     }
     await setMockLocationCustomRules(rules);
   }
+  // User Location Templates
+  List<LocationTemplate> _userLocationTemplates = [];
+  List<LocationTemplate> get userLocationTemplates => List.unmodifiable(_userLocationTemplates);
+
+  List<LocationTemplate> get allLocationTemplates => [
+    ...LocationMappingResolver.builtInTemplates,
+    ..._userLocationTemplates,
+  ];
+
+  Future<void> addUserLocationTemplate(LocationTemplate template) async {
+    _userLocationTemplates = [
+      ..._userLocationTemplates.where((t) => t.id != template.id),
+      template,
+    ];
+    final encoded = jsonEncode(_userLocationTemplates.map((t) => t.toJson()).toList());
+    await _prefs?.setString('userLocationTemplates', encoded);
+    notifyListeners();
+  }
+
+  Future<void> deleteUserLocationTemplate(String id) async {
+    _userLocationTemplates = _userLocationTemplates.where((t) => t.id != id).toList();
+    final encoded = jsonEncode(_userLocationTemplates.map((t) => t.toJson()).toList());
+    await _prefs?.setString('userLocationTemplates', encoded);
+    notifyListeners();
+  }
 
 
   // Roaming data safeguard: a foreign keep-alive eSIM can burn chargeable
@@ -948,6 +974,18 @@ class AppSettings extends ChangeNotifier {
         final decoded = jsonDecode(locRulesJson);
         if (decoded is Map) {
           _mockLocationCustomRules = decoded.map((k, v) => MapEntry(k.toString(), v.toString()));
+        }
+      } catch (_) {}
+    }
+    final userTemplatesJson = _prefs?.getString('userLocationTemplates');
+    if (userTemplatesJson != null) {
+      try {
+        final decoded = jsonDecode(userTemplatesJson);
+        if (decoded is List) {
+          _userLocationTemplates = decoded
+              .whereType<Map>()
+              .map((m) => LocationTemplate.fromJson(Map<String, dynamic>.from(m)))
+              .toList();
         }
       } catch (_) {}
     }

@@ -26,6 +26,66 @@ class LocationCoordinate {
   @override
   int get hashCode => Object.hash(latitude, longitude, countryCode);
 }
+class LocationTemplate {
+  final String id;
+  final String name;
+  final double latitude;
+  final double longitude;
+  final String countryCode;
+  final bool isCustom;
+
+  const LocationTemplate({
+    required this.id,
+    required this.name,
+    required this.latitude,
+    required this.longitude,
+    required this.countryCode,
+    this.isCustom = false,
+  });
+
+  String get formattedValue => '$latitude, $longitude, $name';
+
+  String get flagEmoji {
+    final code = countryCode.toUpperCase();
+    if (code.length != 2) return '📍';
+    final first = code.codeUnitAt(0) - 0x41 + 0x1F1E6;
+    final second = code.codeUnitAt(1) - 0x41 + 0x1F1E6;
+    return String.fromCharCode(first) + String.fromCharCode(second);
+  }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'latitude': latitude,
+    'longitude': longitude,
+    'countryCode': countryCode,
+    'isCustom': isCustom,
+  };
+
+  factory LocationTemplate.fromJson(Map<String, dynamic> json) {
+    return LocationTemplate(
+      id: json['id'] as String? ?? 'tpl_${DateTime.now().microsecondsSinceEpoch}',
+      name: json['name'] as String? ?? 'Custom',
+      latitude: (json['latitude'] as num?)?.toDouble() ?? 0.0,
+      longitude: (json['longitude'] as num?)?.toDouble() ?? 0.0,
+      countryCode: json['countryCode'] as String? ?? 'XX',
+      isCustom: json['isCustom'] as bool? ?? true,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is LocationTemplate &&
+          runtimeType == other.runtimeType &&
+          (latitude - other.latitude).abs() < 0.0001 &&
+          (longitude - other.longitude).abs() < 0.0001 &&
+          name == other.name;
+
+  @override
+  int get hashCode => Object.hash(latitude, longitude, name);
+}
+
 
 class LocationMatchResult {
   final LocationCoordinate? coordinate;
@@ -43,6 +103,128 @@ class LocationMatchResult {
 
 class LocationMappingResolver {
   const LocationMappingResolver();
+
+  static List<LocationTemplate> get builtInTemplates => const [
+    LocationTemplate(
+      id: 'hk_tst',
+      name: '中国香港 · 尖沙咀海旁',
+      latitude: 22.3193,
+      longitude: 114.1694,
+      countryCode: 'HK',
+    ),
+    LocationTemplate(
+      id: 'hk_central',
+      name: '中国香港 · 中环金融街',
+      latitude: 22.2820,
+      longitude: 114.1583,
+      countryCode: 'HK',
+    ),
+    LocationTemplate(
+      id: 'us_la',
+      name: '美国 · 洛杉矶市政中心',
+      latitude: 34.0522,
+      longitude: -118.2437,
+      countryCode: 'US',
+    ),
+    LocationTemplate(
+      id: 'us_nyc',
+      name: '美国 · 纽约曼哈顿时代广场',
+      latitude: 40.7580,
+      longitude: -73.9855,
+      countryCode: 'US',
+    ),
+    LocationTemplate(
+      id: 'us_sf',
+      name: '美国 · 旧金山硅谷科技区',
+      latitude: 37.7749,
+      longitude: -122.4194,
+      countryCode: 'US',
+    ),
+    LocationTemplate(
+      id: 'ee_tallinn',
+      name: '爱沙尼亚 · 塔林老城中心',
+      latitude: 59.4370,
+      longitude: 24.7536,
+      countryCode: 'EE',
+    ),
+    LocationTemplate(
+      id: 'gb_london',
+      name: '英国 · 伦敦特拉法加广场',
+      latitude: 51.5074,
+      longitude: -0.1278,
+      countryCode: 'GB',
+    ),
+    LocationTemplate(
+      id: 'jp_tokyo',
+      name: '日本 · 东京新宿商业区',
+      latitude: 35.6938,
+      longitude: 139.7034,
+      countryCode: 'JP',
+    ),
+    LocationTemplate(
+      id: 'jp_osaka',
+      name: '日本 · 大阪心斋桥/道顿堀',
+      latitude: 34.6687,
+      longitude: 135.5013,
+      countryCode: 'JP',
+    ),
+    LocationTemplate(
+      id: 'sg_marina',
+      name: '新加坡 · 滨海湾金融中心',
+      latitude: 1.3521,
+      longitude: 103.8198,
+      countryCode: 'SG',
+    ),
+    LocationTemplate(
+      id: 'de_frankfurt',
+      name: '德国 · 法兰克福欧洲央行',
+      latitude: 50.1109,
+      longitude: 8.6821,
+      countryCode: 'DE',
+    ),
+    LocationTemplate(
+      id: 'fr_paris',
+      name: '法国 · 巴黎香榭丽舍大街',
+      latitude: 48.8566,
+      longitude: 2.3522,
+      countryCode: 'FR',
+    ),
+    LocationTemplate(
+      id: 'nl_ams',
+      name: '荷兰 · 阿姆斯特丹水坝广场',
+      latitude: 52.3676,
+      longitude: 4.9041,
+      countryCode: 'NL',
+    ),
+    LocationTemplate(
+      id: 'tw_taipei',
+      name: '中国台湾 · 台北 101 信义区',
+      latitude: 25.0330,
+      longitude: 121.5654,
+      countryCode: 'TW',
+    ),
+    LocationTemplate(
+      id: 'mo_macau',
+      name: '中国澳门 · 路氹城新濠天地',
+      latitude: 22.1987,
+      longitude: 113.5439,
+      countryCode: 'MO',
+    ),
+    LocationTemplate(
+      id: 'au_sydney',
+      name: '澳大利亚 · 悉尼歌剧院环形码头',
+      latitude: -33.8688,
+      longitude: 151.2093,
+      countryCode: 'AU',
+    ),
+    LocationTemplate(
+      id: 'ca_toronto',
+      name: '加拿大 · 多伦多 CN 塔市中心',
+      latitude: 43.6532,
+      longitude: -79.3832,
+      countryCode: 'CA',
+    ),
+  ];
 
   static const Map<String, LocationCoordinate> standardCoordinates = {
     'HK': LocationCoordinate(

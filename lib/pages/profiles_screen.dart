@@ -70,6 +70,7 @@ import '../services/update_notifier.dart';
 import '../utils/update_utils.dart';
 import '../widgets/profiles_screen/profile_list_section.dart';
 import '../widgets/profiles_screen/proxy_node_picker_dialog.dart';
+import '../widgets/profiles_screen/location_picker_dialog.dart';
 import '../widgets/profiles_screen/reader_helper.dart';
 import '../widgets/profiles_screen/state_messages.dart' hide ColumnStateMessage;
 import '../widgets/profiles_screen/error_state.dart';
@@ -3419,6 +3420,11 @@ class _ProfilesScreenState extends State<ProfilesScreen>
           value: 'proxy_node',
         ),
         AdaptiveContextMenuItem(
+          label: _locationBindingMenuLabel(profile),
+          icon: Icons.edit_location_alt_outlined,
+          value: 'mock_location',
+        ),
+        AdaptiveContextMenuItem(
           label: AppLocalizations.of(context)!.copyIccid,
           icon: Icons.copy_outlined,
           value: 'copy_iccid',
@@ -3451,6 +3457,7 @@ class _ProfilesScreenState extends State<ProfilesScreen>
     if (result == 'change_icon') _changeProfileIcon(profile);
     if (result == 'tags') _openTagManager(profile);
     if (result == 'proxy_node') await _showProxyNodeBindingDialog(profile);
+    if (result == 'mock_location') await _showLocationBindingDialog(profile);
     if (result == 'copy_iccid') _copyIccid(profile);
     if (result == 'transfer') await _handleTransfer(profile);
     if (result == 'delete') _deleteProfile(profile);
@@ -3461,6 +3468,56 @@ class _ProfilesScreenState extends State<ProfilesScreen>
     if (bound == null) return '🌐 指定代理节点';
     final short = bound.length > 18 ? '${bound.substring(0, 17)}…' : bound;
     return '🌐 代理节点：$short';
+  }
+  String _locationBindingMenuLabel(EuiccProfile profile) {
+    final bound = AppSettings().mockLocationForIccid(profile.iccid);
+    if (bound == null) return '📍 指定虚拟定位模板';
+    final parts = bound.split(',');
+    final label = parts.length > 2 ? parts.sublist(2).join(',').trim() : bound;
+    final short = label.length > 18 ? '${label.substring(0, 17)}…' : label;
+    return '📍 定位：$short';
+  }
+
+  Future<void> _showLocationBindingDialog(EuiccProfile profile) async {
+    final settings = AppSettings();
+    final picked = await showDialog<String>(
+      context: context,
+      builder: (context) => LocationPickerDialog(
+        profileName: profile.displayName,
+        iccid: profile.iccid,
+        currentLocationRule: settings.mockLocationForIccid(profile.iccid),
+        settings: settings,
+      ),
+    );
+    if (picked == null) return;
+    await settings.setMockLocationForIccid(
+      profile.iccid,
+      picked.isEmpty ? null : picked,
+    );
+
+    var message = picked.isEmpty
+        ? '已清除【${profile.displayName}】的定向定位，切卡时按国别自动匹配。'
+        : '已绑定【${profile.displayName}】虚拟定位 → $picked';
+    if (picked.isNotEmpty && profile.enabled && settings.mockLocationLinkageEnabled) {
+      final applied = await RemoteGatewayService.instance
+          .applyLocationForProfile(
+            iccid: profile.iccid,
+            alias: profile.displayName,
+            mcc: profile.mcc,
+          )
+          .catchError((Object _) => false);
+      message += applied
+          ? '，并已立即注入定位！'
+          : '（下次切卡时生效）。';
+    }
+    if (!settings.mockLocationLinkageEnabled) {
+      message += '\n虚拟定位联动未启用：请到「短信转发」→「虚拟定位联动」开启。';
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+    setState(() {});
   }
 
   /// Binds one eSIM profile to one FlClash / Mihomo node. The binding is keyed
