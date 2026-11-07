@@ -38,10 +38,9 @@ String decodeBcd(List<int> value) {
     sb.write(hi.toRadixString(16));
   }
   var out = sb.toString();
-  final index = out.lastIndexOf('f');
-  if (index != -1) {
-    out = out.substring(0, index);
-  }
+  // 0xFF filler yields two 'f' characters; removing only the last one left the
+  // identifier with a stray trailing 'f'.
+  out = out.replaceAll(RegExp(r'f+$'), '');
   return out;
 }
 

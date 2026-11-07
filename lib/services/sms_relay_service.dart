@@ -205,9 +205,11 @@ class SmsHistoryEntry {
       slotIndex: slot is int ? slot : null,
       carrierName: carrier is String && carrier.isNotEmpty ? carrier : null,
       receivedAtMillis: receivedAt is int ? receivedAt : 0,
-      mode: map['mode'] == SmsRelayMode.webhook
-          ? SmsRelayMode.webhook
-          : SmsRelayMode.telegram,
+      mode: switch (map['mode']) {
+        SmsRelayMode.webhook => SmsRelayMode.webhook,
+        SmsRelayMode.cfWorker => SmsRelayMode.cfWorker,
+        _ => SmsRelayMode.telegram,
+      },
       delivered: map['delivered'] != false,
       errorCode: err is String && err.isNotEmpty ? err : null,
     );

@@ -491,7 +491,14 @@ class SmsCodec {
   static String _decodeUserData(int dcs, int udl, List<int> raw, bool udhi) {
     var udhBytes = 0;
     if (udhi) {
+      if (raw.isEmpty) {
+        return '';
+      }
       udhBytes = raw.first + 1;
+      if (udhBytes > raw.length) {
+        // Malformed TP-UDL/UDH pair: the header claims more bytes than arrived.
+        return '';
+      }
     }
     var textLength = udl;
     if (udhi) {
@@ -525,13 +532,16 @@ class SmsCodec {
         return 'hex:${_hex(textBytes).toUpperCase()}';
       default:
         if (udhi) {
-          final skipBits = udhBytes * 8;
-          final skipSeptets = (skipBits + 6) ~/ 7;
+          // TS 23.040 9.2.3.24: the fill bits pad the UDH up to the next septet
+          // boundary and UDL counts the UDH septets too. Unpacking from
+          // udhBytes*8 instead of skipSeptets*7 shifted every character by the
+          // leftover bits and produced garbage for every concatenated SMS.
+          final skipSeptets = (udhBytes * 8 + 6) ~/ 7;
           final textSeptets = udl - skipSeptets;
           return _unpackGsm7WithOffset(
             raw,
             textSeptets < 0 ? 0 : textSeptets,
-            skipBits,
+            skipSeptets * 7,
           );
         }
         return _unpackGsm7(raw, udl);
