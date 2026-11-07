@@ -26,8 +26,10 @@ class UpdateInfo {
 class UpdateService {
   static final Logger _log = Logger('UpdateService');
 
-  /// Upstream publishes its own feed; a fork points this at its own file.
-  static const String _defaultConfigUrl = 'https://updates.lpa.ee/nlpa2.json';
+  /// This fork publishes its own feed; upstream's file would advertise
+  /// upstream builds under a different package name.
+  static const String _defaultConfigUrl =
+      'https://raw.githubusercontent.com/hg552/eSIM-Matrix/main/update_feed.json';
 
   /// Set with `--dart-define=APP_UPDATE_FEED_URL=...` at build time.
   static const String _configuredConfigUrl = String.fromEnvironment(

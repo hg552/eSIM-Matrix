@@ -21,6 +21,7 @@ import 'plugins/plugin_manager.dart';
 import 'services/remote_gateway_service.dart';
 import 'dart:convert';
 import 'pages/reminder_details_page.dart';
+import 'pages/glass_preview_page.dart';
 import 'pages/main_tab_screen.dart';
 import 'vowifi/inbox_page.dart';
 
@@ -321,7 +322,11 @@ class _AppSettingsScopeState extends State<_AppSettingsScope> {
       darkTheme: AppTheme.theme(true),
       themeMode: _themeMode,
       locale: resolvedLocale,
-      home: const MainTabScreen(),
+      // `--dart-define=GLASS_PREVIEW=1` boots straight into the glass
+      // sample. It is a build-time switch, so a normal build has no such path.
+      home: const bool.fromEnvironment('GLASS_PREVIEW')
+          ? const GlassPreviewPage()
+          : const MainTabScreen(),
       routes: PluginManager().allRoutes,
       debugShowCheckedModeBanner: false,
       localizationsDelegates: const [
