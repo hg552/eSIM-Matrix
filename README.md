@@ -6,6 +6,7 @@
   <a href="https://github.com/iebb/NekokoLPA2"><img src="https://img.shields.io/badge/Upstream-NekokoLPA2-6E56CF?style=flat-square" alt="Based on NekokoLPA2" /></a>
   <a href="https://github.com/hg552/eSIM-Matrix/releases"><img src="https://img.shields.io/badge/Release-v1.4.1-orange?style=flat-square" alt="Release v1.4.1" /></a>
   <a href="https://linux.do"><img src="https://img.shields.io/badge/Community-LINUX%20DO-f09433?style=flat-square" alt="LINUX DO 社区" /></a>
+  <a href="https://t.me/+-R_ZlP2k409kOGE0"><img src="https://img.shields.io/badge/Telegram-交流群-2CA5E0?style=flat-square&logo=telegram&logoColor=white" alt="Telegram 交流群" /></a>
 </p>
 
 > **开源声明**：本项目基于 [iebb/NekokoLPA2](https://github.com/iebb/NekokoLPA2)（及 [OTBridge](https://github.com/iebb/OTBridge)、[remocard](https://github.com/iebb/remocard)）二次开发，遵循 [MIT License](LICENSE)；设计参考了 [cyDione/eSIM-SMS-Forwarder](https://github.com/cyDione/eSIM-SMS-Forwarder) 与 [SmsForwarder](https://github.com/pppscn/SmsForwarder)，并感谢 [LINUX DO 社区](https://linux.do) 支持。`NekokoLPA` 为 `SIMLINK LTD.` 注册商标，本项目由第三方独立维护，非官方产品（详见 [`NOTICE`](NOTICE) / [`BRANDING.md`](BRANDING.md)）。仅供个人管理自有合法 eSIM，严禁用于非法接码或未授权设备监控。
@@ -429,4 +430,4 @@ curl -X GET "http://127.0.0.1:8787/api/v1/sms?limit=10" \
 
 ## 开源协议
 
-[MIT License](LICENSE) · 基于 [iebb/NekokoLPA2](https://github.com/iebb/NekokoLPA2) 构建 · 社区支持：[LINUX DO](https://linux.do)
+[MIT License](LICENSE) · 基于 [iebb/NekokoLPA2](https://github.com/iebb/NekokoLPA2) 构建 · 社区支持：[LINUX DO](https://linux.do) · 交流群：[Telegram](https://t.me/+-R_ZlP2k409kOGE0)
