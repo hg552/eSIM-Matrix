@@ -10,6 +10,7 @@ import '../services/operator_icon_service.dart';
 import '../utils/size_formatter.dart';
 import 'common/loading_spinner.dart';
 import '../theme/app_theme.dart';
+import 'glass/glass_surface.dart';
 import '../l10n/app_localizations.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../services/profile_size_prediction_service.dart';
@@ -73,13 +74,9 @@ class ProfileCard extends StatelessWidget {
     final displayTags = ProfileRedaction.tags(profile.tags);
     final operatorSummary = ProfileRedaction.operatorSummary(profile);
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: AppTheme.highlightedCardDecoration(
-        context,
-        enabled: profile.enabled,
-      ),
-      child: AnimatedScale(
+    final glass = AppSettings().enableGlassUi;
+
+    final Widget body = AnimatedScale(
         scale: isDeleting ? 0.95 : 1.0,
         duration: const Duration(milliseconds: 300),
         child: AnimatedOpacity(
@@ -269,6 +266,39 @@ class ProfileCard extends StatelessWidget {
               ),
             ),
           ),
+        ),
+      );
+
+    if (!glass) {
+      return Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        decoration: AppTheme.highlightedCardDecoration(
+          context,
+          enabled: profile.enabled,
+        ),
+        child: body,
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: GlassSurface(
+        radius: 20,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            border: profile.enabled
+                ? Border.all(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .primary
+                        .withValues(alpha: 0.55),
+                    width: 2,
+                  )
+                : null,
+          ),
+          child: body,
         ),
       ),
     );

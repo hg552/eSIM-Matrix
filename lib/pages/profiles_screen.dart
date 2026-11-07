@@ -1,4 +1,5 @@
 import '../adapter/se_hal_adapter.dart';
+import '../widgets/glass/glass_surface.dart';
 import 'package:flutter/material.dart';
 import '../l10n/app_localizations.dart';
 import 'package:flutter/foundation.dart';
@@ -5517,9 +5518,13 @@ class _ProfilesScreenState extends State<ProfilesScreen>
           profiles: _profiles,
         );
 
+        final glassUi = AppSettings().enableGlassUi;
+
         return Stack(
           children: [
+            if (glassUi) const Positioned.fill(child: GlassBackdrop()),
             Scaffold(
+              backgroundColor: glassUi ? Colors.transparent : null,
               appBar: PreferredSize(
                 preferredSize: isExtremelySmall
                     ? Size.fromHeight(40)

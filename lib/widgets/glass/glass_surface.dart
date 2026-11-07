@@ -149,3 +149,61 @@ class GlassProfile {
     _ => normal,
   };
 }
+
+/// The colourful field the glass is meant to sit on.
+///
+/// A backdrop blur over a flat dark background is invisible: there is nothing
+/// to blur. This paints the soft colour blobs the material was designed
+/// against, so turning the switch on actually changes what the eye sees.
+class GlassBackdrop extends StatelessWidget {
+  const GlassBackdrop({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        const DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Color(0xFF121A3A),
+                Color(0xFF241344),
+                Color(0xFF3A1233),
+                Color(0xFF2A1410),
+              ],
+              stops: [0, 0.35, 0.7, 1],
+            ),
+          ),
+        ),
+        _blob(Alignment.topLeft, 640, const Color(0xFF4C7CFF), 0.55),
+        _blob(const Alignment(1.1, -0.5), 540, const Color(0xFFC05CFF), 0.45),
+        _blob(const Alignment(0.9, 0.95), 580, const Color(0xFF00E0B0), 0.28),
+        _blob(const Alignment(-0.95, 0.55), 540, const Color(0xFFFF7A4D), 0.26),
+      ],
+    );
+  }
+
+  Widget _blob(Alignment align, double size, Color color, double alpha) {
+    return Align(
+      alignment: align,
+      child: IgnorePointer(
+        child: Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: RadialGradient(
+              colors: [
+                color.withValues(alpha: alpha),
+                color.withValues(alpha: 0),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
