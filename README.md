@@ -4,7 +4,7 @@
   <b>基于 Android 备用机的远程多国 eSIM (eUICC) 切卡、基带漫游监控、3D 异构海外环境联动（SIM + 代理 + 虚拟定位）与短信/验证码转发网关</b><br/>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" alt="MIT License" /></a>
   <a href="https://github.com/iebb/NekokoLPA2"><img src="https://img.shields.io/badge/Upstream-NekokoLPA2-6E56CF?style=flat-square" alt="Based on NekokoLPA2" /></a>
-  <a href="https://github.com/hg552/eSIM-Matrix/releases"><img src="https://img.shields.io/badge/Release-v1.4.0-orange?style=flat-square" alt="Release v1.4.0" /></a>
+  <a href="https://github.com/hg552/eSIM-Matrix/releases"><img src="https://img.shields.io/badge/Release-v1.4.1-orange?style=flat-square" alt="Release v1.4.1" /></a>
   <a href="https://linux.do"><img src="https://img.shields.io/badge/Community-LINUX%20DO-f09433?style=flat-square" alt="LINUX DO 社区" /></a>
 </p>
 
