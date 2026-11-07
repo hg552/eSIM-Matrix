@@ -200,6 +200,7 @@ class QrtrPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             "isAvailable" -> result.success(isAvailable())
             "hasPermission" -> result.success(hasPermission())
             "requestPermission" -> requestPermission(result)
+            "platformInfo" -> result.success(platformInfo())
 
             "halInvalidateSessions" -> withService(result, retrySafe = false, seHal = true) { service -> service.halInvalidateSessions(call.number("slot")); null }
             "halUseBorrowed" -> withService(result, retrySafe = false, seHal = true) { service -> service.halUseBorrowed(call.number("slot")); null }
@@ -428,6 +429,40 @@ class QrtrPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             Log.w(TAG, "Shizuku is not available", e)
             false
         }
+    }
+
+    /**
+     * What the app can honestly say about this handset before blaming a
+     * reader: which SoC it is, and whether the ROM publishes either of the
+     * two Secure Element features. An empty reader list means something
+     * different on a MediaTek phone than on a Qualcomm one, and the report
+     * should say which.
+     */
+    private fun platformInfo(): Map<String, Any?> {
+        val packageManager = receiverContext?.packageManager
+        val socManufacturer = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            Build.SOC_MANUFACTURER
+        } else {
+            ""
+        }
+        val socModel = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            Build.SOC_MODEL
+        } else {
+            ""
+        }
+        val secureElementFeature = packageManager
+            ?.hasSystemFeature("android.hardware.secure_element") == true
+        val omapiUiccFeature = packageManager
+            ?.hasSystemFeature("android.hardware.se.omapi.uicc") == true
+
+        return mapOf(
+            "hardware" to Build.HARDWARE,
+            "socManufacturer" to socManufacturer,
+            "socModel" to socModel,
+            "isQualcomm" to isQualcomm(),
+            "secureElementFeature" to secureElementFeature,
+            "omapiUiccFeature" to omapiUiccFeature,
+        )
     }
 
     private fun requestPermission(result: MethodChannel.Result) {

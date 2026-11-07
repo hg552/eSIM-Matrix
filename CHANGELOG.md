@@ -2,6 +2,18 @@
 
 All notable changes to **eSIM-Matrix** (formerly eUICC-Nexus, based on upstream NekokoLPA2) are documented in this file.
 
+## [v1.4.1] - 2026-11-07 (`1.4.1+141`)
+
+### 🔍 读卡器诊断不再静默失败 (Reader discovery now explains itself)
+- **空结果必须说明原因**：任一传输通道返回 0 个读卡器时，扫描明细里现在会直接写出可执行的原因，而不是只显示 `0 reader(s)`：
+  - **QRTR**：非高通机型直接点名 SoC 并说明「QRTR 是高通专用 modem 总线，本机不可用」，同时给出可用替代（OMAPI / SE HAL / OTBridge / BLE·USB 读卡器）；高通机型再区分「Shizuku 未运行」与「Shizuku 已运行但本应用未授权」。
+  - **SE HAL**：区分「Shizuku 未运行」「Shizuku 已运行但未授权（点读卡器会弹授权）」「已授权但该 ROM 未发布 `android.hardware.secure_element`」「已授权且 HAL 已发布但没有列出卡槽（查卡是否插好）」。
+  - **Built-in OMAPI**：0 个卡槽时说明该 ROM 未把卡槽暴露给应用 OMAPI，并指向 SE HAL / OTBridge / 外接读卡器。
+- **新增机型信息探针**：`platformInfo` 上报 `ro.hardware`、SoC 厂商/型号、`android.hardware.secure_element` 与 `android.hardware.se.omapi.uicc` 特性，报告里因此能按芯片而非猜测给结论。
+- **只在空结果时附带原因**：找到读卡器时不再拼接解释文本，避免把成功扫描误读成故障。
+
+
+
 ## [v1.4.0] - 2026-11-07 (`1.4.0+140`)
 
 ### 🚀 品牌升级 (Rebranding)

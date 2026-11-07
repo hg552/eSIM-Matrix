@@ -136,6 +136,26 @@ class CompositeAdapter extends BaseAdapter {
 
   String _describeReader(Reader r) => '${r.id} -> ${r.name}';
 
+  /// Why SE HAL listed no slot, in the terms the handset actually answered.
+  String _seHalDetail({
+    required bool authorised,
+    required ReaderPlatformInfo platform,
+  }) {
+    if (!authorised) {
+      return 'Shizuku is running but this app is not authorised yet; '
+          'tapping an SE HAL reader asks for the permission '
+          '(SoC: ${platform.socLabel})';
+    }
+    if (!platform.secureElementFeature) {
+      return 'Shizuku is authorised, but this ROM does not publish '
+          'android.hardware.secure_element, so the HAL has no SIM slot to '
+          'offer (SoC: ${platform.socLabel})';
+    }
+    return 'Shizuku is authorised and the HAL is published, but no SIM slot '
+        'was listed: check that the card seats in the slot, or that the slot '
+        'is not disabled by the ROM (SoC: ${platform.socLabel})';
+  }
+
   Future<List<Reader>> _doListReaders({bool force = false}) async {
     Object? omapiDiscoveryFailure;
     if (force) {
@@ -191,7 +211,7 @@ class CompositeAdapter extends BaseAdapter {
             source: source,
             status: soft == null ? DiscoveryStatus.ok : DiscoveryStatus.error,
             readerNames: found.map(_describeReader).toList(),
-            detail: soft ?? detail?.call(),
+            detail: soft ?? (found.isEmpty ? detail?.call() : null),
             elapsed: timer.elapsed,
           ),
         );
@@ -322,28 +342,56 @@ class CompositeAdapter extends BaseAdapter {
     if (PlatformX.isAndroid) {
       // Both of these answer an empty list when they cannot run at all, which
       // the report would otherwise show as "ran and found nothing".
+      final platform = await QrtrHost.platformInfo();
+      final shizukuRunning = await QrtrHost.isAvailable();
+      final authorised = shizukuRunning && await QrtrHost.hasPermission();
+
       if (!AppSettings().enableQrtrConnector) {
         skipped('QRTR modem', 'QRTR connector is off in settings');
-      } else if (!await QrtrHost.isSupported()) {
-        skipped('QRTR modem', 'this SoC has no QRTR bus');
-      } else if (!await QrtrHost.isAvailable()) {
-        skipped('QRTR modem', 'Shizuku is not installed or not running');
+      } else if (!platform.isQualcomm) {
+        skipped(
+          'QRTR modem',
+          'no QRTR bus on ${platform.socLabel}: QRTR is a Qualcomm-only modem '
+              'bus, so this transport cannot work on this handset — use '
+              'Built-in OMAPI, SE HAL, OTBridge (root) or a BLE/USB reader',
+        );
+      } else if (!shizukuRunning) {
+        skipped(
+          'QRTR modem',
+          'Shizuku is not installed or not running; the bus socket can only '
+              'be opened by the shell user',
+        );
+      } else if (!authorised) {
+        skipped(
+          'QRTR modem',
+          'Shizuku is running but this app is not authorised in Shizuku',
+        );
       } else {
         await probe(
           'QRTR modem',
           () => _qrtrAdapter.listReaders(force: force),
           failureLog: 'QRTR modem list failed',
+          detail: () => 'Qualcomm QRTR bus is reachable but listed no card slot',
         );
       }
+
       if (!AppSettings().enableSeHalConnector) {
         skipped('SE HAL', 'SE HAL connector is off in settings');
-      } else if (!await QrtrHost.isAvailable()) {
-        skipped('SE HAL', 'Shizuku is not installed or not running');
+      } else if (!shizukuRunning) {
+        skipped(
+          'SE HAL',
+          'Shizuku is not installed or not running; the Secure Element HAL '
+              'answers only to the shell user',
+        );
       } else {
         await probe(
           'SE HAL',
           () => _seHalAdapter.listReaders(force: force),
           failureLog: 'SE HAL reader list failed',
+          detail: () => _seHalDetail(
+            authorised: authorised,
+            platform: platform,
+          ),
         );
       }
     }
@@ -395,7 +443,12 @@ class CompositeAdapter extends BaseAdapter {
             if (isOmapiSessionCorruptedError(e)) omapiDiscoveryFailure = e;
           },
           softError: () => _omapiAdapter.lastListError,
-          detail: () => 'native readers: ${_omapiAdapter.lastRawReaders}',
+          detail: () {
+            final raw = _omapiAdapter.lastRawReaders;
+            return 'native readers: $raw — the ROM exposes no SIM slot to app '
+                'OMAPI; use SE HAL via Shizuku, OTBridge (root) or a BLE/USB '
+                'reader instead';
+          },
         );
       } else {
         skipped('Built-in OMAPI', 'OMAPI connector is off in settings');
