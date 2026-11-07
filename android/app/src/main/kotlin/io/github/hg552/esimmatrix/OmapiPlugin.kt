@@ -202,6 +202,9 @@ class OmapiPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         }
         methodChannel?.setMethodCallHandler(null)
         methodChannel = null
+        // Without clearing the handler the engine keeps the Dart-side sink alive
+        // across a hot restart and the old listener keeps firing.
+        eventChannel?.setStreamHandler(null)
         eventChannel = null
         eventSink = null
 

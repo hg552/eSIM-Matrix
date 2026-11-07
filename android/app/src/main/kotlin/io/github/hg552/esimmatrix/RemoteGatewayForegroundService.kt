@@ -51,6 +51,7 @@ internal class RemoteGatewayForegroundService : Service() {
     }
     @Volatile private var lastObservedSmsId: Long = -1L
     private var smsObserver: ContentObserver? = null
+    private var inboxPollTask: java.util.concurrent.ScheduledFuture<*>? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -89,7 +90,11 @@ internal class RemoteGatewayForegroundService : Service() {
         } catch (e: Exception) {
             Log.w(TAG, "SMS ContentObserver registration deferred: ${e.message}")
         }
-        inboxScanner.scheduleWithFixedDelay({ scanNewInboxSms() }, 3L, 3L, TimeUnit.SECONDS)
+        // Every onStartCommand retries registration while smsObserver is null, so
+        // this may run repeatedly; replace the fallback poller instead of adding
+        // another 3-second scan each time.
+        inboxPollTask?.cancel(false)
+        inboxPollTask = inboxScanner.scheduleWithFixedDelay({ scanNewInboxSms() }, 3L, 3L, TimeUnit.SECONDS)
     }
 
     private fun hasReadSmsPermission(): Boolean =
