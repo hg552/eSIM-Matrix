@@ -478,6 +478,22 @@ class AppSettings extends ChangeNotifier {
   bool _enableTmapiConnector = true;
   bool get enableTmapiConnector => _enableTmapiConnector;
 
+  /// Experimental "liquid glass" surfaces. Off by default: the look is still
+  /// being judged, and a full-screen backdrop blur costs frames on low-end
+  /// handsets, so turning it on has to be a deliberate act.
+  bool _enableGlassUi = false;
+  bool get enableGlassUi => _enableGlassUi;
+
+  /// How heavy the glass reads: `soft`, `normal` or `strong`. Only meaningful
+  /// while [enableGlassUi] is on.
+  String _glassIntensity = 'normal';
+  String get glassIntensity => _glassIntensity;
+
+  /// Let the app drop to a cheaper blur while a list is scrolling, instead of
+  /// asking the GPU to re-blur every frame.
+  bool _glassDegradeOnScroll = true;
+  bool get glassDegradeOnScroll => _glassDegradeOnScroll;
+
   bool _nbridgeProviderAvailable = false;
   bool get nbridgeProviderAvailable => _nbridgeProviderAvailable;
 
@@ -845,6 +861,10 @@ class AppSettings extends ChangeNotifier {
     _enableQrtrConnector =
         _prefs?.getBool('enableQrtrConnector') ?? await QrtrHost.isSupported();
     _enableSeHalConnector = _prefs?.getBool('enableSeHalConnector') ?? false;
+    _enableGlassUi = _prefs?.getBool('enableGlassUi') ?? false;
+    _glassIntensity = _prefs?.getString('glassIntensity') ?? 'normal';
+    _glassDegradeOnScroll =
+        _prefs?.getBool('glassDegradeOnScroll') ?? true;
     _halBorrowedSlots
       ..clear()
       ..addAll(
@@ -1625,6 +1645,27 @@ class AppSettings extends ChangeNotifier {
   Future<void> setEnableSeHalConnector(bool value) async {
     _enableSeHalConnector = value;
     await _prefs?.setBool('enableSeHalConnector', value);
+    notifyListeners();
+  }
+
+  Future<void> setEnableGlassUi(bool value) async {
+    _enableGlassUi = value;
+    await _prefs?.setBool('enableGlassUi', value);
+    notifyListeners();
+  }
+
+  Future<void> setGlassIntensity(String value) async {
+    if (!const {'soft', 'normal', 'strong'}.contains(value)) {
+      throw ArgumentError('Unknown glass intensity: $value');
+    }
+    _glassIntensity = value;
+    await _prefs?.setString('glassIntensity', value);
+    notifyListeners();
+  }
+
+  Future<void> setGlassDegradeOnScroll(bool value) async {
+    _glassDegradeOnScroll = value;
+    await _prefs?.setBool('glassDegradeOnScroll', value);
     notifyListeners();
   }
 

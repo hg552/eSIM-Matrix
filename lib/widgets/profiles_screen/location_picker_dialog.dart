@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../glass/glass_surface.dart';
 import '../../services/location_mapping_resolver.dart';
 import '../../settings/app_settings.dart';
 
@@ -147,13 +148,18 @@ class _LocationPickerDialogState extends State<LocationPickerDialog> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
+    final glass = AppSettings().enableGlassUi;
     return Dialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      backgroundColor: glass ? Colors.transparent : null,
+      surfaceTintColor: glass ? Colors.transparent : null,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 480, maxHeight: 680),
-        child: Padding(
-          padding: const EdgeInsets.all(20),
+      child: GlassSurface(
+        radius: 16,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 480, maxHeight: 680),
+          child: Padding(
+            padding: const EdgeInsets.all(20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -241,6 +247,7 @@ class _LocationPickerDialogState extends State<LocationPickerDialog> {
             ],
           ),
         ),
+      ),
       ),
     );
   }

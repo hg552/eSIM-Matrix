@@ -4,6 +4,7 @@ import '../../theme/app_theme.dart';
 import '../../widgets/styled_header_scaffold.dart';
 import '../../l10n/app_localizations.dart';
 import '../../utils/platform_adapter.dart';
+import '../glass_preview_page.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 
 class DisplaySettingsPage extends StatelessWidget {
@@ -44,6 +45,18 @@ class DisplaySettingsPage extends StatelessWidget {
                   children: [
                     _buildAutoLoadSwitcher(context),
                     _buildShowProfileSearchSwitcher(context),
+                  ],
+                ),
+                _buildSection(
+                  context,
+                  title: '液态玻璃（实验性）',
+                  children: [
+                    _buildGlassUiSwitcher(context),
+                    if (AppSettings().enableGlassUi) ...[
+                      _buildGlassIntensitySelector(context),
+                      _buildGlassDegradeSwitcher(context),
+                      _buildGlassPreviewButton(context),
+                    ],
                   ],
                 ),
               ];
@@ -612,6 +625,119 @@ class DisplaySettingsPage extends StatelessWidget {
         (v) => settings.setShowProfileSearch(v),
       ),
       onTap: () => settings.setShowProfileSearch(!settings.showProfileSearch),
+    );
+  }
+
+  Widget _buildGlassUiSwitcher(BuildContext context) {
+    final settings = AppSettings();
+    return _buildResponsiveTile(
+      context,
+      icon: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: Colors.lightBlueAccent.withValues(alpha: 0.12),
+          shape: BoxShape.circle,
+        ),
+        child: const Icon(
+          Icons.blur_on,
+          size: 20,
+          color: Colors.lightBlueAccent,
+        ),
+      ),
+      title: '液态玻璃界面',
+      subtitle: '实验性：面板使用实时背景模糊与半透明高光，低端机可能掉帧',
+      child: _buildCustomSwitch(
+        context,
+        settings.enableGlassUi,
+        (v) => settings.setEnableGlassUi(v),
+      ),
+      onTap: () => settings.setEnableGlassUi(!settings.enableGlassUi),
+    );
+  }
+
+  Widget _buildGlassIntensitySelector(BuildContext context) {
+    final settings = AppSettings();
+    const labels = {'soft': '轻柔', 'normal': '标准', 'strong': '厚重'};
+    return _buildResponsiveTile(
+      context,
+      icon: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: Colors.deepPurpleAccent.withValues(alpha: 0.12),
+          shape: BoxShape.circle,
+        ),
+        child: const Icon(
+          Icons.opacity,
+          size: 20,
+          color: Colors.deepPurpleAccent,
+        ),
+      ),
+      title: '玻璃强度',
+      subtitle: '模糊半径与染色浓度的组合',
+      child: _buildAdaptiveDropdown<String>(
+        context: context,
+        value: settings.glassIntensity,
+        items: [
+          for (final entry in labels.entries)
+            DropdownMenuItem(value: entry.key, child: Text(entry.value)),
+        ],
+        onChanged: (v) {
+          if (v != null) settings.setGlassIntensity(v);
+        },
+      ),
+    );
+  }
+
+  Widget _buildGlassDegradeSwitcher(BuildContext context) {
+    final settings = AppSettings();
+    return _buildResponsiveTile(
+      context,
+      icon: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: Colors.orangeAccent.withValues(alpha: 0.12),
+          shape: BoxShape.circle,
+        ),
+        child: const Icon(
+          Icons.speed,
+          size: 20,
+          color: Colors.orangeAccent,
+        ),
+      ),
+      title: '滚动时降低模糊',
+      subtitle: '列表滚动时用更小的半径，减少每帧重算',
+      child: _buildCustomSwitch(
+        context,
+        settings.glassDegradeOnScroll,
+        (v) => settings.setGlassDegradeOnScroll(v),
+      ),
+      onTap: () => settings.setGlassDegradeOnScroll(
+        !settings.glassDegradeOnScroll,
+      ),
+    );
+  }
+
+  Widget _buildGlassPreviewButton(BuildContext context) {
+    return _buildResponsiveTile(
+      context,
+      icon: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: Colors.tealAccent.withValues(alpha: 0.12),
+          shape: BoxShape.circle,
+        ),
+        child: const Icon(
+          Icons.visibility_outlined,
+          size: 20,
+          color: Colors.tealAccent,
+        ),
+      ),
+      title: '预览界面样例',
+      subtitle: '用当前强度渲染一张卡片、一套分段控件与一个底部面板',
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const GlassPreviewPage()),
+      ),
+      child: const Icon(Icons.chevron_right, color: Colors.grey),
     );
   }
 }
