@@ -392,7 +392,12 @@ class CcidPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         val ccid = Ccid(usbConnection, endpoints.first, endpoints.second, usbInterface)
         try {
             val descriptor = ccid.getDescriptor(interfaceIdx)
-            if (descriptor?.supportsProtocol(Protocol.T0) != true) {
+            // XfrBlock carries the APDU and the reader's firmware handles T=0 or
+            // T=1 itself, so a T=1-only reader is perfectly usable; the old T=0
+            // gate rejected every one of them.
+            if (descriptor == null ||
+                (!descriptor.supportsProtocol(Protocol.T0) &&
+                    !descriptor.supportsProtocol(Protocol.T1))) {
                 Log.d(TAG, "Unsupported protocol")
                 ccid.close()
                 return null

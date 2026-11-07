@@ -168,16 +168,23 @@ class Ccid(
         }
 
         val dataBuffer = ByteArray(message.length)
-        var bytesBuffered = bytesRead - HEADER_SIZE
-        System.arraycopy(buffer, HEADER_SIZE, dataBuffer, 0, bytesBuffered)
+        // A reader may pad its bulk reply to the endpoint packet size, so the
+        // number of bytes the host reads can exceed the Lc declared in the
+        // header. Copying that straight into a message.length buffer threw
+        // ArrayIndexOutOfBoundsException on short responses such as 90 00.
+        var bytesBuffered = minOf(bytesRead - HEADER_SIZE, message.length)
+        if (bytesBuffered > 0) {
+            System.arraycopy(buffer, HEADER_SIZE, dataBuffer, 0, bytesBuffered)
+        }
 
         while (bytesBuffered < message.length) {
             bytesRead = usbDeviceConnection.bulkTransfer(bulkIn, buffer, buffer.size, USB_TIMEOUT)
             if (bytesRead <= 0) {
                 throw CcidException("Failed to read data")
             }
-            System.arraycopy(buffer, 0, dataBuffer, bytesBuffered, bytesRead)
-            bytesBuffered += bytesRead
+            val toCopy = minOf(bytesRead, message.length - bytesBuffered)
+            System.arraycopy(buffer, 0, dataBuffer, bytesBuffered, toCopy)
+            bytesBuffered += toCopy
         }
 
         return message.withData(dataBuffer)
