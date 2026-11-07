@@ -2,6 +2,18 @@
   "android": {
     "multi": [
       {
+        "version": "1.4.2",
+        "build": 142,
+        "url": "https://github.com/hg552/eSIM-Matrix/releases/tag/v1.4.2",
+        "download_url": "https://github.com/hg552/eSIM-Matrix/releases/download/v1.4.2/eSIM-Matrix-v1.4.2.apk",
+        "changelog": "🆕 eSIM-Matrix 1.4.2（build 142）\n\n• 视觉升级：新增「液态玻璃（Liquid Glass）」渲染开关（设置 → 显示设置），首页 Profile 卡片与弹窗支持高斯模糊、菲涅尔亮边与深色极光背景底板。\n• 流量卫士修复：修复隐藏 TelephonyManager 反射参数类型错误，切卡时可正常通过特权 API 关闭目标卡移动数据与漫游。\n• 3D 海外环境联动修复：修复仅开启「虚拟定位联动」时切卡不触发定位注入的问题；Shizuku 虚拟定位移至独立后台线程（消除主线程卡顿/ANR）；切卡失败回滚时同步还原 Clash 代理节点与虚拟定位。\n• 远程网关与保号修复：定时保号仅在实际切卡成功后更新时间戳，单条失效规则不再阻塞后续保号任务；远程下卡（/download）入库后不再强行抢占当前激活主卡。\n• 底层协议与读卡器加固：按 ISO 7816-4 标准解析 Case 2/3/4 APDU（修复 Case 4 Le 字节拼入 payload 及末尾 0x00 被误删）；修复 USB CCID 短响应缓冲区越界崩溃并支持 T=1 读卡器；修复 VoWiFi 7-bit 拼接长短信 UDH 填充位偏移乱码。",
+        "signatures": [
+          "C47350C7BA682B34A3E584A0D58463EA42B1AD73",
+          "D1C0F48B370E74D4EA4770ED4C3CD70A3198D31F",
+          "65D0571854AFEC519A90F92D7C5D8CF8148DA373"
+        ]
+      },
+      {
         "version": "1.4.1",
         "build": 141,
         "url": "https://github.com/hg552/eSIM-Matrix/releases/tag/v1.4.1",
