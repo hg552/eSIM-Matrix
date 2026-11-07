@@ -200,7 +200,10 @@ class SimLinkAdapter extends BaseAdapter implements BleAdapter {
     String accumulatedResponse = "";
 
     _rxSub = _rxChar!.onValueReceived.listen((data) {
-      final chunk = utf8.decode(data);
+      // Notifications can split a multi-byte code point across packets;
+      // allowMalformed keeps the ASCII JSON readable instead of throwing and
+      // silently dropping the chunk.
+      final chunk = utf8.decode(data, allowMalformed: true);
       accumulatedResponse += chunk;
       try {
         final decoded = jsonDecode(accumulatedResponse);
@@ -226,7 +229,16 @@ class SimLinkAdapter extends BaseAdapter implements BleAdapter {
               })();
               return;
             } else {
-              if (!completer.isCompleted) completer.complete("");
+              // A device-side error is not an empty successful response: callers
+              // index the last two bytes as SW1SW2 and crashed on "".
+              if (!completer.isCompleted) {
+                completer.completeError(
+                  AppException(
+                    AppErrorCode.ERROR_TRANSACTION_FAILED,
+                    message: 'SimLink device error: $error',
+                  ),
+                );
+              }
             }
           } else if (decoded.containsKey('data')) {
             if (!completer.isCompleted) {

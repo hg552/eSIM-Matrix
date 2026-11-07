@@ -322,7 +322,7 @@ class BeeSimAdapter extends BaseAdapter implements BleAdapter {
 
   @override
   Future<Channel> openChannel({List<String>? aids}) async {
-    return await openLogicalChannel(aids: [_standardAid]);
+    return await openLogicalChannel(aids: aids ?? [_standardAid]);
   }
 
   @override

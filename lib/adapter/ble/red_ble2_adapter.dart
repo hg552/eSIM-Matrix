@@ -202,11 +202,14 @@ class RedBle2Adapter extends BaseAdapter implements BleAdapter {
       );
     }
 
-    // Basic status check for CCID
+    // bStatus bits 0-1: 1 = command failed. Returning the (usually empty)
+    // payload as success made callers treat a failed APDU as a valid response.
     final status = response[7];
     if ((status & 0x03) == 0x01) {
-      log.warning(
-        "CCID Status indicates command failed: status=$status error=${response[8]}",
+      throw AppException(
+        AppErrorCode.ERROR_TRANSACTION_FAILED,
+        message:
+            "CCID command failed: status=0x${status.toRadixString(16)} error=0x${response[8].toRadixString(16)}",
       );
     }
 
