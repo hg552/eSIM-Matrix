@@ -543,20 +543,22 @@ class RemoteGatewayService {
         final profiles = await _profiles.listProfiles();
         final target = _resolveProfileSelector(profiles, selector);
         final rules = await _loadKeepAliveRules();
-        final now = DateTime.now().millisecondsSinceEpoch;
         final idx = rules.indexWhere((r) => r.iccid == target.iccid);
         final dwell = idx >= 0 ? rules[idx].dwellSeconds : 180;
-        if (idx >= 0) {
-          rules[idx] = rules[idx].copyWith(
-            alias: target.alias,
-            lastRunEpochMillis: now,
-          );
-          await _saveKeepAliveRules(rules);
-        }
         final res = await _switchProfile(
           target.iccid,
           duration: Duration(seconds: dwell),
         );
+        // Only stamp the run once the switch actually landed: a cooldown
+        // rejection or a card error must leave the rule due, otherwise a failed
+        // 保号 pass silently postpones the next attempt by a whole interval.
+        if (idx >= 0) {
+          rules[idx] = rules[idx].copyWith(
+            alias: target.alias,
+            lastRunEpochMillis: DateTime.now().millisecondsSinceEpoch,
+          );
+          await _saveKeepAliveRules(rules);
+        }
         return {
           ...res,
           'keepAlive': true,
@@ -1547,25 +1549,37 @@ class RemoteGatewayService {
       if (rules.isEmpty) return;
       final now = DateTime.now().millisecondsSinceEpoch;
       for (final rule in rules) {
-        if (now >= rule.nextRunEpochMillis) {
-          final res = await runKeepAliveNow(rule.iccid);
-          unawaited(
-            _sendTelegramReply(
-              _TelegramReply(
-                '🛡️ 【定时保号任务自动触发】\n'
-                '已按计划（每 ${rule.intervalDays} 天）自动切换至：【${res['target']}】。\n'
-                '将在漫游基站驻留 ${rule.dwellSeconds ~/ 60} 分钟后自动切回默认主卡。',
-                keyboard: const [
-                  [
-                    _TelegramButton('📡 查看搜网状态', 'cmd:status'),
-                    _TelegramButton('🏠 立即切回主卡', 'cmd:back'),
-                  ],
-                ],
-              ),
-            ).catchError((Object _) {}),
+        if (now < rule.nextRunEpochMillis) continue;
+        final Map<String, Object?> res;
+        try {
+          res = await runKeepAliveNow(rule.iccid);
+        } catch (error) {
+          // A deleted profile or a card error leaves the rule due forever. Keep
+          // scanning so one broken rule cannot starve every later one, and log
+          // instead of swallowing the reason.
+          _log.warning(
+            'Scheduled keep-alive for ${rule.alias.isNotEmpty ? rule.alias : rule.iccid} '
+            'failed (${_errorCode(error)})',
           );
-          break;
+          continue;
         }
+        unawaited(
+          _sendTelegramReply(
+            _TelegramReply(
+              '🛡️ 【定时保号任务自动触发】\n'
+              '已按计划（每 ${rule.intervalDays} 天）自动切换至：【${res['target']}】。\n'
+              '将在漫游基站驻留 ${rule.dwellSeconds ~/ 60} 分钟后自动切回默认主卡。',
+              keyboard: const [
+                [
+                  _TelegramButton('📡 查看搜网状态', 'cmd:status'),
+                  _TelegramButton('🏠 立即切回主卡', 'cmd:back'),
+                ],
+              ],
+            ),
+          ).catchError((Object _) {}),
+        );
+        // Only one switch can be in flight; the rest wait for the next tick.
+        break;
       }
     } catch (_) {}
   }
