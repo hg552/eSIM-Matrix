@@ -148,7 +148,7 @@ class CellularDataGuardianPlugin : FlutterPlugin, MethodChannel.MethodCallHandle
         val viaApi = invokeHidden(
             manager,
             "setDataEnabled",
-            arrayOf(intArrayOf(subscriptionId), booleanArrayOf(enabled)),
+            arrayOf(subscriptionId, enabled),
         )
         val applied = viaApi != null
         val viaShell = if (!applied) {
@@ -179,7 +179,7 @@ class CellularDataGuardianPlugin : FlutterPlugin, MethodChannel.MethodCallHandle
         val applied = invokeHidden(
             manager,
             "setDataRoamingEnabled",
-            arrayOf(intArrayOf(subscriptionId), booleanArrayOf(enabled)),
+            arrayOf(subscriptionId, enabled),
         ) != null
         val verified = if (applied) {
             runCatching { manager.createForSubscriptionId(subscriptionId) }.getOrNull()
