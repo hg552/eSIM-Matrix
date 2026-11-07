@@ -751,7 +751,7 @@ class RemoteGatewayService {
     _sawDisconnectAfterSwitch = false;
     await _saveSession(_session);
     _lastLinkedProxyNode = null;
-    if (AppSettings().proxyLinkageEnabled) {
+    if (AppSettings().proxyLinkageEnabled || AppSettings().mockLocationLinkageEnabled) {
       unawaited(_triggerProxySwitch(target).catchError((Object e) {
         _log.warning('Proxy linkage switch failed: $e');
       }));
@@ -773,6 +773,15 @@ class RemoteGatewayService {
           dataEnabled: failed.guardDataEnabledBefore,
           roamingEnabled: failed.guardRoamingEnabledBefore,
         ).catchError((Object _) {});
+      }
+      if (AppSettings().proxyLinkageEnabled && AppSettings().proxyAutoRestore) {
+        unawaited(_triggerProxyRestore(
+          targetDefaultIccid: savedDefault.iccid,
+          targetDefaultAlias: savedDefault.alias,
+        ).catchError((Object _) => null));
+      }
+      if (AppSettings().mockLocationLinkageEnabled && AppSettings().mockLocationAutoRestore) {
+        unawaited(stopMockLocation().catchError((Object _) => false));
       }
       _lastGuardResult = null;
       _session = previousSession;
@@ -908,7 +917,9 @@ class RemoteGatewayService {
       );
       try {
         // Keep the pre-switch node so _revert can put it back.
-        _proxySnapshot ??= await _proxyLinkage.snapshot(group);
+        if (_proxySnapshot == null || _proxySnapshot!.group != group) {
+          _proxySnapshot = await _proxyLinkage.snapshot(group);
+        }
         await applyProxyForProfile(iccid: target.iccid, alias: target.alias);
       } catch (e) {
         _log.warning('Proxy linkage switch failed: $e');

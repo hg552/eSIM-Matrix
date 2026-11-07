@@ -4046,13 +4046,16 @@ class _ProfilesScreenState extends State<ProfilesScreen>
     showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => AlertDialog(
-        content: Row(
-          children: [
-            const CircularProgressIndicator(),
-            const SizedBox(width: 20),
-            Expanded(child: Text(l10n.discoveringProfiles)),
-          ],
+      builder: (_) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          content: Row(
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(width: 20),
+              Expanded(child: Text(l10n.discoveringProfiles)),
+            ],
+          ),
         ),
       ),
     );

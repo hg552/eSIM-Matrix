@@ -29,9 +29,9 @@ void main() {
     );
 
     expect(selected, isNotNull);
-    expect(selected!['version'], '1.3.4');
-    expect(selected['build'], 134);
-    expect(selected['download_url'], contains('releases/download/v1.3.4'));
+    expect(selected!['version'], '1.4.1');
+    expect(selected['build'], 141);
+    expect(selected['download_url'], contains('releases/download/v1.4.1'));
   });
 
   test('offers nothing to an install that is already current', () {
@@ -39,7 +39,7 @@ void main() {
       android,
       variant: 'multi',
       signatures: ourSignatures,
-      currentBuild: 134,
+      currentBuild: 141,
     );
 
     expect(selected, isNull);

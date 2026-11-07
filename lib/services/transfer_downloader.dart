@@ -46,6 +46,7 @@ class TransferDownloader {
   Future<TransferDownloadResult> downloadInstallEnable({
     required String activationCode,
     String? confirmationCode,
+    bool enableAfterInstall = true,
     void Function(String message)? onStatus,
     void Function(double progress)? onProgress,
   }) async {
@@ -59,10 +60,11 @@ class TransferDownloader {
             ? ac.confirmationCode
             : null);
 
-    await adapter.connect(reader);
-    onStatus?.call('Connecting to eUICC');
-    final channel = await manager.openSession();
-    try {
+    return await adapter.runExclusive(() async {
+      await adapter.connect(reader);
+      onStatus?.call('Connecting to eUICC');
+      final channel = await manager.openSession();
+      try {
       // --- Mutual authentication (ES9+ / ES10b) ---
       onStatus?.call('Getting challenge');
       final challengeBytes = await manager.getEuiccChallenge(useChannel: channel);
@@ -205,7 +207,7 @@ class TransferDownloader {
       }
 
       // --- Enable the freshly installed profile so the carrier can activate it ---
-      if (installedIccid != null) {
+      if (enableAfterInstall && installedIccid != null) {
         onStatus?.call('Enabling profile');
         try {
           await manager.enableProfile(installedIccid, useChannel: channel);
@@ -223,6 +225,7 @@ class TransferDownloader {
         await channel.close();
       } catch (_) {}
     }
+    });
   }
 
   Future<void> _processNotifications(Channel channel, AppSettings settings) async {

@@ -55,8 +55,8 @@ class SimpleAsn1Reader {
       value = Uint8List(0);
     } else {
       if (_offset + length > _data.length) {
-        // Truncated?
-        length = _data.length - _offset;
+        // Truncated payload: reject instead of silently returning truncated node.
+        return null;
       }
       value = _data.sublist(_offset, _offset + length);
       _offset += length;
@@ -99,12 +99,12 @@ class Asn1Node {
     if (tag < 0x100) {
       return Uint8List.fromList([tag]);
     }
-    // Multi-byte tag encoding
+    // Multi-byte tag encoding: decompose folded 8-bit bytes (e.g. 0xBF2D -> [0xBF, 0x2D])
     final bytes = <int>[];
     var t = tag;
     while (t > 0) {
-      bytes.insert(0, (t & 0x7F) | (bytes.isEmpty ? 0 : 0x80));
-      t >>= 7;
+      bytes.insert(0, t & 0xFF);
+      t >>= 8;
     }
     return Uint8List.fromList(bytes);
   }

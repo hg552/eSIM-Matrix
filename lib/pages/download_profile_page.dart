@@ -1435,68 +1435,70 @@ class _DownloadProfilePageState extends State<DownloadProfilePage> {
                       ? l10n.seHalDownloadUnusedQr
                       : l10n.continueButton),
                   ),
-                  const SizedBox(height: 16),
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
+                  if (!_isHalDownload) ...[
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
+                        ),
                       ),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(Icons.speed_outlined, size: 18, color: theme.colorScheme.primary),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'Speedtest 公开测试 eSIM（用于测试下卡与删卡）',
-                                style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(Icons.speed_outlined, size: 18, color: theme.colorScheme.primary),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Speedtest 公开测试 eSIM（用于测试下卡与删卡）',
+                                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'LPA:1\$rsp.truphone.com\$QRF-SPEEDTEST',
+                            style: AppTheme.mono(
+                              TextStyle(
+                                fontSize: 12,
+                                color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
                               ),
                             ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'LPA:1\$rsp.truphone.com\$QRF-SPEEDTEST',
-                          style: AppTheme.mono(
-                            TextStyle(
-                              fontSize: 12,
-                              color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
-                            ),
                           ),
-                        ),
-                        const SizedBox(height: 10),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            OutlinedButton.icon(
-                              onPressed: () {
-                                _controller.text = 'LPA:1\$rsp.truphone.com\$QRF-SPEEDTEST';
-                                setState(() => _error = null);
-                              },
-                              icon: const Icon(Icons.edit_note_outlined, size: 18),
-                              label: const Text('填入测试码'),
-                            ),
-                            FilledButton.tonalIcon(
-                              onPressed: () {
-                                _controller.text = 'LPA:1\$rsp.truphone.com\$QRF-SPEEDTEST';
-                                setState(() => _error = null);
-                                _startPreview();
-                              },
-                              icon: const Icon(Icons.rocket_launch_outlined, size: 18),
-                              label: const Text('一键下载 Speedtest 测试 eSIM'),
-                            ),
-                          ],
-                        ),
-                      ],
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              OutlinedButton.icon(
+                                onPressed: () {
+                                  _controller.text = 'LPA:1\$rsp.truphone.com\$QRF-SPEEDTEST';
+                                  setState(() => _error = null);
+                                },
+                                icon: const Icon(Icons.edit_note_outlined, size: 18),
+                                label: const Text('填入测试码'),
+                              ),
+                              FilledButton.tonalIcon(
+                                onPressed: () {
+                                  _controller.text = 'LPA:1\$rsp.truphone.com\$QRF-SPEEDTEST';
+                                  setState(() => _error = null);
+                                  _startPreview();
+                                },
+                                icon: const Icon(Icons.rocket_launch_outlined, size: 18),
+                                label: const Text('一键下载 Speedtest 测试 eSIM'),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
+                  ],
                ],
             ),
           ),

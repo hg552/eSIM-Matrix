@@ -7,6 +7,7 @@ import '../adapter/euicc_adapter.dart';
 import '../logic/profile_download_session.dart';
 import '../logic/profile_manager.dart';
 import 'es9plus_service.dart';
+import '../utils/foreground_card_session.dart';
 
 /// The GSMA root SM-DS, used when the eUICC has no configured discovery server.
 const String kRootSmdsAddress = 'lpa.ds.gsma.com';
@@ -51,6 +52,9 @@ class SmdsDiscoveryService {
     required String smdsAddress,
     Uint8List? imei,
   }) async {
+    ForegroundCardSession.begin();
+    try {
+      return await adapter.runExclusive(() async {
     final host = _hostOf(smdsAddress);
     await adapter.connect(reader);
     final channel = await manager.openSession();
@@ -113,6 +117,10 @@ class SmdsDiscoveryService {
       try {
         await channel.close();
       } catch (_) {}
+    }
+      });
+    } finally {
+      ForegroundCardSession.end();
     }
   }
 

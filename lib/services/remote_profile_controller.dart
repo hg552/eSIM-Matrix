@@ -239,6 +239,7 @@ class LpaRemoteProfileControl implements RemoteProfileControl {
       final result = await downloader.downloadInstallEnable(
         activationCode: activationCode,
         confirmationCode: confirmationCode,
+        enableAfterInstall: false,
         onStatus: onStatus,
       );
       _cachedProfiles = null;

@@ -149,6 +149,7 @@ class ProxyLinkageService {
   String? _secret;
   Duration _timeout;
   final HttpClient Function() _clientFactory;
+  HttpClient? _client;
 
   String get controllerUrl => _controllerUrl;
   String? get secret => _secret;
@@ -162,6 +163,9 @@ class ProxyLinkageService {
     }
     if (timeout != null) {
       _timeout = timeout;
+    }
+    if (_client != null && timeout != null) {
+      _client!.connectionTimeout = _timeout;
     }
   }
 
@@ -186,8 +190,7 @@ class ProxyLinkageService {
     String path, {
     String? body,
   }) async {
-    final client = _clientFactory();
-    client.connectionTimeout = _timeout;
+    final client = _client ??= (_clientFactory()..connectionTimeout = _timeout);
     final uri = _endpoint(path);
     final request = await client.openUrl(method, uri).timeout(_timeout);
     request.headers.set(HttpHeaders.acceptHeader, 'application/json');
@@ -360,5 +363,10 @@ class ProxyLinkageService {
   Future<ProxySwitchResult> restore(ProxySnapshot snapshot) async {
     _log.info('Restoring proxy snapshot for group [${snapshot.group}] to [${snapshot.node}]');
     return selectNode(snapshot.group, snapshot.node);
+  }
+
+  void close() {
+    _client?.close(force: true);
+    _client = null;
   }
 }

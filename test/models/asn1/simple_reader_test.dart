@@ -111,11 +111,9 @@ void main() {
       expect(node.value.length, 256);
     });
 
-    test('clamps a truncated value instead of throwing', () {
+    test('rejects a truncated value by returning null', () {
       // Declares 10 bytes but only 3 are present.
-      final node = SimpleAsn1Reader(fromHex('04 0A AABBCC')).readNext()!;
-      expect(toHex(node.value), 'AABBCC');
-      expect(toHex(node.encodedBytes), '040AAABBCC');
+      expect(SimpleAsn1Reader(fromHex('04 0A AABBCC')).readNext(), isNull);
     });
 
     test('indefinite length (0x80) yields an empty value', () {
@@ -180,19 +178,10 @@ void main() {
       expect(encoded.length, 3 + 200);
     });
 
-    test('BUG: re-encoding a multi-byte tag emits base-128 tag octets', () {
-      // `Asn1Node._encodeTag` uses the BER high-tag-number 7-bit continuation
-      // scheme on the *already folded* tag integer, so 0xBF2E round-trips to
-      // 82 FE 2E instead of BF 2E. The generated model code never hits this
-      // path (it has its own byte-oriented `_tagBytes`, and nodes produced by
-      // the reader carry their original bytes), but the behaviour is pinned
-      // here because it is observable.
+    test('re-encoding a multi-byte tag preserves folded BER tag octets', () {
       final node = Asn1Node(0xBF2E, fromHex('AA'));
-      expect(toHex(node.encodedBytes), '82FE2E01AA');
-      expect(toHex(node.encodedBytes).startsWith('BF2E'), isFalse);
-
-      // 0x9F70 is mangled the same way (82 BE 70 instead of 9F 70).
-      expect(toHex(Asn1Node(0x9F70, fromHex('01')).encodedBytes), '82BE700101');
+      expect(toHex(node.encodedBytes), 'BF2E01AA');
+      expect(toHex(Asn1Node(0x9F70, fromHex('01')).encodedBytes), '9F700101');
     });
 
     test('a node from the reader returns the original bytes verbatim', () {
