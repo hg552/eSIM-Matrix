@@ -58,9 +58,20 @@ class _WebBrowserPageState extends State<WebBrowserPage> {
 
   @override
   void dispose() {
-    _urlController.dispose();
+    // The listener writes _urlController.text when focus is lost. Disposing the
+    // controller first (or letting FocusNode.dispose unfocus with the listener
+    // still attached) touches a disposed controller and throws.
+    _urlFocusNode.removeListener(_syncUrlOnBlur);
     _urlFocusNode.dispose();
+    _urlController.dispose();
     super.dispose();
+  }
+
+  void _syncUrlOnBlur() {
+    if (!mounted) return;
+    if (!_urlFocusNode.hasFocus) {
+      _urlController.text = _currentUrl;
+    }
   }
 
   @override
@@ -71,11 +82,7 @@ class _WebBrowserPageState extends State<WebBrowserPage> {
 
     _urlController = TextEditingController(text: widget.initialUrl);
     _urlFocusNode = FocusNode();
-    _urlFocusNode.addListener(() {
-      if (!_urlFocusNode.hasFocus) {
-        _urlController.text = _currentUrl;
-      }
-    });
+    _urlFocusNode.addListener(_syncUrlOnBlur);
 
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)

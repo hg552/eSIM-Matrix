@@ -670,6 +670,7 @@ class _ProfilesScreenState extends State<ProfilesScreen>
     BleManager().removeListener(_onBleManagerChanged);
     AppSettings().removeListener(_onSettingsChanged);
     NotificationService().isProcessing.removeListener(_onProcessingChanged);
+    _readerEids.dispose();
     super.dispose();
   }
 
@@ -1414,11 +1415,17 @@ class _ProfilesScreenState extends State<ProfilesScreen>
       if (idx != -1) _tabController!.index = idx;
     }
     _tabController!.addListener(() {
-      if (!_tabController!.indexIsChanging) {
-        final newReader = _readers[_tabController!.index];
-        if (newReader != _selectedReader) {
-          _selectReader(newReader);
-        }
+      final controller = _tabController;
+      if (controller == null || controller.indexIsChanging) return;
+      // The list behind the tabs can shrink between builds (a BLE reader drops
+      // out), and a length-0 controller still fires listeners, so index into it
+      // defensively instead of throwing RangeError during teardown.
+      if (_readers.isEmpty) return;
+      final index = controller.index;
+      if (index < 0 || index >= _readers.length) return;
+      final newReader = _readers[index];
+      if (newReader != _selectedReader) {
+        _selectReader(newReader);
       }
     });
   }
@@ -3316,11 +3323,13 @@ class _ProfilesScreenState extends State<ProfilesScreen>
       }
     } catch (e) {
       if (reader.source is SeHalAdapter) {
-        setState(
-          () => _error = AppLocalizations.of(
-            context,
-          )!.seHalDeleteUnknown(e.toString()),
-        );
+        if (mounted) {
+          setState(
+            () => _error = AppLocalizations.of(
+              context,
+            )!.seHalDeleteUnknown(e.toString()),
+          );
+        }
       } else {
         _handleOperationError(reader, e, onRetry: () => _deleteProfile(p));
       }
