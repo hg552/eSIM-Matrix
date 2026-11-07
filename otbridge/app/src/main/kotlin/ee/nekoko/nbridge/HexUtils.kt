@@ -33,7 +33,14 @@ internal fun parseApdu(apduHex: String): ParsedApdu {
     if (tx.size > 4) {
         p3 = tx[4].toUByte().toInt()
         if (tx.size > 5) {
-            data = tx.sliceArray(5 until tx.size).toHex()
+            // Case 4 APDUs are Lc + data + Le; the trailing Le must not be sent
+            // as payload or the RIL layer rejects the Lc/payload length mismatch.
+            val dataEnd = 5 + p3
+            data = if (p3 > 0 && tx.size >= dataEnd) {
+                tx.sliceArray(5 until dataEnd).toHex()
+            } else {
+                tx.sliceArray(5 until tx.size).toHex()
+            }
         }
     }
 

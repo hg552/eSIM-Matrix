@@ -471,6 +471,7 @@ abstract class BaseAdapter implements Adapter {
 
   @override
   Future<Uint8List> sendApdu(Uint8List apdu) async {
+    final parsed = _parseRawApdu(apdu);
     return await runExclusive(() async {
       return await ApduChainer.transceive(
         transmitter: (a) async {
@@ -483,19 +484,95 @@ abstract class BaseAdapter implements Adapter {
           }
           return r;
         },
-        cla: apdu[0],
-        ins: apdu[1],
-        p1: apdu[2],
-        p2: apdu[3],
-        data: apdu.length > 5
-            ? apdu.sublist(
-                5,
-                apdu.length - (apdu.length > 5 && apdu.last == 0 ? 1 : 0),
-              )
-            : null,
+        cla: parsed.cla,
+        ins: parsed.ins,
+        p1: parsed.p1,
+        p2: parsed.p2,
+        data: parsed.data,
+        le: parsed.le,
         log: log,
       );
     });
+  }
+
+  /// Splits a raw APDU into its ISO/IEC 7816-4 case. The previous code guessed
+  /// the payload by trimming a trailing 0x00, which ate the last data byte of a
+  /// Case 3 command whose payload ends in 0x00 and turned the Le of a Case 4
+  /// command into payload.
+  static ({
+    int cla,
+    int ins,
+    int p1,
+    int p2,
+    Uint8List? data,
+    int? le,
+  }) _parseRawApdu(Uint8List apdu) {
+    if (apdu.length < 4) {
+      throw AppException(
+        AppErrorCode.ERROR_TRANSACTION_FAILED,
+        message: 'APDU too short: ${HexUtils.bytesToHex(apdu)}',
+      );
+    }
+    final cla = apdu[0];
+    final ins = apdu[1];
+    final p1 = apdu[2];
+    final p2 = apdu[3];
+    if (apdu.length == 4) {
+      return (cla: cla, ins: ins, p1: p1, p2: p2, data: null, le: null);
+    }
+    if (apdu.length == 5) {
+      // Case 2: the fifth byte is Le. Keep it as a byte value: 0 means "256" and
+      // must be emitted as a single 0x00, not as a three-byte extended length.
+      return (
+        cla: cla,
+        ins: ins,
+        p1: p1,
+        p2: p2,
+        data: null,
+        le: apdu[4],
+      );
+    }
+
+    var offset = 5;
+    var lc = apdu[4];
+    var extended = false;
+    if (lc == 0) {
+      extended = true;
+      lc = (apdu[5] << 8) | apdu[6];
+      offset = 7;
+    }
+    if (apdu.length < offset + lc) {
+      // Truncated payload: hand the remainder over unchanged so the reader can
+      // reject it instead of silently transmitting a mangled command.
+      return (
+        cla: cla,
+        ins: ins,
+        p1: p1,
+        p2: p2,
+        data: apdu.sublist(offset),
+        le: null,
+      );
+    }
+    final data = apdu.sublist(offset, offset + lc);
+    final trailing = apdu.length - (offset + lc);
+    int? le;
+    if (trailing >= 1) {
+      if (extended && trailing >= 2) {
+        le = (apdu[offset + lc] << 8) | apdu[offset + lc + 1];
+        if (le == 0) le = 65536;
+      } else {
+        // Short format: Le is one byte and 0x00 already means 256 to the card.
+        le = apdu[offset + lc];
+      }
+    }
+    return (
+      cla: cla,
+      ins: ins,
+      p1: p1,
+      p2: p2,
+      data: data.isEmpty ? null : data,
+      le: le,
+    );
   }
 
   @override

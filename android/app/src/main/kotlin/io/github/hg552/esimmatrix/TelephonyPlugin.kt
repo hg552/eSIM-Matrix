@@ -39,6 +39,10 @@ class TelephonyPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     private var eventSink: EventChannel.EventSink? = null
     private var context: Context? = null
     private var telephonyManager: TelephonyManager? = null
+    // The receiver is registered against the application context in
+    // onAttachedToEngine; keep that reference separate so detaching an activity
+    // (which nulls `context`) cannot leak the receiver.
+    private var receiverContext: Context? = null
 
     // Dedicated background thread for hardware operations
     private var backgroundHandler: android.os.Handler? = null
@@ -418,6 +422,14 @@ class TelephonyPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         )
 
         context = binding.applicationContext
+        receiverContext = binding.applicationContext
+        // The headless engine (background gateway / SMS service) never attaches
+        // an activity, so the handler thread and TelephonyManager have to exist
+        // from engine attach time; otherwise every call was silently dropped.
+        telephonyManager =
+                binding.applicationContext.getSystemService(Context.TELEPHONY_SERVICE) as?
+                        TelephonyManager
+        startBackgroundThread()
         val filter = IntentFilter("android.intent.action.SIM_STATE_CHANGED")
         filter.addAction("android.telephony.action.SIM_CARD_STATE_CHANGED")
         filter.addAction("android.telephony.action.SIM_APPLICATION_STATE_CHANGED")
@@ -432,10 +444,13 @@ class TelephonyPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         eventSink = null
 
         try {
-            context?.unregisterReceiver(simStateReceiver)
+            receiverContext?.unregisterReceiver(simStateReceiver)
         } catch (e: Exception) {
             // Likely not registered
         }
+        receiverContext = null
+        context = null
+        telephonyManager = null
 
         stopBackgroundThread()
     }
@@ -467,9 +482,14 @@ class TelephonyPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     }
 
     override fun onDetachedFromActivity() {
-        stopBackgroundThread()
-        context = null
-        telephonyManager = null
+        // Everything this plugin needs is engine-scoped. Activity detachment
+        // happens on navigation and on rotation; tearing the handler thread down
+        // here disabled telephony for the headless gateway afterwards.
+        context = context ?: receiverContext
+        telephonyManager =
+                telephonyManager
+                        ?: (context?.getSystemService(Context.TELEPHONY_SERVICE) as?
+                                TelephonyManager)
     }
 
     override fun onMethodCall(call: MethodCall, result: Result) {
@@ -805,7 +825,15 @@ class TelephonyPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
             if (tx.size > 4) {
                 p3 = tx[4].toUByte().toInt()
                 if (tx.size > 5) {
-                    data = tx.sliceArray(5 until tx.size).toHex()
+                    // Case 4 APDUs carry Lc, the data, then a trailing Le. Slicing to
+                    // tx.size kept the Le byte inside the data and the RIL layer
+                    // rejected the APDU because Lc no longer matched the payload.
+                    val dataEnd = 5 + p3
+                    if (p3 > 0 && tx.size >= dataEnd) {
+                        data = tx.sliceArray(5 until dataEnd).toHex()
+                    } else {
+                        data = tx.sliceArray(5 until tx.size).toHex()
+                    }
                 }
             }
 
