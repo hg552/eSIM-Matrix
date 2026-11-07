@@ -34,7 +34,11 @@ internal class SmsRelayReceiver : BroadcastReceiver() {
             30L,
             TimeUnit.SECONDS,
             LinkedBlockingQueue(256),
-            ThreadPoolExecutor.DiscardOldestPolicy(),
+            // DiscardOldestPolicy silently dropped a queued delivery, so its
+            // partial wake lock was never released and its store row stayed
+            // pending forever. AbortPolicy reaches the handler below, which
+            // marks the entry failed (retryable) and releases its lock.
+            ThreadPoolExecutor.AbortPolicy(),
         )
         private val retryBackoffMillis = longArrayOf(0L, 1200L, 3000L)
 
