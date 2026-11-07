@@ -106,7 +106,8 @@ class LpaRemoteProfileControl implements RemoteProfileControl {
   List<RemoteProfileEntry>? _cachedProfiles;
   RemoteCardResourceInfo? _cachedResourceInfo;
   String? _cachedReaderId;
-  DateTime? _cachedAt;
+  DateTime? _profilesCachedAt;
+  DateTime? _resourceCachedAt;
   @override
   String? get selectedReaderId => AppSettings().lastSelectedReader;
 
@@ -125,7 +126,7 @@ class LpaRemoteProfileControl implements RemoteProfileControl {
     final profiles = await _readProfiles(reader);
     _cachedProfiles = profiles;
     _cachedReaderId = reader.id;
-    _cachedAt = DateTime.now();
+    _profilesCachedAt = DateTime.now();
     return profiles;
   }
   @override
@@ -136,8 +137,8 @@ class LpaRemoteProfileControl implements RemoteProfileControl {
       final now = DateTime.now();
       final profiles = (_cachedProfiles != null &&
               _cachedReaderId == reader.id &&
-              _cachedAt != null &&
-              now.difference(_cachedAt!) < const Duration(seconds: 10))
+              _profilesCachedAt != null &&
+              now.difference(_profilesCachedAt!) < const Duration(seconds: 10))
           ? _cachedProfiles!
           : await _readProfiles(reader);
       final candidates = profiles.where((profile) => profile.iccid == iccid).toList();
@@ -343,8 +344,8 @@ class LpaRemoteProfileControl implements RemoteProfileControl {
       final now = DateTime.now();
       if (_cachedResourceInfo != null &&
           _cachedReaderId == reader.id &&
-          _cachedAt != null &&
-          now.difference(_cachedAt!) < const Duration(seconds: 30)) {
+          _resourceCachedAt != null &&
+          now.difference(_resourceCachedAt!) < const Duration(seconds: 30)) {
         return _cachedResourceInfo!;
       }
       return await _adapter.runExclusive(() async {
@@ -354,6 +355,7 @@ class LpaRemoteProfileControl implements RemoteProfileControl {
           final info = await _readResourceInfoOnChannel(channel);
           _cachedResourceInfo = info;
           _cachedReaderId = reader.id;
+          _resourceCachedAt = DateTime.now();
           return info;
         } finally {
           try {
@@ -578,6 +580,7 @@ class LpaRemoteProfileControl implements RemoteProfileControl {
           requireKnownState: true,
         );
         _cachedResourceInfo = await _readResourceInfoOnChannel(channel);
+        _resourceCachedAt = DateTime.now();
         return profiles
             .map(_toRemoteProfile)
             .toList(growable: false);
