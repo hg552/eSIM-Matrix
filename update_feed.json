@@ -2,6 +2,18 @@
   "android": {
     "multi": [
       {
+        "version": "1.4.5",
+        "build": 145,
+        "url": "https://github.com/hg552/eSIM-Matrix/releases/tag/v1.4.5",
+        "download_url": "https://github.com/hg552/eSIM-Matrix/releases/download/v1.4.5/eSIM-Matrix-v1.4.5.apk",
+        "changelog": "🆕 eSIM-Matrix 1.4.5（build 145）\n\n• 修复「网络状态」偶发空白：页面打开时立即拉取实时快照，不再依赖事件流是否已就绪。此前刷新请求若早于平台 onListen 到达，插件返回 not_listening，页面就一直停在无数据状态，只能清后台重开；现在 refresh/snapshot 直接回传快照，并带一次静默重试。",
+        "signatures": [
+          "C47350C7BA682B34A3E584A0D58463EA42B1AD73",
+          "D1C0F48B370E74D4EA4770ED4C3CD70A3198D31F",
+          "65D0571854AFEC519A90F92D7C5D8CF8148DA373"
+        ]
+      },
+      {
         "version": "1.4.4",
         "build": 144,
         "url": "https://github.com/hg552/eSIM-Matrix/releases/tag/v1.4.4",

@@ -65,3 +65,6 @@ release/
 outputs/
 store/
 signer/
+
+# Local build output (scripts/build_local_apk.ps1)
+/dist/

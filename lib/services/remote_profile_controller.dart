@@ -119,7 +119,9 @@ class LpaRemoteProfileControl implements RemoteProfileControl {
   Stream<NetworkStatusUpdate> get networkUpdates => _networkStatus.updates;
 
   @override
-  Future<void> refreshNetworkStatus() => _networkStatus.refresh();
+  Future<void> refreshNetworkStatus() async {
+    await _networkStatus.refresh();
+  }
 
   @override
   Future<bool> accelerateNetworkSearch() =>

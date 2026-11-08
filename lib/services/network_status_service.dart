@@ -121,9 +121,24 @@ class NetworkStatusService {
             onCancel: (subscription) => subscription.cancel(),
           );
 
-  Future<void> refresh() async {
-    await _methodChannel.invokeMethod<void>('refresh');
+  /// Re-reads the live state and returns it.
+  ///
+  /// The page calls this right after subscribing, when the platform's onListen
+  /// may not have arrived yet; the answer is therefore the data itself rather
+  /// than an empty acknowledgement.
+  Future<NetworkStatusUpdate?> refresh() async {
+    final value = await _methodChannel.invokeMethod<Object?>('refresh');
+    return _decode(value);
   }
+
+  /// Reads the current state once, without touching the event stream.
+  Future<NetworkStatusUpdate?> snapshot() async {
+    final value = await _methodChannel.invokeMethod<Object?>('snapshot');
+    return _decode(value);
+  }
+
+  static NetworkStatusUpdate? _decode(Object? value) =>
+      value is Map ? NetworkStatusUpdate.fromPlatform(value) : null;
 
   Future<bool> accelerateNetworkSearch() async {
     try {

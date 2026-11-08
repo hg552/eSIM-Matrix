@@ -114,19 +114,27 @@ class NetworkStatusPlugin :
         when (call.method) {
             "isSupported" -> result.success(isSupported(appContext))
             "refresh" -> {
-                if (eventSink == null) {
-                    result.error("not_listening", "Network status stream is not active", null)
-                    return
-                }
+                // The page asks for data right after it subscribes, and the
+                // platform's onListen can still be in flight at that moment.
+                // Answering "not_listening" left the page empty until the app
+                // was restarted, so start monitoring here and return the
+                // snapshot instead of erroring.
                 if (subscriptionsListener == null) {
                     startMonitoring()
                 }
                 val error = refreshSubscriptions()
                 if (error == null) {
-                    result.success(null)
+                    result.success(snapshotMap())
                 } else {
                     result.error(error, error, null)
                 }
+            }
+            "snapshot" -> {
+                if (subscriptionsListener == null) {
+                    startMonitoring()
+                }
+                refreshSubscriptions()
+                result.success(snapshotMap())
             }
             "accelerateNetworkSearch" -> {
                 val ctx = appContext
@@ -431,16 +439,16 @@ class NetworkStatusPlugin :
     }
 
     private fun publish() {
-        val orderedSnapshots = snapshots.values
-            .sortedWith(compareBy<SubscriptionSnapshot> { it.slotIndex }.thenBy { it.subscriptionId })
-            .map(SubscriptionSnapshot::toMap)
-        eventSink?.success(
-            mapOf(
-                "error" to currentError,
-                "subscriptions" to orderedSnapshots,
-            ),
-        )
+        eventSink?.success(snapshotMap())
     }
+
+    /** The payload both the event stream and the method calls hand over. */
+    private fun snapshotMap(): Map<String, Any?> = mapOf(
+        "error" to currentError,
+        "subscriptions" to snapshots.values
+            .sortedWith(compareBy<SubscriptionSnapshot> { it.slotIndex }.thenBy { it.subscriptionId })
+            .map(SubscriptionSnapshot::toMap),
+    )
 
     private data class CallbackRegistration(
         val manager: TelephonyManager,

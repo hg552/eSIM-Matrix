@@ -148,9 +148,26 @@ class _NetworkStatusPageState extends State<NetworkStatusPage>
     if (!_permissionGranted || _updates == null) return;
     setState(() => _loadingStatus = true);
     try {
-      await _service.refresh();
+      // The method call answers with the live state, so the page does not
+      // depend on the event stream having been wired up yet.
+      final update = await _service.refresh();
+      if (update != null) _handleUpdate(update);
     } on PlatformException catch (error) {
       _handleStreamError(error);
+      unawaited(_retryWithSnapshot());
+    }
+  }
+
+  /// One quiet retry for the case where the stream subscription was not yet
+  /// live when the first refresh ran.
+  Future<void> _retryWithSnapshot() async {
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    if (!mounted || _updates == null) return;
+    try {
+      final update = await _service.snapshot();
+      if (update != null) _handleUpdate(update);
+    } catch (_) {
+      // The original error is already on screen.
     }
   }
 
