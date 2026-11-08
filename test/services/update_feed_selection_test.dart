@@ -29,9 +29,9 @@ void main() {
     );
 
     expect(selected, isNotNull);
-    expect(selected!['version'], '1.4.5');
-    expect(selected['build'], 145);
-    expect(selected['download_url'], contains('releases/download/v1.4.5'));
+    expect(selected!['version'], '1.4.6');
+    expect(selected['build'], 146);
+    expect(selected['download_url'], contains('releases/download/v1.4.6'));
   });
 
   test('offers nothing to an install that is already current', () {
@@ -39,7 +39,7 @@ void main() {
       android,
       variant: 'multi',
       signatures: ourSignatures,
-      currentBuild: 145,
+      currentBuild: 146,
     );
 
     expect(selected, isNull);

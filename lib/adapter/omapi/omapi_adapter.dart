@@ -70,6 +70,7 @@ class OmapiAdapter extends BaseAdapter {
   bool _appInBackground = false;
   List<Reader>? _lastReaders;
   DateTime? _lastListTime;
+  int _lastSessionResetAt = 0;
 
   final StreamController<EuiccPortState> _stateController =
       StreamController<EuiccPortState>.broadcast();
@@ -609,6 +610,60 @@ class OmapiAdapter extends BaseAdapter {
     }
   }
 
+  /// Last-resort recovery for a card that refuses every SELECT.
+  ///
+  /// Reconnecting is what a reboot does for this card, minus the reboot: the
+  /// session behind the APDU channel is torn down, so a channel left half-open
+  /// by a killed process stops blocking the next open. Returns the opened
+  /// channel, or null when the retry failed too.
+  Future<Map<dynamic, dynamic>?> _retryAfterSessionReset(
+    String aidHex,
+    int channelId,
+  ) async {
+    final reader = _internalReaderName;
+    if (reader == null) return null;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - _lastSessionResetAt < 10000) return null;
+    _lastSessionResetAt = now;
+
+    log.warning('openChannel keeps failing for $aidHex; dropping the session');
+    _clearChannelTracking();
+    try {
+      await _invoke('disconnect', {'reader': reader});
+    } catch (e) {
+      log.fine('recovery disconnect failed: $e');
+    }
+    try {
+      final result = await _invoke('connect', {'reader': reader});
+      if (result is Map) _lastAtr = result['atr'] as String?;
+      _nextChannelIds[reader] = 1;
+    } catch (e) {
+      log.warning('recovery reconnect failed: $e');
+      return null;
+    }
+
+    final token = _channelOwnership.claim(channelId);
+    try {
+      final result = await _invoke('openChannel', {
+        'reader': reader,
+        'aid': aidHex,
+      });
+      _channelMappings[channelId] = aidHex;
+      _refCounts[channelId] = 1;
+      await Future.delayed(const Duration(milliseconds: 50));
+      final resultMap = result is bool
+          ? <dynamic, dynamic>{"success": result}
+          : Map<dynamic, dynamic>.from(result as Map);
+      resultMap['_ownershipToken'] = token;
+      log.info('openChannel for $aidHex recovered after a session reset');
+      return resultMap;
+    } catch (e) {
+      log.severe('openChannel after session reset still failed: $e');
+      _channelOwnership.releaseIfOwned(channelId, token);
+      return null;
+    }
+  }
+
   Future<Map<dynamic, dynamic>> _openChannelInKotlin(
     String aidHex,
     int channelId,
@@ -671,15 +726,23 @@ class OmapiAdapter extends BaseAdapter {
           }
           log.severe('Retry openChannel failed for $aidHex: $retryE');
           if (isOmapiSessionCorruptedError(retryE)) rethrow;
-          if (retryE is PlatformException &&
+          final araDenied = retryE is PlatformException &&
               (retryE.code == 'AccessControlException' ||
-                  retryE.message == 'no APDU access allowed')) {
+                  retryE.message == 'no APDU access allowed');
+          if (araDenied) {
             throw AppException(
               AppErrorCode.ERROR_OMAPI_PERMISSION_DENIED,
               message: 'ARA-M permissions not allowed',
               originalError: retryE,
             );
           }
+
+          // The card is refusing SELECT after a cleanup that only closed
+          // channels. A session left half-open by a killed process keeps
+          // refusing until the card is power-cycled, so do the cheap half of
+          // that here once: drop the session itself and reopen it.
+          final recovered = await _retryAfterSessionReset(aidHex, channelId);
+          if (recovered != null) return recovered;
           throw AppException(
             AppErrorCode.ERROR_OMAPI_CHANNEL_OPEN_FAILED,
             originalError: retryE,

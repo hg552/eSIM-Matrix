@@ -601,7 +601,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get errorApplicationNotFound =>
-      '找不到 eUICC 管理应用程序 (ISD-R) 。此卡可能不是有效的 eUICC。';
+      '找不到 eUICC 管理应用程序 (ISD-R)。此卡可能不是 eUICC；若刚崩溃、切卡中途退出或被其他程序占用，请切一次飞行模式或重启手机后再试。';
 
   @override
   String get changeSettings => '更改设置';
@@ -3590,7 +3590,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get errorApplicationNotFound =>
-      '找不到 eUICC 管理應用程式 (ISD-R) 。此卡可能不是有效的 eUICC。';
+      '找不到 eUICC 管理應用程式 (ISD-R)。此卡可能不是 eUICC；若剛當機、切卡中途退出或被其他程式佔用，請切換一次飛航模式或重新開機後再試。';
 
   @override
   String get changeSettings => '更改設定';

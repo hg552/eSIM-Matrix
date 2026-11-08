@@ -2,6 +2,18 @@
   "android": {
     "multi": [
       {
+        "version": "1.4.6",
+        "build": 146,
+        "url": "https://github.com/hg552/eSIM-Matrix/releases/tag/v1.4.6",
+        "download_url": "https://github.com/hg552/eSIM-Matrix/releases/download/v1.4.6/eSIM-Matrix-v1.4.6.apk",
+        "changelog": "🆕 eSIM-Matrix 1.4.6（build 146）\n\n• 读卡自动复位：打开逻辑通道失败时，除原有「关闭全部通道后重试」之外，再升级为「断开并重开会话」后重试一次（10 秒冷却，ARA-M 拒绝不重试、不空转）。这条链路原本只有重启手机才能恢复。\n• 读卡提示更准确：当 ISD-R 找不到时，提示不再只让人以为卡坏了，而是明确告知「若刚崩溃、切卡中途退出或被其他程序占用，请切一次飞行模式或重启手机后再试」。",
+        "signatures": [
+          "C47350C7BA682B34A3E584A0D58463EA42B1AD73",
+          "D1C0F48B370E74D4EA4770ED4C3CD70A3198D31F",
+          "65D0571854AFEC519A90F92D7C5D8CF8148DA373"
+        ]
+      },
+      {
         "version": "1.4.5",
         "build": 145,
         "url": "https://github.com/hg552/eSIM-Matrix/releases/tag/v1.4.5",

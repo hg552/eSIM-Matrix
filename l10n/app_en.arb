@@ -214,7 +214,7 @@
   "remoteConnectionFailedMessage": "Ensure the remote server is running and accessible.\n\n{error}",
   "errorBluetoothTimeout": "Bluetooth operation timed out. Please try again.",
   "errorOmapiSecurity": "Security error: Access to the card was denied by the OS or ARA-M rules.",
-  "errorApplicationNotFound": "eUICC management application (ISD-R) not found. This card may not be a valid eUICC.",
+  "errorApplicationNotFound": "eUICC management application (ISD-R) not found. This card may not be an eUICC; if the app crashed, a switch was interrupted, or another program holds the card, toggle airplane mode or reboot the phone and try again.",
   "changeSettings": "Change Settings",
   "connectCompatibleReader": "Connect a compatible reader to start.",
   "connectReaderMessageBle": "You can also scan for compatible Bluetooth devices if you have a Bluetooth-enabled eUICC.",

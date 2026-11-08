@@ -120,7 +120,7 @@
   "remoteConnectionFailedMessage": "確保遠端伺服器正在執行且可存取。\n\n{error}",
   "errorBluetoothTimeout": "藍牙操作超時。請再試一次。",
   "errorOmapiSecurity": "安全錯誤：作業系統或 ARA-M 規則拒絕存取該卡片。",
-  "errorApplicationNotFound": "找不到 eUICC 管理應用程式 (ISD-R) 。此卡可能不是有效的 eUICC。",
+  "errorApplicationNotFound": "找不到 eUICC 管理應用程式 (ISD-R)。此卡可能不是 eUICC；若剛當機、切卡中途退出或被其他程式佔用，請切換一次飛航模式或重新開機後再試。",
   "changeSettings": "更改設定",
   "connectCompatibleReader": "請連接相容的讀卡機以開始。",
   "connectReaderMessageBle": "如果您有支援藍牙的 eUICC，也可以掃描藍牙裝置。",

@@ -1244,7 +1244,7 @@ abstract class AppLocalizations {
   /// No description provided for @errorApplicationNotFound.
   ///
   /// In en, this message translates to:
-  /// **'eUICC management application (ISD-R) not found. This card may not be a valid eUICC.'**
+  /// **'eUICC management application (ISD-R) not found. This card may not be an eUICC; if the app crashed, a switch was interrupted, or another program holds the card, toggle airplane mode or reboot the phone and try again.'**
   String get errorApplicationNotFound;
 
   /// No description provided for @changeSettings.

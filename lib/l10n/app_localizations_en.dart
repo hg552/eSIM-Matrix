@@ -644,7 +644,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get errorApplicationNotFound =>
-      'eUICC management application (ISD-R) not found. This card may not be a valid eUICC.';
+      'eUICC management application (ISD-R) not found. This card may not be an eUICC; if the app crashed, a switch was interrupted, or another program holds the card, toggle airplane mode or reboot the phone and try again.';
 
   @override
   String get changeSettings => 'Change Settings';
