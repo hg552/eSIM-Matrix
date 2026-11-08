@@ -29,16 +29,38 @@ $env:ANDROID_SDK_ROOT = $AndroidSdk
 $env:ANDROID_NDK_HOME = (Get-ChildItem "$AndroidSdk\ndk" -Directory | Sort-Object Name -Descending | Select-Object -First 1).FullName
 $env:PATH = "$JdkRoot\bin;$env:USERPROFILE\.cargo\bin;$env:PATH"
 
+# Rust compiles build scripts and proc-macros for the host, which needs MSVC's
+# linker *and* its LIB/INCLUDE paths. Gradle keeps the environment of the
+# daemon it started with, so setting these in PowerShell is not enough: the
+# whole chain (cmd -> flutter -> gradle -> cargokit -> cargo) is started from a
+# wrapper that has run vcvars64 first. Without it link.exe fails with LNK1181
+# (kernel32.lib not found), or Git's coreutils `link.exe` answers "extra
+# operand".
+$vcvars = Get-ChildItem 'C:\Program Files (x86)\Microsoft Visual Studio\*\BuildTools\VC\Auxiliary\Build\vcvars64.bat' -ErrorAction SilentlyContinue |
+    Sort-Object FullName -Descending | Select-Object -First 1
+if (-not $vcvars) { throw 'vcvars64.bat not found: install the VS C++ build tools' }
+
 # Version comes from pubspec so the APK name cannot drift from the build.
 $versionLine = Select-String -Path 'pubspec.yaml' -Pattern '^version:\s*(\S+)' | Select-Object -First 1
 if (-not $versionLine) { throw 'pubspec.yaml has no version line' }
 $version = $versionLine.Matches[0].Groups[1].Value.Split('+')[0]
 
+$wrapper = Join-Path $env:TEMP 'esim_matrix_local_build.cmd'
+@"
+@echo off
+call "$($vcvars.FullName)" >nul 2>&1
+set JAVA_HOME=$JdkRoot
+set ANDROID_HOME=$AndroidSdk
+set ANDROID_SDK_ROOT=$AndroidSdk
+set ANDROID_NDK_HOME=$($env:ANDROID_NDK_HOME)
+set PATH=%JAVA_HOME%\bin;$env:USERPROFILE\.cargo\bin;%PATH%
+cd /d $repo
+call "$FlutterRoot\bin\flutter.bat" build apk --release --flavor m --target-platform android-arm64 --no-pub --dart-define=APP_VARIANT=multi --dart-define=APP_DISPLAY_NAME=eSIM-Matrix --dart-define=APP_UPDATE_FEED_URL=https://raw.githubusercontent.com/hg552/eSIM-Matrix/main/update_feed.json
+exit /b %ERRORLEVEL%
+"@ | Set-Content -Path $wrapper -Encoding ASCII
+
 Write-Host "==> flutter build apk (multi, arm64, v$version)" -ForegroundColor Cyan
-& "$FlutterRoot\bin\flutter.bat" build apk --release --flavor m --target-platform android-arm64 --no-pub `
-    --dart-define=APP_VARIANT=multi `
-    --dart-define=APP_DISPLAY_NAME=eSIM-Matrix `
-    --dart-define=APP_UPDATE_FEED_URL=https://raw.githubusercontent.com/hg552/eSIM-Matrix/main/update_feed.json
+& cmd /c $wrapper
 if ($LASTEXITCODE -ne 0) { throw "flutter build failed ($LASTEXITCODE)" }
 
 $unsigned = 'build\app\outputs\flutter-apk\app-m-release.apk'
