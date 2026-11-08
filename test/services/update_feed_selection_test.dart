@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -29,9 +29,9 @@ void main() {
     );
 
     expect(selected, isNotNull);
-    expect(selected!['version'], '1.4.3');
-    expect(selected['build'], 143);
-    expect(selected['download_url'], contains('releases/download/v1.4.3'));
+    expect(selected!['version'], '1.4.4');
+    expect(selected['build'], 144);
+    expect(selected['download_url'], contains('releases/download/v1.4.4'));
   });
 
   test('offers nothing to an install that is already current', () {
@@ -39,7 +39,7 @@ void main() {
       android,
       variant: 'multi',
       signatures: ourSignatures,
-      currentBuild: 143,
+      currentBuild: 144,
     );
 
     expect(selected, isNull);

@@ -2,6 +2,18 @@
   "android": {
     "multi": [
       {
+        "version": "1.4.4",
+        "build": 144,
+        "url": "https://github.com/hg552/eSIM-Matrix/releases/tag/v1.4.4",
+        "download_url": "https://github.com/hg552/eSIM-Matrix/releases/download/v1.4.4/eSIM-Matrix-v1.4.4.apk",
+        "changelog": "🆕 eSIM-Matrix 1.4.4（build 144）\n\n• 修复 QRTR 读卡器完全不可用：改包名后 Rust 侧 5 个 JNI 导出仍按上游 ee.nekoko.nlpa2 注册，导致 nativeOpenBus/BusNode/Send/Receive/CloseBus 全部找不到符号，每次探测都把 shell 用户服务打成 FATAL EXCEPTION 并反复重启。现已改为 io.github.hg552.esimmatrix，QRTR 通道恢复可用，高通机型在 OMAPI 被 ROM 阉割时重新具备兜底读卡能力。",
+        "signatures": [
+          "C47350C7BA682B34A3E584A0D58463EA42B1AD73",
+          "D1C0F48B370E74D4EA4770ED4C3CD70A3198D31F",
+          "65D0571854AFEC519A90F92D7C5D8CF8148DA373"
+        ]
+      },
+      {
         "version": "1.4.3",
         "build": 143,
         "url": "https://github.com/hg552/eSIM-Matrix/releases/tag/v1.4.3",

@@ -206,7 +206,7 @@ fn fail(env: &mut JNIEnv, error: impl core::fmt::Display) {
 }
 
 #[no_mangle]
-pub extern "system" fn Java_ee_nekoko_nlpa2_QrtrUserService_nativeOpenBus(
+pub extern "system" fn Java_io_github_hg552_esimmatrix_QrtrUserService_nativeOpenBus(
     mut env: JNIEnv,
     _this: JObject,
 ) -> jint {
@@ -220,7 +220,7 @@ pub extern "system" fn Java_ee_nekoko_nlpa2_QrtrUserService_nativeOpenBus(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_ee_nekoko_nlpa2_QrtrUserService_nativeBusNode(
+pub extern "system" fn Java_io_github_hg552_esimmatrix_QrtrUserService_nativeBusNode(
     mut env: JNIEnv,
     _this: JObject,
     fd: jint,
@@ -235,7 +235,7 @@ pub extern "system" fn Java_ee_nekoko_nlpa2_QrtrUserService_nativeBusNode(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_ee_nekoko_nlpa2_QrtrUserService_nativeSend(
+pub extern "system" fn Java_io_github_hg552_esimmatrix_QrtrUserService_nativeSend(
     mut env: JNIEnv,
     _this: JObject,
     fd: jint,
@@ -261,7 +261,7 @@ pub extern "system" fn Java_ee_nekoko_nlpa2_QrtrUserService_nativeSend(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_ee_nekoko_nlpa2_QrtrUserService_nativeReceive(
+pub extern "system" fn Java_io_github_hg552_esimmatrix_QrtrUserService_nativeReceive(
     mut env: JNIEnv,
     _this: JObject,
     fd: jint,
@@ -298,7 +298,7 @@ pub extern "system" fn Java_ee_nekoko_nlpa2_QrtrUserService_nativeReceive(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_ee_nekoko_nlpa2_QrtrUserService_nativeCloseBus(
+pub extern "system" fn Java_io_github_hg552_esimmatrix_QrtrUserService_nativeCloseBus(
     _env: JNIEnv,
     _this: JObject,
     fd: jint,
