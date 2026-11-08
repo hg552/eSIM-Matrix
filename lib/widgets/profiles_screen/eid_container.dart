@@ -5,6 +5,8 @@ import '../../theme/app_theme.dart';
 import '../../models/asn1/rsp_definitions.g.dart';
 import '../../utils/size_formatter.dart';
 import '../../utils/profile_redaction.dart';
+import '../glass/glass_surface.dart';
+import '../../settings/app_settings.dart';
 
 class EidContainer extends StatelessWidget {
   static final Logger _log = Logger('EidContainer');
@@ -38,31 +40,39 @@ class EidContainer extends StatelessWidget {
     final theme = Theme.of(context);
     final isTinyScreen = MediaQuery.of(context).size.width < 400;
     final isSmallWidth = MediaQuery.of(context).size.width < 300;
-    return Material(
+    final glass = AppSettings().enableGlassUi;
+
+    final content = Material(
       key: _eidKey,
       color: Colors.transparent,
       child: InkWell(
         onTap: () => onContextMenu(_eidKey),
         onSecondaryTapDown: (details) => onContextMenu(_eidKey),
         onLongPress: () => onContextMenu(_eidKey),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(glass ? 14 : 16),
         child: Ink(
           width: double.infinity,
           height: (isSmallWidth || eid == null) ? 40 : 54,
           padding: const EdgeInsets.symmetric(horizontal: 12),
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface,
-            borderRadius: BorderRadius.circular(16),
+            color: glass
+                ? Colors.white.withValues(alpha: 0.04)
+                : Theme.of(context).colorScheme.surface,
+            borderRadius: BorderRadius.circular(glass ? 14 : 16),
             border: Border.all(
-              color: theme.colorScheme.primary.withValues(alpha: 0.2),
+              color: glass
+                  ? Colors.white.withValues(alpha: 0.20)
+                  : theme.colorScheme.primary.withValues(alpha: 0.2),
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.03),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
+            boxShadow: glass
+                ? null
+                : [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.03),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -200,5 +210,13 @@ class EidContainer extends StatelessWidget {
         ), // Ink
       ), // InkWell
     ); // Material
+
+    if (glass) {
+      return GlassSurface(
+        radius: 14,
+        child: content,
+      );
+    }
+    return content;
   }
 }

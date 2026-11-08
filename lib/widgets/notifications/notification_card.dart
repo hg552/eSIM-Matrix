@@ -5,6 +5,8 @@ import '../../theme/app_theme.dart';
 import '../../l10n/app_localizations.dart';
 import '../common/loading_spinner.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import '../../settings/app_settings.dart';
+import '../glass/glass_surface.dart';
 
 class NotificationCard extends StatefulWidget {
   final PendingNotification notification;
@@ -89,28 +91,37 @@ class _NotificationCardState extends State<NotificationCard>
         animation: _borderController,
         builder: (context, child) {
           final pulse = widget.isDeleting ? _borderController.value : 0.0;
-          return Container(
+          final glass = AppSettings().enableGlassUi;
+          final cardContainer = Container(
             decoration: BoxDecoration(
-              color: theme.colorScheme.surface,
+              color: glass
+                  ? Colors.white.withValues(alpha: isDark ? 0.04 : 0.45)
+                  : theme.colorScheme.surface,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
                 color: widget.isDeleting
                     ? deleteColor.withValues(alpha: 0.45 + pulse * 0.45)
-                    : AppTheme.surfaceSubtle(context),
+                    : (glass
+                          ? Colors.white.withValues(alpha: 0.18)
+                          : AppTheme.surfaceSubtle(context)),
                 width: widget.isDeleting ? 1.5 + pulse * 1.5 : 1,
               ),
               boxShadow: [
-                BoxShadow(
-                  color: widget.isDeleting
-                      ? deleteColor.withValues(alpha: 0.16 + pulse * 0.12)
-                      : Colors.black.withValues(alpha: isDark ? 0.3 : 0.04),
-                  blurRadius: widget.isDeleting ? 18 + pulse * 10 : 20,
-                  offset: const Offset(0, 8),
-                ),
+                if (!glass || widget.isDeleting)
+                  BoxShadow(
+                    color: widget.isDeleting
+                        ? deleteColor.withValues(alpha: 0.16 + pulse * 0.12)
+                        : Colors.black.withValues(alpha: isDark ? 0.3 : 0.04),
+                    blurRadius: widget.isDeleting ? 18 + pulse * 10 : 20,
+                    offset: const Offset(0, 8),
+                  ),
               ],
             ),
             child: child,
           );
+          return glass
+              ? GlassSurface(radius: 16, child: cardContainer)
+              : cardContainer;
         },
         child: Stack(
           clipBehavior: Clip.none,

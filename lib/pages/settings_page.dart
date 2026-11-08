@@ -4,6 +4,7 @@ import '../plugins/plugin_base.dart';
 import '../plugins/plugin_manager.dart';
 import '../theme/app_theme.dart';
 import '../widgets/styled_header_scaffold.dart';
+import '../widgets/glass/glass_surface.dart';
 import 'dart:io' as io;
 import 'package:path/path.dart' as path;
 import '../services/database_service.dart';
@@ -404,6 +405,37 @@ class SettingsPage extends StatelessWidget {
     required List<Widget> children,
   }) {
     final theme = Theme.of(context);
+    final isGlass = AppSettings().enableGlassUi;
+    final content = Container(
+      decoration: BoxDecoration(
+        color: isGlass
+            ? Colors.white.withValues(alpha: 0.04)
+            : theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: isGlass
+            ? null
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(
+                    alpha: theme.brightness == Brightness.dark ? 0.3 : 0.04,
+                  ),
+                  blurRadius: 20,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: Column(
+          children: [
+            for (int i = 0; i < children.length; i++) ...[
+              RepaintBoundary(child: children[i]),
+              if (i < children.length - 1) _buildDivider(context),
+            ],
+          ],
+        ),
+      ),
+    );
 
     return RepaintBoundary(
       child: Column(
@@ -421,32 +453,10 @@ class SettingsPage extends StatelessWidget {
               ),
             ),
           ),
-          Container(
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surface,
-              borderRadius: BorderRadius.circular(24),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(
-                    alpha: theme.brightness == Brightness.dark ? 0.3 : 0.04,
-                  ),
-                  blurRadius: 20,
-                  offset: const Offset(0, 8),
-                ),
-              ],
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(24),
-              child: Column(
-                children: [
-                  for (int i = 0; i < children.length; i++) ...[
-                    RepaintBoundary(child: children[i]),
-                    if (i < children.length - 1) _buildDivider(context),
-                  ],
-                ],
-              ),
-            ),
-          ),
+          if (isGlass)
+            GlassSurface(radius: 20, child: content)
+          else
+            content,
         ],
       ),
     );
@@ -874,20 +884,25 @@ class SettingsPage extends StatelessWidget {
   ) {
     final theme = Theme.of(context);
     final l10n = AppLocalizations.of(context)!;
+    final isGlass = AppSettings().enableGlassUi;
 
-    return Container(
+    final card = Container(
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(
-              alpha: theme.brightness == Brightness.dark ? 0.3 : 0.04,
-            ),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-          ),
-        ],
+        color: isGlass
+            ? Colors.white.withValues(alpha: 0.04)
+            : theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: isGlass
+            ? null
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(
+                    alpha: theme.brightness == Brightness.dark ? 0.3 : 0.04,
+                  ),
+                  blurRadius: 20,
+                  offset: const Offset(0, 8),
+                ),
+              ],
       ),
       child: _buildResponsiveTile(
         context,
@@ -918,6 +933,7 @@ class SettingsPage extends StatelessWidget {
         ), // Reuse styles
       ),
     );
+    return isGlass ? GlassSurface(radius: 20, child: card) : card;
   }
 
   Widget _buildCustomSwitch(

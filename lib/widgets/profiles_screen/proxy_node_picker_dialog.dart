@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 
-
+import '../glass/glass_surface.dart';
 import '../../services/proxy_linkage_service.dart';
 import '../../settings/app_settings.dart';
 
@@ -154,10 +154,19 @@ class _ProxyNodePickerDialogState extends State<ProxyNodePickerDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isGlass = AppSettings().enableGlassUi;
+    final isDark = theme.brightness == Brightness.dark;
+    final glassBg = isDark
+        ? const Color(0xFF141B2D).withValues(alpha: 0.65)
+        : Colors.white.withValues(alpha: 0.72);
     final suffix = widget.iccid.length > 4
         ? widget.iccid.substring(widget.iccid.length - 4)
         : widget.iccid;
-    return AlertDialog(
+
+    Widget dialogChild = AlertDialog(
+      backgroundColor: isGlass ? glassBg : null,
+      surfaceTintColor: isGlass ? Colors.transparent : null,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       title: const Text('指定代理节点'),
       content: SizedBox(
         width: double.maxFinite,
@@ -203,5 +212,13 @@ class _ProxyNodePickerDialogState extends State<ProxyNodePickerDialog> {
         ),
       ],
     );
+
+    if (isGlass) {
+      return GlassSurface(
+        radius: 24,
+        child: dialogChild,
+      );
+    }
+    return dialogChild;
   }
 }

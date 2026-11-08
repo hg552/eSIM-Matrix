@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
+import '../../settings/app_settings.dart';
 
 class SwitchModeButton extends StatelessWidget {
   final VoidCallback? onPressed;
@@ -21,24 +22,31 @@ class SwitchModeButton extends StatelessWidget {
     final isSmall = MediaQuery.of(context).size.width < 350;
     final buttonWidth = isSmall ? 56.0 : 68.0;
     final buttonHeight = isSmall ? 44.0 : 52.0;
+    final glass = AppSettings().enableGlassUi;
 
     return SizedBox(
       width: buttonWidth,
       height: buttonHeight,
       child: Container(
         decoration: BoxDecoration(
-          color: theme.colorScheme.surface,
+          color: glass
+              ? Colors.white.withValues(alpha: 0.06)
+              : theme.colorScheme.surface,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: theme.colorScheme.primary.withValues(alpha: 0.15),
+            color: glass
+                ? Colors.white.withValues(alpha: 0.20)
+                : theme.colorScheme.primary.withValues(alpha: 0.15),
           ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.03),
-              blurRadius: 4,
-              offset: const Offset(0, 2),
-            ),
-          ],
+          boxShadow: glass
+              ? null
+              : [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.03),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
         ),
         child: Material(
           color: Colors.transparent,

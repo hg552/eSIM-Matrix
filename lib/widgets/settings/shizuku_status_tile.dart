@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../services/shizuku_bundle.dart';
 import '../../theme/app_theme.dart';
+import '../../settings/app_settings.dart';
 
 /// Shizuku state plus the one action that is useful right now.
 ///
@@ -178,13 +179,20 @@ class _ShizukuStatusTileState extends State<ShizukuStatusTile>
       _ => '安装',
     };
 
+    final isGlass = AppSettings().enableGlassUi;
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+        color: isGlass
+            ? Colors.white.withValues(alpha: 0.05)
+            : theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: color.withValues(alpha: 0.35)),
+        border: Border.all(
+          color: isGlass
+              ? color.withValues(alpha: 0.45)
+              : color.withValues(alpha: 0.35),
+        ),
       ),
       child: Row(
         children: [

@@ -15,6 +15,7 @@ import '../utils/platform_adapter.dart';
 import '../services/sms_relay_service.dart';
 import '../services/remote_gateway_service.dart';
 import '../widgets/lazy_tab_body.dart';
+import '../widgets/glass/glass_surface.dart';
 
 class MainTabScreen extends StatefulWidget {
   const MainTabScreen({super.key});
@@ -98,7 +99,7 @@ class _MainTabScreenState extends State<MainTabScreen>
     final theme = Theme.of(context);
     final l10n = AppLocalizations.of(context)!;
     final settings = AppSettings();
-    // Determine if we should show standard buy tab
+    final glass = settings.enableGlassUi;
 
     final pluginTabs = PluginManager().appTabs;
     final tabEntries = <_MainTabEntry>[
@@ -186,6 +187,110 @@ class _MainTabScreenState extends State<MainTabScreen>
 
     // Add floating top bar for desktop
     if (isDesktop && showBottomBar) {
+      Widget topBarContent = AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          color: glass
+              ? (theme.brightness == Brightness.dark
+                  ? Colors.white.withValues(alpha: 0.08)
+                  : Colors.white.withValues(alpha: 0.55))
+              : theme.colorScheme.surfaceContainerHighest.withValues(
+                  alpha: 0.9,
+                ),
+          borderRadius: BorderRadius.circular(24),
+          border: glass
+              ? Border.all(
+                  color: Colors.white.withValues(alpha: 0.22),
+                  width: 1,
+                )
+              : null,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.1),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: List.generate(tabs.length, (index) {
+            final bool isActive = _currentIndex == index;
+            final entry = tabEntries[index];
+            final label = entry.label;
+            final icon = isActive ? entry.activeIcon : entry.icon;
+
+            return InkWell(
+              onTap: () {
+                setState(() => _currentIndex = index);
+                HapticFeedback.selectionClick();
+              },
+              borderRadius: BorderRadius.circular(20),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  vertical: 8,
+                  horizontal: 12,
+                ),
+                decoration: isActive
+                    ? BoxDecoration(
+                        color: theme.colorScheme.primary,
+                        borderRadius: BorderRadius.circular(20),
+                      )
+                    : null,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      icon,
+                      size: 18,
+                      color: isActive
+                          ? theme.colorScheme.onPrimary
+                          : theme.colorScheme.onSurfaceVariant,
+                    ),
+                    AnimatedSize(
+                      duration: const Duration(milliseconds: 200),
+                      curve: Curves.easeInOut,
+                      child: _isHoveringTopBar
+                          ? Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const SizedBox(width: 8),
+                                Text(
+                                  label,
+                                  style: TextStyle(
+                                    color: isActive
+                                        ? theme.colorScheme.onPrimary
+                                        : theme
+                                              .colorScheme
+                                              .onSurfaceVariant,
+                                    fontWeight: isActive
+                                        ? FontWeight.bold
+                                        : FontWeight.normal,
+                                    fontSize: 13,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            )
+                          : const SizedBox.shrink(),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }),
+        ),
+      );
+
+      final topBar = glass
+          ? GlassSurface(
+              radius: 24,
+              child: topBarContent,
+            )
+          : topBarContent;
+
       body = Stack(
         children: [
           body,
@@ -197,92 +302,7 @@ class _MainTabScreenState extends State<MainTabScreen>
               child: MouseRegion(
                 onEnter: (_) => setState(() => _isHoveringTopBar = true),
                 onExit: (_) => setState(() => _isHoveringTopBar = false),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHighest.withValues(
-                      alpha: 0.9,
-                    ),
-                    borderRadius: BorderRadius.circular(24),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.1),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: List.generate(tabs.length, (index) {
-                      final bool isActive = _currentIndex == index;
-                      final entry = tabEntries[index];
-                      final label = entry.label;
-                      final icon = isActive ? entry.activeIcon : entry.icon;
-
-                      return InkWell(
-                        onTap: () {
-                          setState(() => _currentIndex = index);
-                          HapticFeedback.selectionClick();
-                        },
-                        borderRadius: BorderRadius.circular(20),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            vertical: 8,
-                            horizontal: 12,
-                          ),
-                          decoration: isActive
-                              ? BoxDecoration(
-                                  color: theme.colorScheme.primary,
-                                  borderRadius: BorderRadius.circular(20),
-                                )
-                              : null,
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                icon,
-                                size: 18,
-                                color: isActive
-                                    ? theme.colorScheme.onPrimary
-                                    : theme.colorScheme.onSurfaceVariant,
-                              ),
-                              AnimatedSize(
-                                duration: const Duration(milliseconds: 200),
-                                curve: Curves.easeInOut,
-                                child: _isHoveringTopBar
-                                    ? Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const SizedBox(width: 8),
-                                          Text(
-                                            label,
-                                            style: TextStyle(
-                                              color: isActive
-                                                  ? theme.colorScheme.onPrimary
-                                                  : theme
-                                                        .colorScheme
-                                                        .onSurfaceVariant,
-                                              fontWeight: isActive
-                                                  ? FontWeight.bold
-                                                  : FontWeight.normal,
-                                              fontSize: 13,
-                                            ),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ],
-                                      )
-                                    : const SizedBox.shrink(),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    }),
-                  ),
-                ),
+                child: topBar,
               ),
             ),
           ),
@@ -290,31 +310,57 @@ class _MainTabScreenState extends State<MainTabScreen>
       );
     }
 
-    return Scaffold(
-      body: body,
-      bottomNavigationBar: (showBottomBar && !isDesktop)
-          ? Container(
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surface.withValues(alpha: 0.95),
-                border: Border(
-                  top: BorderSide(
-                    color: theme.dividerColor.withValues(alpha: 0.1),
-                    width: 1,
-                  ),
-                ),
-              ),
-              child: SafeArea(
-                child: SizedBox(
-                  height: 56, // Shorter height
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceAround,
-                    children: tabs,
-                  ),
-                ),
-              ),
+    Widget? bottomNav;
+    if (showBottomBar && !isDesktop) {
+      final bottomBarContent = Container(
+        decoration: BoxDecoration(
+          color: glass
+              ? Colors.transparent
+              : theme.colorScheme.surface.withValues(alpha: 0.95),
+          border: Border(
+            top: BorderSide(
+              color: glass
+                  ? Colors.white.withValues(alpha: 0.18)
+                  : theme.dividerColor.withValues(alpha: 0.1),
+              width: 1,
+            ),
+          ),
+        ),
+        child: SafeArea(
+          child: SizedBox(
+            height: 56, // Shorter height
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: tabs,
+            ),
+          ),
+        ),
+      );
+
+      bottomNav = glass
+          ? GlassSurface(
+              borderRadius: BorderRadius.zero,
+              child: bottomBarContent,
             )
-          : null,
+          : bottomBarContent;
+    }
+
+    final scaffold = Scaffold(
+      backgroundColor: glass ? Colors.transparent : null,
+      body: body,
+      bottomNavigationBar: bottomNav,
     );
+
+    if (glass) {
+      return Stack(
+        children: [
+          const Positioned.fill(child: GlassBackdrop()),
+          scaffold,
+        ],
+      );
+    }
+
+    return scaffold;
   }
 
   Widget _buildTabItem(

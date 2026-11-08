@@ -11,8 +11,8 @@ import '../services/sms_relay_service.dart';
 import '../services/remote_gateway_service.dart';
 import '../settings/app_settings.dart';
 import '../services/mock_location_service.dart';
+import '../widgets/glass/glass_surface.dart';
 import '../widgets/styled_header_scaffold.dart';
-
 class SmsRelayPage extends StatefulWidget {
   const SmsRelayPage({super.key});
 
@@ -681,47 +681,75 @@ class _SmsRelayPageState extends State<SmsRelayPage>
     unawaited(openAppSettings());
   }
 
-  Widget _buildPermissionCard(AppLocalizations l10n) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              l10n.smsRelayPermissionRequired,
-              style: Theme.of(context).textTheme.titleMedium,
+  Widget _buildCardContainer({
+    required Widget child,
+    Color? color,
+    EdgeInsetsGeometry? padding = const EdgeInsets.all(16),
+    EdgeInsetsGeometry? margin,
+  }) {
+    final glass = AppSettings().enableGlassUi;
+    if (glass) {
+      return Padding(
+        padding: margin ?? EdgeInsets.zero,
+        child: GlassSurface(
+          radius: 20,
+          child: Container(
+            decoration: BoxDecoration(
+              color: color ?? Colors.white.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.18),
+                width: 1,
+              ),
             ),
-            const SizedBox(height: 8),
-            Text(l10n.smsRelayPermissionHelp),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                FilledButton.icon(
-                  onPressed: _requestingPermission ? null : _requestPermission,
-                  icon: const Icon(Icons.sms_outlined),
-                  label: Text(l10n.smsRelayGrantPermission),
-                ),
-                TextButton(
-                  onPressed: _openSettings,
-                  child: Text(l10n.openSettings),
-                ),
-              ],
-            ),
-          ],
+            padding: padding,
+            child: child,
+          ),
         ),
+      );
+    }
+    return Card(
+      color: color,
+      margin: margin,
+      child: padding != null ? Padding(padding: padding, child: child) : child,
+    );
+  }
+
+  Widget _buildPermissionCard(AppLocalizations l10n) {
+    return _buildCardContainer(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            l10n.smsRelayPermissionRequired,
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          Text(l10n.smsRelayPermissionHelp),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              FilledButton.icon(
+                onPressed: _requestingPermission ? null : _requestPermission,
+                icon: const Icon(Icons.sms_outlined),
+                label: Text(l10n.smsRelayGrantPermission),
+              ),
+              TextButton(
+                onPressed: _openSettings,
+                child: Text(l10n.openSettings),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildUnavailableCard(AppLocalizations l10n) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Text(l10n.smsRelayUnavailable),
-      ),
+    return _buildCardContainer(
+      child: Text(l10n.smsRelayUnavailable),
     );
   }
 
@@ -952,11 +980,9 @@ class _SmsRelayPageState extends State<SmsRelayPage>
     final fieldBorder = OutlineInputBorder(
       borderRadius: BorderRadius.circular(12),
     );
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    return _buildCardContainer(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
@@ -1170,17 +1196,14 @@ class _SmsRelayPageState extends State<SmsRelayPage>
             ),
           ],
         ),
-      ),
     );
   }
 
   Widget _buildHistoryCard(AppLocalizations l10n) {
     final theme = Theme.of(context);
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    return _buildCardContainer(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
@@ -1368,7 +1391,6 @@ class _SmsRelayPageState extends State<SmsRelayPage>
               ),
           ],
         ),
-      ),
     );
   }
 
@@ -1376,11 +1398,9 @@ class _SmsRelayPageState extends State<SmsRelayPage>
     final theme = Theme.of(context);
     final gateway = RemoteGatewayService.instance;
     final apiUrl = gateway.apiUrl;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    return _buildCardContainer(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
@@ -1662,7 +1682,6 @@ class _SmsRelayPageState extends State<SmsRelayPage>
             ),
           ],
         ),
-      ),
     );
   }
 
@@ -1684,20 +1703,17 @@ class _SmsRelayPageState extends State<SmsRelayPage>
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(16),
         children: [
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    Icons.privacy_tip_outlined,
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(child: Text(l10n.smsRelayPrivacy)),
-                ],
-              ),
+          _buildCardContainer(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.privacy_tip_outlined,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                const SizedBox(width: 12),
+                Expanded(child: Text(l10n.smsRelayPrivacy)),
+              ],
             ),
           ),
           if (_loading)
@@ -1709,11 +1725,9 @@ class _SmsRelayPageState extends State<SmsRelayPage>
             _buildUnavailableCard(l10n)
           else ...[
             if (!_permissionGranted) _buildPermissionCard(l10n),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
+            _buildCardContainer(
+              child: Column(
+                children: [
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
                       title: Text(l10n.smsRelayForwardingEnabled),
@@ -2012,16 +2026,12 @@ class _SmsRelayPageState extends State<SmsRelayPage>
                     ),
                   ],
                 ),
-              ),
             ),
             if (_error != null) ...[
               const SizedBox(height: 8),
-              Card(
-                color: Theme.of(context).colorScheme.errorContainer,
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Text(_errorMessage(l10n)),
-                ),
+              _buildCardContainer(
+                color: Theme.of(context).colorScheme.errorContainer.withValues(alpha: AppSettings().enableGlassUi ? 0.35 : 1.0),
+                child: Text(_errorMessage(l10n)),
               ),
             ],
             const SizedBox(height: 12),

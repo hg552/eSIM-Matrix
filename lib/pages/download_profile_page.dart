@@ -15,6 +15,7 @@ import '../utils/iccid_formatter.dart';
 import '../widgets/common/simple_dialog_container.dart';
 import '../widgets/common/loading_spinner.dart';
 import '../widgets/styled_header_scaffold.dart';
+import '../widgets/glass/glass_surface.dart';
 import '../theme/app_theme.dart';
 import '../logic/profile_download_session.dart';
 import '../logic/profile_download_retry.dart';
@@ -1245,6 +1246,7 @@ class _DownloadProfilePageState extends State<DownloadProfilePage> {
     Widget _buildInput(BuildContext context) {
     final theme = Theme.of(context);
     final l10n = AppLocalizations.of(context)!;
+    final isGlass = AppSettings().enableGlassUi;
     return DropTarget(
       onDragDone: (detail) async {
         if (detail.files.isNotEmpty) {
@@ -1437,13 +1439,19 @@ class _DownloadProfilePageState extends State<DownloadProfilePage> {
                   ),
                   if (!_isHalDownload) ...[
                     const SizedBox(height: 16),
-                    Container(
+                    GlassSurface(
+                      radius: 16,
+                      child: Container(
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
+                        color: isGlass
+                            ? Colors.white.withValues(alpha: 0.05)
+                            : theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
+                          color: isGlass
+                              ? Colors.white.withValues(alpha: 0.15)
+                              : theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
                         ),
                       ),
                       child: Column(
@@ -1497,6 +1505,7 @@ class _DownloadProfilePageState extends State<DownloadProfilePage> {
                           ),
                         ],
                       ),
+                    ),
                     ),
                   ],
                ],
@@ -1602,6 +1611,7 @@ class _DownloadProfilePageState extends State<DownloadProfilePage> {
     }
 
     final theme = Theme.of(context);
+    final isGlass = AppSettings().enableGlassUi;
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
       child: Center(
@@ -1648,20 +1658,28 @@ class _DownloadProfilePageState extends State<DownloadProfilePage> {
           ),
           const SizedBox(height: 24),
           // Elegant Info Section
-          Container(
+          GlassSurface(
+            radius: 20,
+            child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
             decoration: BoxDecoration(
-              color: theme.colorScheme.surface,
-              borderRadius: BorderRadius.circular(24),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.03),
-                  blurRadius: 16,
-                  offset: const Offset(0, 4),
-                ),
-              ],
+              color: isGlass
+                  ? Colors.white.withValues(alpha: 0.04)
+                  : theme.colorScheme.surface,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: isGlass
+                  ? null
+                  : [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.03),
+                        blurRadius: 16,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
               border: Border.all(
-                color: theme.colorScheme.primary.withValues(alpha: 0.05),
+                color: isGlass
+                    ? Colors.white.withValues(alpha: 0.15)
+                    : theme.colorScheme.primary.withValues(alpha: 0.05),
                 width: 1.5,
               ),
             ),
@@ -1796,6 +1814,7 @@ class _DownloadProfilePageState extends State<DownloadProfilePage> {
                 ],
               ],
             ),
+          ),
           ),
           
           // Certificate Export Section (Developer Mode Only, Non-web)

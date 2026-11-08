@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:logging/logging.dart';
 import '../services/log_buffer.dart';
 import '../widgets/styled_header_scaffold.dart';
+import '../settings/app_settings.dart';
+import '../widgets/glass/glass_surface.dart';
 import '../l10n/app_localizations.dart';
 import '../services/diagnostics_service.dart';
 import '../adapter/composite_adapter.dart';
@@ -81,6 +83,96 @@ class _AppLogsPageState extends State<AppLogsPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isGlass = AppSettings().enableGlassUi;
+
+    Widget bottomBar = Container(
+      padding: const EdgeInsets.all(8),
+      color: isGlass ? Colors.white.withValues(alpha: 0.04) : theme.colorScheme.surface,
+      child: Row(
+        children: [
+          IconButton(
+            icon: Icon(Icons.refresh, color: theme.colorScheme.onSurface),
+            onPressed: _loadLogs,
+            tooltip: AppLocalizations.of(context)!.refreshReload,
+          ),
+          IconButton(
+            icon: Icon(
+              _autoScroll
+                  ? Icons.vertical_align_bottom
+                  : Icons.vertical_align_center,
+              color: _autoScroll
+                  ? theme.colorScheme.primary
+                  : theme.colorScheme.onSurface,
+            ),
+            onPressed: () => setState(() => _autoScroll = !_autoScroll),
+            tooltip: AppLocalizations.of(context)!.toggleAutoScroll,
+          ),
+          const Spacer(),
+          TextButton.icon(
+            icon: const Icon(Icons.troubleshoot_rounded, size: 18),
+            label: const Text('复制排查报告'),
+            style: TextButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+            ),
+            onPressed: () async {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('正在收集底层硬件与读卡器诊断信息...'),
+                  duration: Duration(seconds: 1),
+                ),
+              );
+              try {
+                final snap = await DiagnosticsService.collect(
+                  adapter: CompositeAdapter(),
+                  maxLogLines: 120,
+                );
+                await Clipboard.setData(
+                  ClipboardData(text: snap.reportText),
+                );
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        '✅ 完整硬件与读卡器排查报告已复制到剪贴板！',
+                      ),
+                      duration: Duration(seconds: 4),
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('生成报告失败: $e')),
+                  );
+                }
+              }
+            },
+          ),
+          const SizedBox(width: 4),
+          IconButton(
+            icon: const Icon(Icons.copy, size: 20),
+            tooltip: '复制原始日志',
+            onPressed: () {
+              final text = _logs
+                  .map(
+                    (l) =>
+                        "${l.time} [${l.loggerName}] ${l.level}: ${l.message}",
+                  )
+                  .join("\n");
+              Clipboard.setData(ClipboardData(text: text));
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    AppLocalizations.of(context)!.appLogsCopied,
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+
     return StyledHeaderScaffold(
       title: AppLocalizations.of(context)!.applicationLogs,
       body: Column(
@@ -92,7 +184,6 @@ class _AppLogsPageState extends State<AppLogsPage> {
               itemCount: _logs.length,
               itemBuilder: (context, index) {
                 final log = _logs[index];
-                final color = _getLevelColor(log.level);
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 0),
                   child: SelectableText.rich(
@@ -121,7 +212,16 @@ class _AppLogsPageState extends State<AppLogsPage> {
                         ),
                         TextSpan(
                           text: log.message,
-                          style: TextStyle(color: color, fontSize: 12),
+                          style: AppTheme.mono(
+                            TextStyle(
+                              fontSize: 12,
+                              color: _getLevelColor(log.level),
+                              fontWeight: log.level >= Level.WARNING
+                                  ? FontWeight.bold
+                                  : FontWeight.normal,
+                              height: 1.5,
+                            ),
+                          ),
                         ),
                         if (log.error != null)
                           TextSpan(
@@ -146,93 +246,10 @@ class _AppLogsPageState extends State<AppLogsPage> {
               },
             ),
           ),
-          Container(
-            padding: const EdgeInsets.all(8),
-            color: theme.colorScheme.surface,
-            child: Row(
-              children: [
-                IconButton(
-                  icon: Icon(Icons.refresh, color: theme.colorScheme.onSurface),
-                  onPressed: _loadLogs,
-                  tooltip: AppLocalizations.of(context)!.refreshReload,
-                ),
-                IconButton(
-                  icon: Icon(
-                    _autoScroll
-                        ? Icons.vertical_align_bottom
-                        : Icons.vertical_align_center,
-                    color: _autoScroll
-                        ? theme.colorScheme.primary
-                        : theme.colorScheme.onSurface,
-                  ),
-                  onPressed: () => setState(() => _autoScroll = !_autoScroll),
-                  tooltip: AppLocalizations.of(context)!.toggleAutoScroll,
-                ),
-                const Spacer(),
-                TextButton.icon(
-                  icon: const Icon(Icons.troubleshoot_rounded, size: 18),
-                  label: const Text('复制排查报告'),
-                  style: TextButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                  ),
-                  onPressed: () async {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('正在收集底层硬件与读卡器诊断信息...'),
-                        duration: Duration(seconds: 1),
-                      ),
-                    );
-                    try {
-                      final snap = await DiagnosticsService.collect(
-                        adapter: CompositeAdapter(),
-                        maxLogLines: 120,
-                      );
-                      await Clipboard.setData(
-                        ClipboardData(text: snap.reportText),
-                      );
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              '✅ 完整硬件与读卡器排查报告已复制到剪贴板！',
-                            ),
-                            duration: Duration(seconds: 4),
-                          ),
-                        );
-                      }
-                    } catch (e) {
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('生成报告失败: $e')),
-                        );
-                      }
-                    }
-                  },
-                ),
-                const SizedBox(width: 4),
-                IconButton(
-                  icon: const Icon(Icons.copy, size: 20),
-                  tooltip: '复制原始日志',
-                  onPressed: () {
-                    final text = _logs
-                        .map(
-                          (l) =>
-                              "${l.time} [${l.loggerName}] ${l.level}: ${l.message}",
-                        )
-                        .join("\n");
-                    Clipboard.setData(ClipboardData(text: text));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          AppLocalizations.of(context)!.appLogsCopied,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ],
-            ),
-          ),
+          if (isGlass)
+            GlassSurface(radius: 0, child: bottomBar)
+          else
+            bottomBar,
         ],
       ),
     );

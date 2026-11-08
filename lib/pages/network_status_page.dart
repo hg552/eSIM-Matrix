@@ -6,6 +6,8 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../l10n/app_localizations.dart';
 import '../services/network_status_service.dart';
+import '../settings/app_settings.dart';
+import '../widgets/glass/glass_surface.dart';
 import '../widgets/styled_header_scaffold.dart';
 
 class NetworkStatusPage extends StatefulWidget {
@@ -188,54 +190,79 @@ class _NetworkStatusPageState extends State<NetworkStatusPage>
     VoiceRegistrationState.unknown => l10n.unknown,
   };
 
-  Widget _buildPermissionCard(AppLocalizations l10n) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              l10n.networkStatusPermissionRequired,
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 8),
-            Text(l10n.networkStatusPermissionMessage),
-            const SizedBox(height: 12),
-            FilledButton.icon(
-              onPressed: _checkingPermission
-                  ? null
-                  : _permissionPermanentlyDenied
-                  ? _openSettings
-                  : _requestPermission,
-              icon: const Icon(Icons.phonelink_lock_outlined),
-              label: Text(
-                _permissionPermanentlyDenied
-                    ? l10n.openSettings
-                    : l10n.networkStatusGrantPermission,
+  Widget _buildCardContainer({required Widget child}) {
+    final glass = AppSettings().enableGlassUi;
+    if (glass) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: GlassSurface(
+          radius: 20,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.18),
+                width: 1,
               ),
             ),
-          ],
+            padding: const EdgeInsets.all(16),
+            child: child,
+          ),
         ),
+      );
+    }
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: child,
+      ),
+    );
+  }
+
+  Widget _buildPermissionCard(AppLocalizations l10n) {
+    return _buildCardContainer(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            l10n.networkStatusPermissionRequired,
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          Text(l10n.networkStatusPermissionMessage),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: _checkingPermission
+                ? null
+                : _permissionPermanentlyDenied
+                ? _openSettings
+                : _requestPermission,
+            icon: const Icon(Icons.phonelink_lock_outlined),
+            label: Text(
+              _permissionPermanentlyDenied
+                  ? l10n.openSettings
+                  : l10n.networkStatusGrantPermission,
+            ),
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildMessageCard(String message) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(
-              Icons.info_outline,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-            const SizedBox(width: 12),
-            Expanded(child: Text(message)),
-          ],
-        ),
+    return _buildCardContainer(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.info_outline,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+          const SizedBox(width: 12),
+          Expanded(child: Text(message)),
+        ],
       ),
     );
   }
@@ -263,10 +290,8 @@ class _NetworkStatusPageState extends State<NetworkStatusPage>
     }
     final signal = signalParts.isEmpty ? l10n.unknown : signalParts.join(' · ');
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
+    return _buildCardContainer(
+      child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
@@ -318,7 +343,6 @@ class _NetworkStatusPageState extends State<NetworkStatusPage>
             _NetworkStatusRow(label: l10n.networkStatusSignal, value: signal),
           ],
         ),
-      ),
     );
   }
 
@@ -344,20 +368,17 @@ class _NetworkStatusPageState extends State<NetworkStatusPage>
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.all(16),
           children: [
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(
-                      Icons.privacy_tip_outlined,
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(child: Text(l10n.networkStatusPrivacy)),
-                  ],
-                ),
+            _buildCardContainer(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.privacy_tip_outlined,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(child: Text(l10n.networkStatusPrivacy)),
+                ],
               ),
             ),
             if (_checkingAvailability || _checkingPermission)

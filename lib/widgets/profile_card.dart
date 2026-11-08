@@ -284,22 +284,8 @@ class ProfileCard extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 12),
       child: GlassSurface(
         radius: 20,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            border: profile.enabled
-                ? Border.all(
-                    color: Theme.of(context)
-                        .colorScheme
-                        .primary
-                        .withValues(alpha: 0.55),
-                    width: 2,
-                  )
-                : null,
-          ),
-          child: body,
-        ),
+        accentColor: profile.enabled ? theme.colorScheme.primary : null,
+        child: body,
       ),
     );
   }

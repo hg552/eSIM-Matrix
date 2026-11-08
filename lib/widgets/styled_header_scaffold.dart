@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
+import '../settings/app_settings.dart';
+import 'glass/glass_surface.dart';
 
 /// A reusable scaffold with a stylized header for secondary pages
 /// Automatically handles safe area padding for mobile devices
@@ -32,6 +34,116 @@ class StyledHeaderScaffold extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final glass = AppSettings().enableGlassUi;
+
+    Widget headerContent = Container(
+      padding: EdgeInsets.fromLTRB(
+        12,
+        (compact ? 8 : 12) +
+            MediaQuery.of(
+              context,
+            ).padding.top, // Add top safe area padding
+        16,
+        compact ? 8 : 12,
+      ),
+      decoration: BoxDecoration(
+        color: glass ? Colors.transparent : theme.colorScheme.surface,
+        border: Border(
+          bottom: BorderSide(
+            color: glass
+                ? Colors.white.withValues(alpha: 0.14)
+                : theme.dividerColor,
+            width: 1,
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          if (logoAsset != null) ...[
+            Image.asset(logoAsset!, height: 24),
+            const SizedBox(width: 12),
+          ] else if (showBackButton) ...[
+            // Back button
+            Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: () => Navigator.pop(context),
+                child: Ink(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Container(
+                    padding: const EdgeInsets.all(10),
+                    child: Icon(
+                      Icons.arrow_back,
+                      color: AppTheme.onSurfaceSubtle(context),
+                      size: 20,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+          ] else
+            const SizedBox(width: 4),
+          // Title
+          Expanded(
+            child: GestureDetector(
+              onTap: onTitleTap,
+              behavior: HitTestBehavior.opaque,
+              child:
+                  titleWidget ??
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (title != null)
+                        Text(
+                          title!,
+                          style: TextStyle(
+                            fontSize: compact ? 16 : 20,
+                            fontWeight: FontWeight.w600,
+                            color: theme.colorScheme.onSurface,
+                            letterSpacing: -0.5,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      if (subtitle != null)
+                        Text(
+                          subtitle!,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppTheme.onSurfaceSubtle(context),
+                            fontWeight: FontWeight.w500,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                    ],
+                  ),
+            ),
+          ),
+          // Optional actions
+          ...?actions,
+        ],
+      ),
+    );
+
+    final header = glass
+        ? GlassSurface(borderRadius: BorderRadius.zero, child: headerContent)
+        : headerContent;
+
+    final scaffold = Scaffold(
+      backgroundColor: glass ? Colors.transparent : theme.scaffoldBackgroundColor,
+      body: Column(
+        children: [
+          header,
+          // Body content
+          Expanded(child: body),
+        ],
+      ),
+    );
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle(
@@ -39,104 +151,14 @@ class StyledHeaderScaffold extends StatelessWidget {
         statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
         statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
       ),
-      child: Scaffold(
-        backgroundColor: theme.scaffoldBackgroundColor,
-        body: Column(
-          children: [
-            // Custom Header with safe area padding
-            Container(
-              padding: EdgeInsets.fromLTRB(
-                12,
-                (compact ? 8 : 12) +
-                    MediaQuery.of(
-                      context,
-                    ).padding.top, // Add top safe area padding
-                16,
-                compact ? 8 : 12,
-              ),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surface,
-                border: Border(
-                  bottom: BorderSide(color: theme.dividerColor, width: 1),
-                ),
-              ),
-              child: Row(
-                children: [
-                  if (logoAsset != null) ...[
-                    Image.asset(logoAsset!, height: 24),
-                    const SizedBox(width: 12),
-                  ] else if (showBackButton) ...[
-                    // Back button
-                    Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(10),
-                        onTap: () => Navigator.pop(context),
-                        child: Ink(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Container(
-                            padding: const EdgeInsets.all(10),
-                            child: Icon(
-                              Icons.arrow_back,
-                              color: AppTheme.onSurfaceSubtle(context),
-                              size: 20,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                  ] else
-                    const SizedBox(width: 4),
-                  // Title
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: onTitleTap,
-                      behavior: HitTestBehavior.opaque,
-                      child:
-                          titleWidget ??
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (title != null)
-                                Text(
-                                  title!,
-                                  style: TextStyle(
-                                    fontSize: compact ? 16 : 20,
-                                    fontWeight: FontWeight.w600,
-                                    color: theme.colorScheme.onSurface,
-                                    letterSpacing: -0.5,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              if (subtitle != null)
-                                Text(
-                                  subtitle!,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: AppTheme.onSurfaceSubtle(context),
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                            ],
-                          ),
-                    ),
-                  ),
-                  // Optional actions
-                  ...?actions,
-                ],
-              ),
-            ),
-            // Body content
-            Expanded(child: body),
-          ],
-        ),
-      ),
+      child: glass
+          ? Stack(
+              children: [
+                const Positioned.fill(child: GlassBackdrop()),
+                scaffold,
+              ],
+            )
+          : scaffold,
     );
   }
 }

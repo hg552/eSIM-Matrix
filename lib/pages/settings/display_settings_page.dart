@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../settings/app_settings.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/styled_header_scaffold.dart';
+import '../../widgets/glass/glass_surface.dart';
 import '../../l10n/app_localizations.dart';
 import '../../utils/platform_adapter.dart';
 import '../glass_preview_page.dart';
@@ -84,6 +85,38 @@ class DisplaySettingsPage extends StatelessWidget {
     required List<Widget> children,
   }) {
     final theme = Theme.of(context);
+    final isGlass = AppSettings().enableGlassUi;
+
+    final content = Container(
+      decoration: BoxDecoration(
+        color: isGlass
+            ? Colors.white.withValues(alpha: 0.04)
+            : theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: isGlass
+            ? null
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(
+                    alpha: theme.brightness == Brightness.dark ? 0.3 : 0.04,
+                  ),
+                  blurRadius: 20,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: Column(
+          children: [
+            for (int i = 0; i < children.length; i++) ...[
+              RepaintBoundary(child: children[i]),
+              if (i < children.length - 1) _buildDivider(context),
+            ],
+          ],
+        ),
+      ),
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -100,32 +133,10 @@ class DisplaySettingsPage extends StatelessWidget {
             ),
           ),
         ),
-        Container(
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-            borderRadius: BorderRadius.circular(24),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(
-                  alpha: theme.brightness == Brightness.dark ? 0.3 : 0.04,
-                ),
-                blurRadius: 20,
-                offset: const Offset(0, 8),
-              ),
-            ],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(24),
-            child: Column(
-              children: [
-                for (int i = 0; i < children.length; i++) ...[
-                  RepaintBoundary(child: children[i]),
-                  if (i < children.length - 1) _buildDivider(context),
-                ],
-              ],
-            ),
-          ),
-        ),
+        if (isGlass)
+          GlassSurface(radius: 20, child: content)
+        else
+          content,
       ],
     );
   }
@@ -657,7 +668,13 @@ class DisplaySettingsPage extends StatelessWidget {
 
   Widget _buildGlassIntensitySelector(BuildContext context) {
     final settings = AppSettings();
-    const labels = {'soft': '轻柔', 'normal': '标准', 'strong': '厚重'};
+    final current = settings.glassIntensity;
+    const options = [
+      ('soft', '柔和'),
+      ('normal', '标准'),
+      ('strong', '强烈'),
+    ];
+
     return _buildResponsiveTile(
       context,
       icon: Container(
@@ -673,17 +690,20 @@ class DisplaySettingsPage extends StatelessWidget {
         ),
       ),
       title: '玻璃强度',
-      subtitle: '模糊半径与染色浓度的组合',
-      child: _buildAdaptiveDropdown<String>(
-        context: context,
-        value: settings.glassIntensity,
-        items: [
-          for (final entry in labels.entries)
-            DropdownMenuItem(value: entry.key, child: Text(entry.value)),
-        ],
-        onChanged: (v) {
-          if (v != null) settings.setGlassIntensity(v);
-        },
+      subtitle: '当前：${switch (current) { 'soft' => '柔和', 'strong' => '强烈', _ => '标准' }} · 模糊半径与高光强度的组合',
+      child: Wrap(
+        spacing: 6,
+        children: options.map((opt) {
+          final isSelected = current == opt.$1;
+          return ChoiceChip(
+            label: Text(opt.$2),
+            selected: isSelected,
+            onSelected: (selected) {
+              if (selected) settings.setGlassIntensity(opt.$1);
+            },
+            visualDensity: VisualDensity.compact,
+          );
+        }).toList(),
       ),
     );
   }

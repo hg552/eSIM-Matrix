@@ -4,7 +4,9 @@ import 'package:flutter/services.dart';
 import '../../adapter/composite_adapter.dart';
 import '../../pages/app_logs_page.dart';
 import '../../services/diagnostics_service.dart';
+import '../../settings/app_settings.dart';
 import '../../theme/app_theme.dart';
+import '../glass/glass_surface.dart';
 import '../common/loading_spinner.dart';
 
 /// Embedded diagnostics view displayed on empty reader or card detection screens.
@@ -92,14 +94,21 @@ class _ReaderDiagnosticsViewState extends State<ReaderDiagnosticsView> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final isGlass = AppSettings().enableGlassUi;
+    final glassBg = isDark
+        ? const Color(0xFF141B2D).withValues(alpha: 0.65)
+        : Colors.white.withValues(alpha: 0.72);
 
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 16),
+    Widget content = Container(
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E222B) : const Color(0xFFF4F6F9),
-        borderRadius: BorderRadius.circular(16),
+        color: isGlass
+            ? glassBg
+            : (isDark ? const Color(0xFF1E222B) : const Color(0xFFF4F6F9)),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
+          color: isGlass
+              ? Colors.white.withValues(alpha: 0.18)
+              : theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
         ),
       ),
       child: Column(
@@ -341,6 +350,16 @@ class _ReaderDiagnosticsViewState extends State<ReaderDiagnosticsView> {
           ],
         ],
       ),
+    );
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 16),
+      child: isGlass
+          ? GlassSurface(
+              radius: 18,
+              child: content,
+            )
+          : content,
     );
   }
 

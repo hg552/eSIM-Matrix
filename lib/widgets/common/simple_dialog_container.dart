@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
+import '../glass/glass_surface.dart';
+import '../../settings/app_settings.dart';
 import 'loading_spinner.dart';
 import '../../utils/platform_adapter.dart';
 
@@ -35,27 +37,32 @@ class SimpleDialogContainer extends StatelessWidget {
     // Use standard behavior on Desktop/Web, only animate on Mobile where keyboard pushes UI
     final useAnimate = PlatformX.isMobile && keyboardInset > 0;
 
-    Widget dialogBody = Center(
-      child: Material(
-        color: Colors.transparent,
-        child: Container(
-          width: isSmallScreen ? double.infinity : 400,
-          constraints: const BoxConstraints(maxHeight: 600),
-          margin: EdgeInsets.all(isSmallScreen ? 12 : 24),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-            borderRadius: BorderRadius.circular(isSmallScreen ? 20 : 24),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.2),
-                blurRadius: 20,
-                offset: const Offset(0, 10),
-              ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
+    final isGlass = AppSettings().enableGlassUi;
+    final isDark = theme.brightness == Brightness.dark;
+    final glassBg = isDark
+        ? const Color(0xFF141B2D).withValues(alpha: 0.65)
+        : Colors.white.withValues(alpha: 0.72);
+    final dialogRadius = isSmallScreen ? 20.0 : 24.0;
+
+    Widget contentColumn = Container(
+      width: isSmallScreen ? double.infinity : 400,
+      constraints: const BoxConstraints(maxHeight: 600),
+      decoration: BoxDecoration(
+        color: isGlass ? glassBg : theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(dialogRadius),
+        boxShadow: isGlass
+            ? null
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.2),
+                  blurRadius: 20,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
               // Header
               Padding(
                 padding: EdgeInsets.fromLTRB(
@@ -154,6 +161,19 @@ class SimpleDialogContainer extends StatelessWidget {
                 ),
             ],
           ),
+    );
+
+    Widget dialogBody = Center(
+      child: Material(
+        color: Colors.transparent,
+        child: Padding(
+          padding: EdgeInsets.all(isSmallScreen ? 12 : 24),
+          child: isGlass
+              ? GlassSurface(
+                  radius: dialogRadius,
+                  child: contentColumn,
+                )
+              : contentColumn,
         ),
       ),
     );

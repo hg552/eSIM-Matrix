@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/profile_card_bottom_data.dart';
 import '../theme/app_theme.dart';
 import '../utils/size_formatter.dart';
+import '../settings/app_settings.dart';
 
 class ProfileCardBottom extends StatelessWidget {
   final Color themeColor;
@@ -25,10 +26,12 @@ class ProfileCardBottom extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
+    final glass = AppSettings().enableGlassUi;
+
     // Calculate darker shades for text
+    final hsv = HSVColor.fromColor(themeColor);
     // Calculate colors based on theme brightness
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final hsv = HSVColor.fromColor(themeColor);
 
     final Color textColor;
     final Color iconColor;
@@ -47,9 +50,16 @@ class ProfileCardBottom extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: themeColor.withValues(alpha: 0.05),
+        color: glass
+            ? themeColor.withValues(alpha: 0.03)
+            : themeColor.withValues(alpha: 0.05),
         border: Border(
-          top: BorderSide(color: themeColor.withValues(alpha: 0.1), width: 1),
+          top: BorderSide(
+            color: glass
+                ? Colors.white.withValues(alpha: 0.15)
+                : themeColor.withValues(alpha: 0.1),
+            width: 1,
+          ),
         ),
       ),
       child: Padding(

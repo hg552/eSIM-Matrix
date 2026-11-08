@@ -17,12 +17,16 @@ class GlassSurface extends StatelessWidget {
     super.key,
     required this.child,
     this.radius = 28,
+    this.borderRadius,
+    this.accentColor,
     this.padding = EdgeInsets.zero,
     this.blurOverride,
   });
 
   final Widget child;
   final double radius;
+  final BorderRadius? borderRadius;
+  final Color? accentColor;
   final EdgeInsetsGeometry padding;
 
   /// Used by lists that scroll: the caller can pass a cheaper sigma while
@@ -39,8 +43,10 @@ class GlassSurface extends StatelessWidget {
     final profile = GlassProfile.of(settings.glassIntensity);
     final sigma = blurOverride ?? profile.blur;
 
+    final effectiveRadius = borderRadius ?? BorderRadius.circular(radius);
+
     return ClipRRect(
-      borderRadius: BorderRadius.circular(radius),
+      borderRadius: effectiveRadius,
       child: BackdropFilter(
         filter: ImageFilter.compose(
           outer: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
@@ -53,20 +59,24 @@ class GlassSurface extends StatelessWidget {
         ),
         child: DecoratedBox(
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(radius),
+            borderRadius: effectiveRadius,
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
-                Colors.white.withValues(alpha: profile.tint + 0.06),
+                accentColor != null
+                    ? accentColor!.withValues(alpha: 0.16)
+                    : Colors.white.withValues(alpha: profile.tint + 0.06),
                 Colors.white.withValues(alpha: profile.tint * 0.55),
                 Colors.white.withValues(alpha: profile.tint * 0.30),
               ],
               stops: const [0, 0.55, 1],
             ),
             border: Border.all(
-              color: Colors.white.withValues(alpha: profile.rim),
-              width: 1,
+              color: accentColor != null
+                  ? accentColor!.withValues(alpha: 0.55)
+                  : Colors.white.withValues(alpha: profile.rim),
+              width: accentColor != null ? 1.5 : 1.0,
             ),
           ),
           child: Stack(
@@ -75,10 +85,10 @@ class GlassSurface extends StatelessWidget {
                 child: IgnorePointer(
                   child: DecoratedBox(
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(radius),
+                      borderRadius: effectiveRadius,
                       gradient: LinearGradient(
                         begin: Alignment.topLeft,
-                        end: Alignment(0.35, 0.75),
+                        end: const Alignment(0.35, 0.75),
                         colors: [
                           Colors.white.withValues(alpha: profile.sheen),
                           Colors.white.withValues(alpha: 0.015),
@@ -94,6 +104,54 @@ class GlassSurface extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Convenience widget that wraps content in a [GlassSurface] when glass UI is
+/// enabled, with fallback to standard [Card] presentation.
+class GlassCard extends StatelessWidget {
+  const GlassCard({
+    super.key,
+    required this.child,
+    this.radius = 20,
+    this.borderRadius,
+    this.padding = EdgeInsets.zero,
+    this.margin = EdgeInsets.zero,
+    this.accentColor,
+  });
+
+  final Widget child;
+  final double radius;
+  final BorderRadius? borderRadius;
+  final EdgeInsetsGeometry padding;
+  final EdgeInsetsGeometry margin;
+  final Color? accentColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = AppSettings();
+    if (settings.enableGlassUi) {
+      return Padding(
+        padding: margin,
+        child: GlassSurface(
+          radius: radius,
+          borderRadius: borderRadius,
+          padding: padding,
+          accentColor: accentColor,
+          child: child,
+        ),
+      );
+    }
+    return Card(
+      margin: margin,
+      shape: RoundedRectangleBorder(
+        borderRadius: borderRadius ?? BorderRadius.circular(radius),
+      ),
+      child: Padding(
+        padding: padding,
+        child: child,
       ),
     );
   }

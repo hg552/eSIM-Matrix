@@ -5,6 +5,8 @@ import '../../adapter/euicc_adapter.dart';
 import '../../utils/profile_redaction.dart';
 import '../common/reader_api_icon.dart';
 import 'reader_helper.dart';
+import '../glass/glass_surface.dart';
+import '../../settings/app_settings.dart';
 
 Widget buildReaderDropdown({
   required BuildContext context,
@@ -16,21 +18,30 @@ Widget buildReaderDropdown({
   VoidCallback? onOpen,
 }) {
   final theme = Theme.of(context);
+  final glass = AppSettings().enableGlassUi;
 
-  return Container(
+  final Widget dropdownContent = Container(
     width: double.infinity,
     height: 54,
     decoration: BoxDecoration(
-      color: theme.colorScheme.surface,
-      borderRadius: BorderRadius.circular(14),
-      border: Border.all(color: theme.dividerColor),
-      boxShadow: [
-        BoxShadow(
-          color: Colors.black.withValues(alpha: 0.05),
-          blurRadius: 10,
-          offset: const Offset(0, 4),
-        ),
-      ],
+      color: glass
+          ? Colors.white.withValues(alpha: 0.04)
+          : theme.colorScheme.surface,
+      borderRadius: BorderRadius.circular(glass ? 16 : 14),
+      border: Border.all(
+        color: glass
+            ? Colors.white.withValues(alpha: 0.20)
+            : theme.dividerColor,
+      ),
+      boxShadow: glass
+          ? null
+          : [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
     ),
     child: LayoutBuilder(
       builder: (context, c) {
@@ -48,9 +59,17 @@ Widget buildReaderDropdown({
             constraints: BoxConstraints.tightFor(width: c.maxWidth),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
-              side: BorderSide(color: theme.dividerColor),
+              side: BorderSide(
+                color: glass
+                    ? Colors.white.withValues(alpha: 0.20)
+                    : theme.dividerColor,
+              ),
             ),
-            color: theme.colorScheme.surface,
+            color: glass
+                ? (theme.brightness == Brightness.dark
+                    ? const Color(0xE6141923)
+                    : const Color(0xF2F1F5F9))
+                : theme.colorScheme.surface,
             elevation: 8,
             onSelected: onChanged,
             child: GestureDetector(
@@ -224,6 +243,14 @@ Widget buildReaderDropdown({
       },
     ),
   );
+
+  if (glass) {
+    return GlassSurface(
+      radius: 16,
+      child: dropdownContent,
+    );
+  }
+  return dropdownContent;
 }
 
 Widget _getReaderIcon(

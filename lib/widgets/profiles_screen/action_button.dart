@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
 import '../common/loading_spinner.dart';
+import '../../settings/app_settings.dart';
 
 class ActionButton extends StatelessWidget {
   final IconData icon;
@@ -31,23 +32,37 @@ class ActionButton extends StatelessWidget {
     final theme = Theme.of(context);
     final isSmall = MediaQuery.of(context).size.width < 300;
     final buttonSize = isSmall ? 40.0 : 52.0;
+    final glass = AppSettings().enableGlassUi;
+
+    Color bgColor;
+    if (isDestructive) {
+      bgColor = theme.colorScheme.errorContainer.withValues(alpha: 0.2);
+    } else if (isPrimary) {
+      bgColor = glass
+          ? theme.colorScheme.primary.withValues(alpha: 0.85)
+          : theme.colorScheme.primary;
+    } else {
+      bgColor = glass
+          ? Colors.white.withValues(alpha: 0.06)
+          : theme.colorScheme.surface;
+    }
 
     return SizedBox(
       width: buttonSize,
       height: buttonSize,
       child: Container(
         decoration: BoxDecoration(
-          color: isDestructive
-              ? theme.colorScheme.errorContainer.withValues(alpha: 0.2)
-              : (isPrimary
-                    ? theme.colorScheme.primary
-                    : theme.colorScheme.surface),
+          color: bgColor,
           borderRadius: BorderRadius.circular(14),
-          border: (isPrimary || isDestructive)
+          border: (isPrimary && !glass) || isDestructive
               ? null
-              : Border.all(color: theme.dividerColor),
+              : Border.all(
+                  color: glass
+                      ? Colors.white.withValues(alpha: isPrimary ? 0.35 : 0.20)
+                      : theme.dividerColor,
+                ),
           boxShadow: [
-            if (isPrimary)
+            if (isPrimary && !glass)
               BoxShadow(
                 color: theme.colorScheme.primary.withValues(alpha: 0.3),
                 blurRadius: 8,

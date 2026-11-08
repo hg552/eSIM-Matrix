@@ -1,9 +1,11 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../models/asn1/rsp_definitions.g.dart';
+import '../settings/app_settings.dart';
 import '../theme/app_theme.dart';
 import '../utils/hex_utils.dart';
 import '../l10n/app_localizations.dart';
+import 'glass/glass_surface.dart';
 
 class EuiccInfoDialog {
   /// [configured] is the ES10a GetEuiccConfiguredAddresses response. It is
@@ -77,34 +79,43 @@ class EuiccInfoDialog {
 
         final svn = info2.highestSvn ?? info2.lowestSvn;
 
-        return Center(
-          child: ScaleTransition(
-            scale: anim1,
-            child: Container(
-              width: 380,
-              constraints: BoxConstraints(
-                maxHeight: MediaQuery.of(context).size.height * 0.8,
-              ),
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surface,
-                borderRadius: BorderRadius.circular(28),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.3),
-                    blurRadius: 40,
-                    offset: const Offset(0, 15),
-                  ),
-                ],
-                border: Border.all(color: theme.dividerColor),
-              ),
-              child: Material(
-                color: Colors.transparent,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Fixed Header
+        final isGlass = AppSettings().enableGlassUi;
+        final isDark = theme.brightness == Brightness.dark;
+        final glassBg = isDark
+            ? const Color(0xFF141B2D).withValues(alpha: 0.65)
+            : Colors.white.withValues(alpha: 0.72);
+
+        Widget dialogCard = Container(
+          width: 380,
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.8,
+          ),
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: isGlass ? glassBg : theme.colorScheme.surface,
+            borderRadius: BorderRadius.circular(24),
+            boxShadow: isGlass
+                ? null
+                : [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.3),
+                      blurRadius: 40,
+                      offset: const Offset(0, 15),
+                    ),
+                  ],
+            border: Border.all(
+              color: isGlass
+                  ? Colors.white.withValues(alpha: 0.2)
+                  : theme.dividerColor,
+            ),
+          ),
+          child: Material(
+            color: Colors.transparent,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Fixed Header
                     Row(
                       children: [
                         Container(
@@ -297,7 +308,17 @@ class EuiccInfoDialog {
                   ],
                 ),
               ),
-            ),
+            );
+
+        return Center(
+          child: ScaleTransition(
+            scale: anim1,
+            child: isGlass
+                ? GlassSurface(
+                    radius: 24,
+                    child: dialogCard,
+                  )
+                : dialogCard,
           ),
         );
       },

@@ -4,6 +4,8 @@ import '../../theme/app_theme.dart';
 import '../../adapter/euicc_adapter.dart';
 import '../common/reader_api_icon.dart';
 import 'reader_helper.dart';
+import '../glass/glass_surface.dart';
+import '../../settings/app_settings.dart';
 
 class ReaderTabs extends StatelessWidget implements PreferredSizeWidget {
   final TabController tabController;
@@ -22,33 +24,43 @@ class ReaderTabs extends StatelessWidget implements PreferredSizeWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isExtremelySmall = MediaQuery.of(context).size.width < 300;
+    final glass = AppSettings().enableGlassUi;
 
-    return Container(
-      child: Container(
-        padding: const EdgeInsets.all(4),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.onSurface.withValues(alpha: 0.05),
-          borderRadius: BorderRadius.circular(25),
+    final tabContainer = Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: glass
+            ? Colors.white.withValues(alpha: 0.04)
+            : theme.colorScheme.onSurface.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(glass ? 16 : 25),
+        border: glass
+            ? Border.all(color: Colors.white.withValues(alpha: 0.20))
+            : null,
+      ),
+      child: TabBar(
+        controller: tabController,
+        dividerColor: Colors.transparent,
+        indicatorSize: TabBarIndicatorSize.tab,
+        overlayColor: WidgetStateProperty.all(Colors.transparent),
+        splashFactory: NoSplash.splashFactory,
+        indicator: BoxDecoration(
+          borderRadius: BorderRadius.circular(glass ? 12 : 20),
+          color: glass
+              ? Colors.white.withValues(alpha: 0.16)
+              : theme.colorScheme.surface,
+          border: glass
+              ? Border.all(color: Colors.white.withValues(alpha: 0.25))
+              : null,
+          boxShadow: (theme.brightness == Brightness.dark || glass)
+              ? null
+              : [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.08),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
         ),
-        child: TabBar(
-          controller: tabController,
-          dividerColor: Colors.transparent,
-          indicatorSize: TabBarIndicatorSize.tab,
-          overlayColor: WidgetStateProperty.all(Colors.transparent),
-          splashFactory: NoSplash.splashFactory,
-          indicator: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            color: theme.colorScheme.surface,
-            boxShadow: theme.brightness == Brightness.dark
-                ? null
-                : [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.08),
-                      blurRadius: 4,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-          ),
           labelColor: theme.colorScheme.primary,
           unselectedLabelColor: AppTheme.onSurfaceSubtle(context),
           labelStyle: TextStyle(
@@ -107,8 +119,15 @@ class ReaderTabs extends StatelessWidget implements PreferredSizeWidget {
             );
           }).toList(),
         ),
-      ),
-    );
+      );
+
+    if (glass) {
+      return GlassSurface(
+        radius: 16,
+        child: tabContainer,
+      );
+    }
+    return tabContainer;
   }
 
   Widget _buildReaderIcon(

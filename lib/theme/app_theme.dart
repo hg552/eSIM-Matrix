@@ -97,9 +97,18 @@ class AppTheme {
 
       // Global component themes
       cardTheme: CardThemeData(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        color: AppSettings().enableGlassUi
+            ? (isDark
+                ? Colors.white.withValues(alpha: 0.07)
+                : Colors.white.withValues(alpha: 0.60))
+            : (isDark ? const Color(0xFF1E293B) : Colors.white),
         elevation: 0,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: AppSettings().enableGlassUi
+              ? BorderSide(color: Colors.white.withValues(alpha: 0.18))
+              : BorderSide.none,
+        ),
       ),
 
       dividerTheme: DividerThemeData(
@@ -219,10 +228,19 @@ class AppTheme {
       ),
 
       dialogTheme: DialogThemeData(
-        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+        backgroundColor: AppSettings().enableGlassUi
+            ? (isDark
+                ? const Color(0xFF0F172A).withValues(alpha: 0.75)
+                : Colors.white.withValues(alpha: 0.85))
+            : (isDark ? const Color(0xFF1E293B) : Colors.white),
         surfaceTintColor: Colors.transparent,
-        elevation: 8,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        elevation: AppSettings().enableGlassUi ? 0 : 8,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+          side: AppSettings().enableGlassUi
+              ? BorderSide(color: Colors.white.withValues(alpha: 0.22))
+              : BorderSide.none,
+        ),
         titleTextStyle: AppTheme.defaultFont(
           fontSize: 20,
           fontWeight: FontWeight.w600,
@@ -351,6 +369,11 @@ class AppTheme {
       : Colors.black.withValues(alpha: 0.015);
 
   static Color cardBackground(BuildContext context) {
+    if (AppSettings().enableGlassUi) {
+      return Theme.of(context).brightness == Brightness.dark
+          ? Colors.white.withValues(alpha: 0.07)
+          : Colors.white.withValues(alpha: 0.55);
+    }
     if (AppSettings().themeType == AppThemeType.stock) {
       return Theme.of(context).colorScheme.surfaceContainerLow;
     }
@@ -364,6 +387,24 @@ class AppTheme {
     bool enabled = false,
   }) {
     final theme = Theme.of(context);
+    if (AppSettings().enableGlassUi) {
+      return BoxDecoration(
+        color: enabled
+            ? theme.colorScheme.primary.withValues(alpha: 0.16)
+            : Colors.white.withValues(
+                alpha: theme.brightness == Brightness.dark ? 0.06 : 0.45,
+              ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: enabled
+              ? theme.colorScheme.primary.withValues(alpha: 0.65)
+              : Colors.white.withValues(
+                  alpha: theme.brightness == Brightness.dark ? 0.22 : 0.45,
+                ),
+          width: enabled ? 1.8 : 1.0,
+        ),
+      );
+    }
     final isStock = AppSettings().themeType == AppThemeType.stock;
 
     if (isStock) {
@@ -404,6 +445,15 @@ class AppTheme {
 
   static BoxDecoration bannerDecoration(BuildContext context) {
     final theme = Theme.of(context);
+    if (AppSettings().enableGlassUi) {
+      return BoxDecoration(
+        color: theme.colorScheme.primary.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.22),
+        ),
+      );
+    }
     if (AppSettings().themeType == AppThemeType.stock) {
       // MD3: Filled container, no border
       return BoxDecoration(
@@ -422,7 +472,6 @@ class AppTheme {
       ),
     );
   }
-
   static BoxDecoration badgeDecoration(BuildContext context, Color baseColor) {
     if (AppSettings().themeType == AppThemeType.stock) {
       // MD3: Tonal container, no border (like FilterChip/AssistChip)
