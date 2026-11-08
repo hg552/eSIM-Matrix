@@ -2,6 +2,18 @@
   "android": {
     "multi": [
       {
+        "version": "1.4.3",
+        "build": 143,
+        "url": "https://github.com/hg552/eSIM-Matrix/releases/tag/v1.4.3",
+        "download_url": "https://github.com/hg552/eSIM-Matrix/releases/download/v1.4.3/eSIM-Matrix-v1.4.3.apk",
+        "changelog": "🆕 eSIM-Matrix 1.4.3（build 143）\n\n• APDU 大写规范化：新增零拷贝 HexUtils.bytesToHexUpper，Telephony/OMAPI/Bridge 各读卡器通道下发 APDU 全面规范为大写十六进制，解决部分 Unisoc / 高通旧 Modem 拒收小写 Hex 报错问题。\n• 基带搜网加速保底（Kick Fallback）：切卡等待基带漫游驻网超过 25 秒仍未入网时，状态机自动触发基带射频快速刷新（无感飞行模式瞬切）；Telegram Bot 新增 /kick 指令及切卡提示内联「⚡ 刷新基带搜网」快捷按钮；开放 POST /api/v1/network/kick 接口。\n• CI/CD 工作流修复：修复 GitHub Actions 默认主分支从 master 改为 main，恢复更新源检验与自动化构建可用性。",
+        "signatures": [
+          "C47350C7BA682B34A3E584A0D58463EA42B1AD73",
+          "D1C0F48B370E74D4EA4770ED4C3CD70A3198D31F",
+          "65D0571854AFEC519A90F92D7C5D8CF8148DA373"
+        ]
+      },
+      {
         "version": "1.4.2",
         "build": 142,
         "url": "https://github.com/hg552/eSIM-Matrix/releases/tag/v1.4.2",
