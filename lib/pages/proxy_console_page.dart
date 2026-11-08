@@ -58,11 +58,29 @@ class _ProxyConsolePageState extends State<ProxyConsolePage> {
       secret: settings.proxySecret,
     );
 
+    // The SMS relay page writes the same two switches. Without this listener a
+    // toggle there leaves this page showing a stale value until it is reopened.
+    settings.addListener(_syncFromSettings);
+
     unawaited(_initialLoad());
+  }
+
+  void _syncFromSettings() {
+    if (!mounted) return;
+    final settings = AppSettings();
+    if (settings.proxyLinkageEnabled == _linkageEnabled &&
+        settings.proxyAutoRestore == _autoRestore) {
+      return;
+    }
+    setState(() {
+      _linkageEnabled = settings.proxyLinkageEnabled;
+      _autoRestore = settings.proxyAutoRestore;
+    });
   }
 
   @override
   void dispose() {
+    AppSettings().removeListener(_syncFromSettings);
     _urlController.dispose();
     _secretController.dispose();
     _groupController.dispose();
@@ -198,7 +216,9 @@ class _ProxyConsolePageState extends State<ProxyConsolePage> {
         }
       }
 
-      final nodes = await _service.listNodes();
+      final nodes = activeGroup.isEmpty
+          ? const <ProxyNodeInfo>[]
+          : await _service.listGroupNodes(activeGroup);
       String? now;
       if (activeGroup.isNotEmpty) {
         now = await _service.getCurrentNode(activeGroup);
@@ -247,11 +267,12 @@ class _ProxyConsolePageState extends State<ProxyConsolePage> {
 
     try {
       final now = await _service.getCurrentNode(newGroup);
-      final nodes = await _service.listNodes();
+      final nodes = await _service.listGroupNodes(newGroup);
       if (!mounted) return;
       setState(() {
         _currentNode = now;
         _nodes = nodes;
+        _localDelays.clear();
       });
     } catch (_) {}
   }
@@ -262,6 +283,15 @@ class _ProxyConsolePageState extends State<ProxyConsolePage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('❌ 切换失败：未选定策略组')),
+      );
+      return;
+    }
+    // The list is built from the group's own `all`, so this only fires when a
+    // reload raced a switch. Saying so beats a controller-side rejection.
+    if (!_nodes.any((n) => n.name == nodeName)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('❌ 节点「$nodeName」不在策略组【$group】中')),
       );
       return;
     }
@@ -277,6 +307,9 @@ class _ProxyConsolePageState extends State<ProxyConsolePage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('✅ 已切换到 $nodeName')),
         );
+        // A node that was idle reports 0 ms until it is measured; the switch is
+        // the moment it becomes interesting.
+        unawaited(_measureNodeDelay(nodeName));
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('❌ 切换失败：${_formatError(result.error)}')),
@@ -327,14 +360,31 @@ class _ProxyConsolePageState extends State<ProxyConsolePage> {
     }
   }
 
+  /// Measures every node with a small concurrency cap.
+  ///
+  /// Serial awaiting made the worst case `nodes × timeout` (seven nodes at five
+  /// seconds each is 35 s of a frozen-looking button). Four at a time keeps the
+  /// controller from being hammered while finishing in roughly a quarter of that.
   Future<void> _measureAllNodes() async {
     if (_measuringAll || _nodes.isEmpty) return;
     setState(() => _measuringAll = true);
     try {
-      for (final node in _nodes) {
-        if (!mounted) break;
-        await _measureNodeDelay(node.name);
+      const concurrency = 4;
+      final queue = _nodes.map((n) => n.name).toList(growable: false);
+      var index = 0;
+      Future<void> worker() async {
+        while (mounted && index < queue.length) {
+          final name = queue[index++];
+          await _measureNodeDelay(name);
+        }
       }
+
+      await Future.wait(
+        List<Future<void>>.generate(
+          concurrency.clamp(1, queue.length),
+          (_) => worker(),
+        ),
+      );
     } finally {
       if (mounted) {
         setState(() => _measuringAll = false);
@@ -635,11 +685,14 @@ class _ProxyConsolePageState extends State<ProxyConsolePage> {
               children: [
                 Icon(Icons.list_alt_outlined, color: theme.colorScheme.primary, size: 20),
                 const SizedBox(width: 8),
-                Text(
-                  '节点列表 (${_nodes.length})',
-                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                Flexible(
+                  child: Text(
+                    '策略组【${_selectedGroup ?? '—'}】可切换节点 (${_nodes.length})',
+                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-                const Spacer(),
                 TextButton.icon(
                   onPressed: _measuringAll ? null : _measureAllNodes,
                   icon: _measuringAll

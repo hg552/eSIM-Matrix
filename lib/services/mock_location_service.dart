@@ -91,6 +91,7 @@ class MockLocationService {
     String mode = 'system',
     double accuracy = 3.0,
     double altitude = 15.0,
+    String label = '',
   }) async {
     try {
       final res = await _channel.invokeMethod<bool>('startMockLocation', {
@@ -99,6 +100,7 @@ class MockLocationService {
         'longitude': longitude,
         'accuracy': accuracy,
         'altitude': altitude,
+        'label': label,
       });
       return res ?? false;
     } catch (_) {

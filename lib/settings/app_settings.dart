@@ -641,6 +641,23 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
+  // The console is opened to adjust one position and closed again; without this
+  // it reopened on the first built-in template every time and the user had to
+  // re-find the spot they were just at.
+  String? _lastMockLocationRule;
+  String? get lastMockLocationRule => _lastMockLocationRule;
+
+  Future<void> setLastMockLocationRule(String? value) async {
+    final clean = value?.trim();
+    _lastMockLocationRule = clean == null || clean.isEmpty ? null : clean;
+    if (_lastMockLocationRule == null) {
+      await _prefs?.remove('lastMockLocationRule');
+    } else {
+      await _prefs?.setString('lastMockLocationRule', _lastMockLocationRule!);
+    }
+    notifyListeners();
+  }
+
   String? mockLocationForIccid(String iccid) {
     final value = _mockLocationCustomRules[iccid]?.trim();
     return value == null || value.isEmpty ? null : value;
@@ -988,6 +1005,7 @@ class AppSettings extends ChangeNotifier {
     _mockLocationLinkageEnabled = _prefs?.getBool('mockLocationLinkageEnabled') ?? false;
     _mockLocationMode = _prefs?.getString('mockLocationMode') ?? 'system';
     _mockLocationAutoRestore = _prefs?.getBool('mockLocationAutoRestore') ?? true;
+    _lastMockLocationRule = _prefs?.getString('lastMockLocationRule');
     final locRulesJson = _prefs?.getString('mockLocationCustomRules');
     if (locRulesJson != null) {
       try {

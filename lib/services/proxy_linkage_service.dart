@@ -293,28 +293,28 @@ class ProxyLinkageService {
     return group?.now;
   }
 
-  /// Lists every node the controller knows, with its last measured delay.
+  /// Lists the nodes that [groupName] can actually switch to.
   ///
-  /// Groups themselves are skipped: a selector in the list is a switchable
-  /// target, but its `delay` is the group's own, which reads as a healthy node
-  /// and misleads the picker.
-  Future<List<ProxyNodeInfo>> listNodes() async {
+  /// The controller's `/proxies` map holds every node in the profile, but a
+  /// selector only accepts the names in its own `all` list. Showing the whole
+  /// map, as this used to, put nodes on screen that the controller rejects and
+  /// hid nothing useful: the group is the authority on what is switchable.
+  ///
+  /// A name in `all` that `/proxies` does not describe (a nested group the
+  /// controller omits, say) is still listed, with an unknown type and no delay,
+  /// because it can be selected.
+  Future<List<ProxyNodeInfo>> listGroupNodes(String groupName) async {
+    if (groupName.isEmpty) return const <ProxyNodeInfo>[];
+    final group = await getGroup(groupName);
+    if (group == null || group.all.isEmpty) return const <ProxyNodeInfo>[];
     final proxies = await getProxiesRaw();
-    if (proxies == null) return const <ProxyNodeInfo>[];
-    final nodes = <ProxyNodeInfo>[];
-    for (final entry in proxies.entries) {
-      final val = entry.value;
-      if (val is! Map<String, dynamic>) continue;
-      final type = val['type']?.toString().toLowerCase() ?? '';
-      if (type == 'selector' || type == 'urltest' ||
-          type == 'fallback' || type == 'loadbalance' ||
-          type == 'relay' || type == 'direct' || type == 'reject') {
-        continue;
+    return group.all.map((name) {
+      final raw = proxies?[name];
+      if (raw is Map<String, dynamic>) {
+        return ProxyNodeInfo.fromJson(name, raw);
       }
-      nodes.add(ProxyNodeInfo.fromJson(entry.key, val));
-    }
-    nodes.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-    return nodes;
+      return ProxyNodeInfo(name: name, type: 'Unknown');
+    }).toList(growable: false);
   }
 
   /// Asks the controller to re-measure one node's delay.

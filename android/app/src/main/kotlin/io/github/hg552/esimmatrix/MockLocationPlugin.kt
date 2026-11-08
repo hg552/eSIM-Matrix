@@ -32,6 +32,23 @@ class MockLocationPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
         /** `cmd location` forks a process; 5 s keeps the system provider fresh at a sane cost. */
         private const val SHIZUKU_PUSH_INTERVAL_MS = 5_000L
+
+        /**
+         * The live plugin, so the foreground service's "停止定位" action can tear
+         * the test providers down. It runs in the same process as the engine that
+         * owns this plugin, and a null value means the engine is already gone,
+         * in which case [onDetachedFromEngine] has stopped the injection anyway.
+         */
+        @Volatile private var active: MockLocationPlugin? = null
+
+        fun requestStopFromNotification() {
+            val plugin = active
+            if (plugin == null) {
+                Log.w(TAG, "Stop requested with no plugin attached; nothing to tear down")
+                return
+            }
+            plugin.handler.post { plugin.stopMockLocationInternal() }
+        }
     }
 
     private var appContext: Context? = null
@@ -45,6 +62,7 @@ class MockLocationPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private var currentLongitude: Double = 0.0
     private var currentAltitude: Double = 15.0
     private var currentAccuracy: Float = 3.0f
+    private var currentLabel: String = ""
     private val isMocking = AtomicBoolean(false)
     private val activeProviders = mutableSetOf<String>()
 
@@ -61,6 +79,7 @@ class MockLocationPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         appContext = binding.applicationContext
+        active = this
         channel = MethodChannel(binding.binaryMessenger, METHOD_CHANNEL).also {
             it.setMethodCallHandler(this)
         }
@@ -68,6 +87,7 @@ class MockLocationPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         stopMockLocationInternal()
+        if (active === this) active = null
         channel?.setMethodCallHandler(null)
         channel = null
         appContext = null
@@ -90,6 +110,7 @@ class MockLocationPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     val lng = call.argument<Double>("longitude") ?: 0.0
                     val acc = (call.argument<Double>("accuracy") ?: 3.0).toFloat()
                     val alt = call.argument<Double>("altitude") ?: 15.0
+                    currentLabel = call.argument<String>("label") ?: ""
                     result.success(startMockLocationInternal(mode, lat, lng, acc, alt))
                 }
                 "stopMockLocation" -> {
@@ -230,6 +251,14 @@ class MockLocationPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         isMocking.set(true)
         handler.removeCallbacks(periodicPusher)
         handler.post(periodicPusher)
+
+        // Without this the process is reclaimable and the injection dies with it
+        // while the console would still report "正在注入".
+        val label = currentLabel
+        runCatching {
+            MockLocationForegroundService.start(context, label, latitude, longitude)
+        }.onFailure { Log.w(TAG, "Could not start the mock location service", it) }
+
         Log.i(TAG, "Mock location started: mode=$mode, lat=$latitude, lng=$longitude, acc=$accuracy")
         return true
     }
@@ -329,6 +358,10 @@ class MockLocationPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
         }
         activeProviders.clear()
+
+        appContext?.let { ctx ->
+            runCatching { MockLocationForegroundService.stop(ctx) }
+        }
 
         if (activeMode == "shizuku") {
             shizukuExecutor.execute {

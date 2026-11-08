@@ -56,6 +56,20 @@ class _LocationConsolePageState extends State<LocationConsolePage> {
       _selectedLng = initial.longitude;
       _selectedLabel = initial.name;
     }
+    // Reopen where the user left off, not on the first built-in template.
+    final remembered = _settings.lastMockLocationRule;
+    if (remembered != null) {
+      final parts = remembered.split(',');
+      final lat = parts.isNotEmpty ? double.tryParse(parts[0].trim()) : null;
+      final lng = parts.length > 1 ? double.tryParse(parts[1].trim()) : null;
+      if (lat != null && lng != null) {
+        _selectedLat = lat;
+        _selectedLng = lng;
+        _selectedLabel = parts.length > 2
+            ? parts.sublist(2).join(',').trim()
+            : '自定义地点';
+      }
+    }
     _latController.text = _selectedLat.toString();
     _lngController.text = _selectedLng.toString();
     _nameController.text = _selectedLabel;
@@ -112,6 +126,11 @@ class _LocationConsolePageState extends State<LocationConsolePage> {
               success ? '✅ 注入成功' : '❌ 注入失败：请检查上面的权限状态',
             ),
           ),
+        );
+      }
+      if (success) {
+        await _settings.setLastMockLocationRule(
+          '$_selectedLat, $_selectedLng, $_selectedLabel',
         );
       }
     } catch (_) {
@@ -683,10 +702,9 @@ class _LocationConsolePageState extends State<LocationConsolePage> {
           ),
         ),
         value: _settings.mockLocationLinkageEnabled,
-        onChanged: (val) {
-          setState(() {
-            _settings.setMockLocationLinkageEnabled(val);
-          });
+        onChanged: (val) async {
+          await _settings.setMockLocationLinkageEnabled(val);
+          if (mounted) setState(() {});
         },
       ),
     );

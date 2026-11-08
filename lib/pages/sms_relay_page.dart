@@ -63,10 +63,6 @@ class _SmsRelayPageState extends State<SmsRelayPage>
   // only place that edits them, so this page does not carry copies.
   bool _guardEnabled = true;
   bool _guardRestoreOnRevert = true;
-  bool _proxyEnabled = false;
-  bool _proxyAutoRestore = true;
-  bool _mockLocationEnabled = false;
-  bool _mockLocationAutoRestore = true;
   bool _linkageBusy = false;
   String? _linkageStatus;
   bool _linkageStatusIsError = false;
@@ -88,10 +84,6 @@ class _SmsRelayPageState extends State<SmsRelayPage>
     final settings = AppSettings();
     _guardEnabled = settings.dataGuardEnabled;
     _guardRestoreOnRevert = settings.dataGuardRestoreOnRevert;
-    _proxyEnabled = settings.proxyLinkageEnabled;
-    _proxyAutoRestore = settings.proxyAutoRestore;
-    _mockLocationEnabled = settings.mockLocationLinkageEnabled;
-    _mockLocationAutoRestore = settings.mockLocationAutoRestore;
   }
 
   /// The gateway reads these switches on every switch, so they are written the
@@ -106,10 +98,6 @@ class _SmsRelayPageState extends State<SmsRelayPage>
     try {
       await settings.setDataGuardEnabled(_guardEnabled);
       await settings.setDataGuardRestoreOnRevert(_guardRestoreOnRevert);
-      await settings.setProxyLinkageEnabled(_proxyEnabled);
-      await settings.setProxyAutoRestore(_proxyAutoRestore);
-      await settings.setMockLocationLinkageEnabled(_mockLocationEnabled);
-      await settings.setMockLocationAutoRestore(_mockLocationAutoRestore);
       if (!mounted) return;
       setState(() {
         _linkageStatus = '已保存';
@@ -992,7 +980,7 @@ class _SmsRelayPageState extends State<SmsRelayPage>
       ],
       children: [
         Text(
-          '控制器地址、策略组与节点切换都在代理控制台里调。',
+          '流量卫士只在这里；代理与定位的开关、节点和坐标都在各自的控制台里。',
           style: TextStyle(fontSize: 12, color: subtle),
         ),
         const Divider(height: 24),
@@ -1021,65 +1009,21 @@ class _SmsRelayPageState extends State<SmsRelayPage>
                 : (value) => _toggleLinkage(() => _guardRestoreOnRevert = value),
           ),
           const Divider(height: 24),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('代理联动：按卡国别自动切节点'),
-            subtitle: Text(
-              '控制器不可达时只告警，不影响切卡',
-              style: TextStyle(fontSize: 12, color: subtle),
-            ),
-            value: _proxyEnabled,
-            onChanged: _linkageBusy
-                ? null
-                : (value) => _toggleLinkage(() => _proxyEnabled = value),
-          ),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('回滚时还原切卡前的节点'),
-            value: _proxyAutoRestore,
-            onChanged: _linkageBusy
-                ? null
-                : (value) => _toggleLinkage(() => _proxyAutoRestore = value),
-          ),
-          const SizedBox(height: 4),
           Align(
             alignment: Alignment.centerLeft,
             child: OutlinedButton.icon(
               onPressed: _openProxyConsole,
               icon: const Icon(Icons.wifi_tethering, size: 16),
-              label: const Text('代理控制台（节点 / 策略组 / 测速）'),
+              label: const Text('代理控制台（节点 / 策略组 / 联动开关）'),
             ),
           ),
-          const Divider(height: 24),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('虚拟定位联动：切卡时注入对应国家坐标'),
-            subtitle: Text(
-              '如香港 ClubSim ➔ 尖沙咀，美国 Saily ➔ 洛杉矶',
-              style: TextStyle(fontSize: 12, color: subtle),
-            ),
-            value: _mockLocationEnabled,
-            onChanged: _linkageBusy
-                ? null
-                : (value) => _toggleLinkage(() => _mockLocationEnabled = value),
-          ),
-          if (_mockLocationEnabled)
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('回滚时停止模拟定位'),
-              value: _mockLocationAutoRestore,
-              onChanged: _linkageBusy
-                  ? null
-                  : (value) =>
-                      _toggleLinkage(() => _mockLocationAutoRestore = value),
-            ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 8),
           Align(
             alignment: Alignment.centerLeft,
             child: OutlinedButton.icon(
               onPressed: _openLocationConsole,
               icon: const Icon(Icons.my_location, size: 16),
-              label: const Text('虚拟定位控制台（坐标 / 通道 / 权限）'),
+              label: const Text('虚拟定位控制台（坐标 / 通道 / 联动开关）'),
             ),
           ),
       ],

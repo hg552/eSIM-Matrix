@@ -232,6 +232,7 @@ void main() {
         'longitude': -118.2437,
         'accuracy': 3.0,
         'altitude': 15.0,
+        'label': '',
       }));
     });
 
@@ -251,6 +252,7 @@ void main() {
         mode: 'shizuku',
         accuracy: 1.5,
         altitude: 42.0,
+        label: '爱沙尼亚 · 塔林老城中心',
       );
 
       expect(result, isTrue);
@@ -262,6 +264,7 @@ void main() {
         'longitude': 24.7536,
         'accuracy': 1.5,
         'altitude': 42.0,
+        'label': '爱沙尼亚 · 塔林老城中心',
       }));
     });
 

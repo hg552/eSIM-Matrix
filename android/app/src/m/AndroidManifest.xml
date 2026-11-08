@@ -38,6 +38,19 @@
                 android:value="Long-running user-configured private eSIM control gateway" />
         </service>
 
+        <!-- Holds the process up while a virtual location is injected; without it
+             the system may reclaim the app and the spoof silently stops. -->
+        <service
+            android:name=".MockLocationForegroundService"
+            android:enabled="true"
+            android:exported="false"
+            android:stopWithTask="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-requested virtual location injection" />
+        </service>
+
         <receiver
             android:name=".GatewayBootReceiver"
             android:enabled="true"

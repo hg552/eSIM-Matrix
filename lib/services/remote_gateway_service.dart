@@ -1019,6 +1019,7 @@ class RemoteGatewayService {
         latitude: coord.latitude,
         longitude: coord.longitude,
         mode: settings.mockLocationMode,
+        label: coord.cityName,
       );
       if (success) {
         _lastMockLocation = coord;
@@ -1053,6 +1054,7 @@ class RemoteGatewayService {
         latitude: latitude,
         longitude: longitude,
         mode: effectiveMode,
+        label: label,
       );
       if (success) {
         _lastMockLocation = LocationCoordinate(
