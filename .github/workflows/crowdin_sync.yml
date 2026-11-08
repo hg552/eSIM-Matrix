@@ -1,7 +1,7 @@
 name: Crowdin Sync
 on:
   push:
-    branches: [master]
+    branches: [main]
     paths:
       - l10n/app_en.arb
       - scripts/crowdin_sync.py
@@ -29,7 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: master
+          ref: main
           fetch-depth: 0
       - name: Select source upload
         id: source
@@ -67,7 +67,7 @@ jobs:
           if [[ "$UPLOAD_SOURCE" == true ]]; then args+=(--upload-source); fi
           python3 scripts/crowdin_sync.py "${args[@]}"
           python3 scripts/check_l10n.py
-      - name: Commit translations to public master
+      - name: Commit translations to public main
         run: |
           set -euo pipefail
           files=(l10n/app_de.arb l10n/app_es.arb l10n/app_fr.arb l10n/app_it.arb
@@ -82,4 +82,4 @@ jobs:
           git add -- "${files[@]}"
           git commit -m 'chore(l10n): sync Crowdin translations'
           # A concurrent source change must be re-synced rather than overwritten.
-          git push origin HEAD:master
+          git push origin HEAD:main

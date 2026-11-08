@@ -39,7 +39,7 @@ jobs:
       - name: Check out publishing tools
         uses: actions/checkout@v4
         with:
-          ref: master
+          ref: main
 
       - name: Select the published release
         id: release
