@@ -45,8 +45,15 @@ final double _sentryTracesSampleRate =
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  final packageInfo = await PackageInfo.fromPlatform();
-  final version = packageInfo.version;
+  // Package metadata is only used to gate the candidate-only Sentry startup.
+  // A platform without the package_info handler must still reach the UI
+  // instead of dying here, before runApp.
+  var version = '';
+  try {
+    version = (await PackageInfo.fromPlatform()).version;
+  } catch (error) {
+    Logger.root.info('package info unavailable: $error');
+  }
   final versionParts = version.split('.');
   final isCandidate = versionParts.length >= 3 && versionParts[2] != '0';
 
