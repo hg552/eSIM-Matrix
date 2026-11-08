@@ -41,6 +41,8 @@ import '../services/remote_gateway_service.dart';
 import 'notifications_screen.dart';
 
 import '../pages/settings_page.dart';
+import 'location_console_page.dart';
+import 'proxy_console_page.dart';
 import '../pages/settings/remote_settings_page.dart';
 import 'profile_tag_manager_page.dart';
 import '../widgets/profiles_screen/ble_scan_dialog.dart' as ble;
@@ -2200,6 +2202,25 @@ class _ProfilesScreenState extends State<ProfilesScreen>
           'key': 'remote',
           'globalKey': _remoteReaderButtonKey,
         },
+      if (PlatformX.isAndroid)
+        {
+          'icon': Icons.my_location,
+          'tooltip': '虚拟定位控制台',
+          'onPressed': () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const LocationConsolePage()),
+          ),
+          'key': 'location_console',
+        },
+      {
+        'icon': Icons.wifi_tethering,
+        'tooltip': '代理控制台',
+        'onPressed': () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const ProxyConsolePage()),
+        ),
+        'key': 'proxy_console',
+      },
       {
         'icon': Icons.settings_outlined,
         'tooltip': AppLocalizations.of(context)!.settingsTitle,

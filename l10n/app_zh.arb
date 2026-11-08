@@ -33,6 +33,8 @@
   "networkStatusWaiting": "正在等待 Android 电话状态…",
   "networkStatusLimits": "dBm 是 Android 报告的有效小区信号读数；语音已注册不代表短信一定能送达。",
   "smsRelayTab": "短信转发",
+  "locationConsoleTab": "虚拟定位",
+  "proxyConsoleTab": "代理",
   "smsRelayTitle": "短信转发",
   "smsRelaySubtitle": "将收到的短信转发到你配置的 HTTPS Webhook 或 Telegram 目的地。",
   "smsRelayPrivacy": "启用后，发送者、完整短信正文（可能含验证码）及可用的卡槽、订阅 ID、运营商信息会发送到所选 HTTPS Webhook 或 Telegram 会话。群组和频道成员可能看到这些消息。本应用不保存短信正文，也不写入日志；只配置你本人控制的目的地。",

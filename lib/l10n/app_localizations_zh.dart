@@ -97,6 +97,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get smsRelayTab => '短信转发';
 
   @override
+  String get locationConsoleTab => '虚拟定位';
+
+  @override
+  String get proxyConsoleTab => '代理';
+
+  @override
   String get smsRelayTitle => '短信转发';
 
   @override

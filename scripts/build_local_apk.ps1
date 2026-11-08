@@ -60,8 +60,17 @@ exit /b %ERRORLEVEL%
 "@ | Set-Content -Path $wrapper -Encoding ASCII
 
 Write-Host "==> flutter build apk (multi, arm64, v$version)" -ForegroundColor Cyan
+# Gradle prints ordinary warnings (a deprecated Gradle version, ICU plural
+# warnings from the ARB files) on stderr. With ErrorActionPreference=Stop,
+# PowerShell turns the first such line into a terminating NativeCommandError and
+# kills the script *after* a successful build, so the exit code is the only
+# signal that counts here.
+$previousPreference = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 & cmd /c $wrapper
-if ($LASTEXITCODE -ne 0) { throw "flutter build failed ($LASTEXITCODE)" }
+$buildExit = $LASTEXITCODE
+$ErrorActionPreference = $previousPreference
+if ($buildExit -ne 0) { throw "flutter build failed ($buildExit)" }
 
 $unsigned = 'build\app\outputs\flutter-apk\app-m-release.apk'
 if (-not (Test-Path $unsigned)) { throw "missing $unsigned" }

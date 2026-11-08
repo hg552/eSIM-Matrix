@@ -275,6 +275,18 @@ abstract class AppLocalizations {
   /// **'SMS relay'**
   String get smsRelayTab;
 
+  /// No description provided for @locationConsoleTab.
+  ///
+  /// In en, this message translates to:
+  /// **'Location'**
+  String get locationConsoleTab;
+
+  /// No description provided for @proxyConsoleTab.
+  ///
+  /// In en, this message translates to:
+  /// **'Proxy'**
+  String get proxyConsoleTab;
+
   /// No description provided for @smsRelayTitle.
   ///
   /// In en, this message translates to:

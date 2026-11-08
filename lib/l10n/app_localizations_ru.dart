@@ -101,6 +101,12 @@ class AppLocalizationsRu extends AppLocalizations {
   String get smsRelayTab => 'SMS relay';
 
   @override
+  String get locationConsoleTab => 'Location';
+
+  @override
+  String get proxyConsoleTab => 'Proxy';
+
+  @override
   String get smsRelayTitle => 'SMS relay';
 
   @override

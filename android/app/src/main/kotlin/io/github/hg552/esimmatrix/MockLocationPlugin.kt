@@ -29,6 +29,9 @@ class MockLocationPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         private const val TAG = "NexusMockLocation"
         private const val METHOD_CHANNEL = "ee.nekoko.mock_location"
         private val PROVIDERS = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, "fused")
+
+        /** `cmd location` forks a process; 5 s keeps the system provider fresh at a sane cost. */
+        private const val SHIZUKU_PUSH_INTERVAL_MS = 5_000L
     }
 
     private var appContext: Context? = null
@@ -52,6 +55,9 @@ class MockLocationPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             handler.postDelayed(this, 1000)
         }
     }
+
+    /** Wall clock of the last Shizuku push, so the 1 s tick does not fork a process every second. */
+    private var lastShizukuPushAt: Long = 0L
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         appContext = binding.applicationContext
@@ -211,6 +217,16 @@ class MockLocationPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         // Setup Android LocationManager test providers
         setupTestProviders(lm)
 
+        // No provider means the mock app permission is missing (or the ROM blocks
+        // test providers). Reporting true here is what made the UI claim success
+        // while every app still saw the real position.
+        if (activeProviders.isEmpty()) {
+            isMocking.set(false)
+            handler.removeCallbacks(periodicPusher)
+            Log.w(TAG, "Mock location refused: no test provider could be registered")
+            return false
+        }
+
         isMocking.set(true)
         handler.removeCallbacks(periodicPusher)
         handler.post(periodicPusher)
@@ -283,11 +299,15 @@ class MockLocationPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
 
         if (activeMode == "shizuku") {
-            runShizukuCmdAsync(
-                "cmd", "location", "providers", "set-test-provider-location",
-                "gps", "--location", "$currentLatitude,$currentLongitude",
-                "--accuracy", "$currentAccuracy"
-            )
+            val now = System.currentTimeMillis()
+            if (now - lastShizukuPushAt >= SHIZUKU_PUSH_INTERVAL_MS) {
+                lastShizukuPushAt = now
+                runShizukuCmdAsync(
+                    "cmd", "location", "providers", "set-test-provider-location",
+                    "gps", "--location", "$currentLatitude,$currentLongitude",
+                    "--accuracy", "$currentAccuracy"
+                )
+            }
         }
     }
 
@@ -352,7 +372,8 @@ class MockLocationPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             "longitude" to currentLongitude,
             "accuracy" to currentAccuracy,
             "isMockApp" to isMockApp(),
-            "isShizukuAvailable" to isShizukuAvailable()
+            "isShizukuAvailable" to isShizukuAvailable(),
+            "providers" to activeProviders.toList()
         )
     }
 }

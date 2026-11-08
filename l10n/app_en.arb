@@ -33,6 +33,8 @@
   "networkStatusWaiting": "Waiting for Android telephony status…",
   "networkStatusLimits": "dBm is the strongest valid cell reading Android reports. Voice registration does not guarantee SMS delivery.",
   "smsRelayTab": "SMS relay",
+  "locationConsoleTab": "Location",
+  "proxyConsoleTab": "Proxy",
   "smsRelayTitle": "SMS relay",
   "smsRelaySubtitle": "Forward incoming SMS to your HTTPS webhook or Telegram destination.",
   "smsRelayPrivacy": "When enabled, every incoming SMS sender, full text (possibly verification codes), and available SIM slot/subscription/carrier metadata is sent to the selected HTTPS webhook or Telegram chat. Group and channel members may see these messages. The app does not retain SMS content or log it. Use only destinations you control.",

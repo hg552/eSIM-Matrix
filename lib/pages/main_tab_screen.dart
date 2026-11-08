@@ -5,6 +5,8 @@ import 'package:permission_handler/permission_handler.dart';
 import 'profiles_screen.dart';
 import 'network_status_page.dart';
 import 'sms_relay_page.dart';
+import 'location_console_page.dart';
+import 'proxy_console_page.dart';
 import 'buy_page.dart';
 import '../l10n/app_localizations.dart';
 import '../theme/app_theme.dart';
@@ -118,6 +120,21 @@ class _MainTabScreenState extends State<MainTabScreen>
           activeIcon: Icons.network_cell,
           pageBuilder: (_) => const NetworkStatusPage(),
         ),
+      if (PlatformX.isAndroid)
+        _MainTabEntry(
+          id: 'location-console',
+          label: l10n.locationConsoleTab,
+          icon: Icons.my_location_outlined,
+          activeIcon: Icons.my_location,
+          pageBuilder: (_) => const LocationConsolePage(),
+        ),
+      _MainTabEntry(
+        id: 'proxy-console',
+        label: l10n.proxyConsoleTab,
+        icon: Icons.wifi_tethering_outlined,
+        activeIcon: Icons.wifi_tethering,
+        pageBuilder: (_) => const ProxyConsolePage(),
+      ),
       if (_smsRelayAvailable)
         _MainTabEntry(
           id: 'sms-relay',

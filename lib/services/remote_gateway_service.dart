@@ -1034,6 +1034,45 @@ class RemoteGatewayService {
     }
   }
 
+  /// Injects a coordinate chosen by hand, independent of any card binding.
+  ///
+  /// The console page is usable without touching an eSIM at all, so this must
+  /// not consult [AppSettings.mockLocationLinkageEnabled] the way
+  /// [applyLocationForProfile] does: that switch exists to gate what happens
+  /// automatically on a switch, not what the user asked for explicitly.
+  Future<bool> applyManualLocation({
+    required double latitude,
+    required double longitude,
+    required String label,
+    String? mode,
+  }) async {
+    final settings = AppSettings();
+    final effectiveMode = mode ?? settings.mockLocationMode;
+    try {
+      final success = await _mockLocationService.startMockLocation(
+        latitude: latitude,
+        longitude: longitude,
+        mode: effectiveMode,
+      );
+      if (success) {
+        _lastMockLocation = LocationCoordinate(
+          latitude: latitude,
+          longitude: longitude,
+          cityName: label,
+          countryCode: 'CUSTOM',
+        );
+        _log.info(
+          'Mock location: manual injection [$label] '
+          '($latitude, $longitude) mode=$effectiveMode',
+        );
+      }
+      return success;
+    } catch (e) {
+      _log.warning('Manual mock location failed: $e');
+      return false;
+    }
+  }
+
   Future<bool> stopMockLocation() async {
     try {
       final res = await _mockLocationService.stopMockLocation();

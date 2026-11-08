@@ -10,6 +10,10 @@ class MockLocationStatus {
   final bool isMockApp;
   final bool isShizukuAvailable;
 
+  /// Test providers actually registered with LocationManager. Empty while
+  /// mocking means the injection is not reaching any app.
+  final List<String> providers;
+
   const MockLocationStatus({
     required this.isMocking,
     required this.mode,
@@ -18,6 +22,7 @@ class MockLocationStatus {
     required this.accuracy,
     required this.isMockApp,
     required this.isShizukuAvailable,
+    this.providers = const <String>[],
   });
 
   factory MockLocationStatus.fromMap(Map<dynamic, dynamic>? map) {
@@ -40,6 +45,10 @@ class MockLocationStatus {
       accuracy: (map['accuracy'] as num?)?.toDouble() ?? 0.0,
       isMockApp: map['isMockApp'] as bool? ?? false,
       isShizukuAvailable: map['isShizukuAvailable'] as bool? ?? false,
+      providers: (map['providers'] as List<dynamic>?)
+              ?.map((e) => e.toString())
+              .toList(growable: false) ??
+          const <String>[],
     );
   }
 }

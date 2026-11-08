@@ -293,6 +293,57 @@ class ProxyLinkageService {
     return group?.now;
   }
 
+  /// Lists every node the controller knows, with its last measured delay.
+  ///
+  /// Groups themselves are skipped: a selector in the list is a switchable
+  /// target, but its `delay` is the group's own, which reads as a healthy node
+  /// and misleads the picker.
+  Future<List<ProxyNodeInfo>> listNodes() async {
+    final proxies = await getProxiesRaw();
+    if (proxies == null) return const <ProxyNodeInfo>[];
+    final nodes = <ProxyNodeInfo>[];
+    for (final entry in proxies.entries) {
+      final val = entry.value;
+      if (val is! Map<String, dynamic>) continue;
+      final type = val['type']?.toString().toLowerCase() ?? '';
+      if (type == 'selector' || type == 'urltest' ||
+          type == 'fallback' || type == 'loadbalance' ||
+          type == 'relay' || type == 'direct' || type == 'reject') {
+        continue;
+      }
+      nodes.add(ProxyNodeInfo.fromJson(entry.key, val));
+    }
+    nodes.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    return nodes;
+  }
+
+  /// Asks the controller to re-measure one node's delay.
+  ///
+  /// Returns the measured milliseconds, or null when the probe failed (the
+  /// controller answers 408 for a timeout, which is a normal result here).
+  Future<int?> measureDelay(
+    String nodeName, {
+    String url = 'http://www.gstatic.com/generate_204',
+    Duration timeout = const Duration(seconds: 5),
+  }) async {
+    try {
+      final path = '/proxies/${Uri.encodeComponent(nodeName)}/delay'
+          '?url=${Uri.encodeComponent(url)}'
+          '&timeout=${timeout.inMilliseconds}';
+      final req = await _prepareRequest('GET', path);
+      final res = await req.close().timeout(timeout + const Duration(seconds: 2));
+      final bodyStr = await utf8.decodeStream(res).timeout(timeout);
+      final json = jsonDecode(bodyStr);
+      if (json is Map<String, dynamic> && json['delay'] is num) {
+        return (json['delay'] as num).toInt();
+      }
+      return null;
+    } catch (e) {
+      _log.fine('measureDelay $nodeName failed: $e');
+      return null;
+    }
+  }
+
   /// Takes a snapshot of the current node in [groupName].
   Future<ProxySnapshot?> snapshot(String groupName) async {
     final current = await getCurrentNode(groupName);

@@ -6,11 +6,11 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../l10n/app_localizations.dart';
-import '../services/proxy_linkage_service.dart';
 import '../services/sms_relay_service.dart';
 import '../services/remote_gateway_service.dart';
 import '../settings/app_settings.dart';
-import '../services/mock_location_service.dart';
+import 'location_console_page.dart';
+import 'proxy_console_page.dart';
 import '../widgets/glass/glass_surface.dart';
 import '../widgets/styled_header_scaffold.dart';
 class SmsRelayPage extends StatefulWidget {
@@ -59,20 +59,22 @@ class _SmsRelayPageState extends State<SmsRelayPage>
 
   // Switch automation: roaming data guard + proxy linkage. These are stored in
   // AppSettings and applied by RemoteGatewayService on every profile switch.
-  final TextEditingController _proxyUrlController = TextEditingController();
-  final TextEditingController _proxySecretController = TextEditingController();
-  final TextEditingController _proxyGroupController = TextEditingController();
+  // The controller URL, secret and group live in the proxy console, which is the
+  // only place that edits them, so this page does not carry copies.
   bool _guardEnabled = true;
   bool _guardRestoreOnRevert = true;
   bool _proxyEnabled = false;
   bool _proxyAutoRestore = true;
   bool _mockLocationEnabled = false;
-  String _mockLocationMode = 'system';
   bool _mockLocationAutoRestore = true;
-  String? _mockLocationTestStatus;
   bool _linkageBusy = false;
   String? _linkageStatus;
   bool _linkageStatusIsError = false;
+
+  // Secondary sections start folded; the page's main job is the forwarding form.
+  bool _historyExpanded = false;
+  bool _remoteOpsExpanded = false;
+  bool _linkageExpanded = false;
 
   @override
   void initState() {
@@ -84,19 +86,18 @@ class _SmsRelayPageState extends State<SmsRelayPage>
 
   void _hydrateLinkage() {
     final settings = AppSettings();
-    _proxyUrlController.text = settings.proxyControllerUrl;
-    _proxySecretController.text = settings.proxySecret ?? '';
-    _proxyGroupController.text = settings.proxyTargetGroup;
     _guardEnabled = settings.dataGuardEnabled;
     _guardRestoreOnRevert = settings.dataGuardRestoreOnRevert;
     _proxyEnabled = settings.proxyLinkageEnabled;
     _proxyAutoRestore = settings.proxyAutoRestore;
     _mockLocationEnabled = settings.mockLocationLinkageEnabled;
-    _mockLocationMode = settings.mockLocationMode;
     _mockLocationAutoRestore = settings.mockLocationAutoRestore;
   }
 
-  Future<void> _saveLinkage() async {
+  /// The gateway reads these switches on every switch, so they are written the
+  /// moment they change. There is no Save button: a settings card whose only
+  /// action is "save what you just toggled" is one more step to forget.
+  Future<void> _persistLinkage() async {
     final settings = AppSettings();
     setState(() {
       _linkageBusy = true;
@@ -108,22 +109,11 @@ class _SmsRelayPageState extends State<SmsRelayPage>
       await settings.setProxyLinkageEnabled(_proxyEnabled);
       await settings.setProxyAutoRestore(_proxyAutoRestore);
       await settings.setMockLocationLinkageEnabled(_mockLocationEnabled);
-      await settings.setMockLocationMode(_mockLocationMode);
       await settings.setMockLocationAutoRestore(_mockLocationAutoRestore);
-      await settings.setProxyControllerUrl(_proxyUrlController.text.trim());
-      await settings.setProxyTargetGroup(
-        _proxyGroupController.text.trim().isEmpty
-            ? 'PROXY'
-            : _proxyGroupController.text.trim(),
-      );
-      if (_proxySecretController.text.trim().isNotEmpty) {
-        await settings.setProxySecret(_proxySecretController.text.trim());
-      }
       if (!mounted) return;
       setState(() {
-        _linkageStatus = '已保存。切卡时会按下述开关自动执行。';
+        _linkageStatus = '已保存';
         _linkageStatusIsError = false;
-        _proxySecretController.clear();
       });
     } catch (error) {
       if (!mounted) return;
@@ -136,91 +126,32 @@ class _SmsRelayPageState extends State<SmsRelayPage>
     }
   }
 
-  Future<void> _testMockLocation() async {
-    setState(() {
-      _linkageBusy = true;
-      _mockLocationTestStatus = '正在检查免Root虚拟定位权限...';
-    });
-    try {
-      const service = MockLocationService();
-      final status = await service.getStatus();
-      final isMockApp = status.isMockApp;
-      final isShizuku = status.isShizukuAvailable;
-
-      if (_mockLocationMode == 'shizuku' && isShizuku) {
-        await service.grantMockViaShizuku();
-        final success = await service.startMockLocation(
-          latitude: 22.3193,
-          longitude: 114.1694,
-          mode: 'shizuku',
-        );
-        setState(() {
-          _mockLocationTestStatus = success
-              ? '✅ Shizuku 免Root注入成功！已将GPS定位注入为：香港尖沙咀 (22.3193, 114.1694)'
-              : '❌ Shizuku 注入失败，请检查 Shizuku 授权状态';
-        });
-      } else if (isMockApp) {
-        final success = await service.startMockLocation(
-          latitude: 22.3193,
-          longitude: 114.1694,
-          mode: 'system',
-        );
-        setState(() {
-          _mockLocationTestStatus = success
-              ? '✅ 系统模拟位置注入成功！已将GPS定位注入为：香港尖沙咀 (22.3193, 114.1694)'
-              : '❌ 模拟位置注入失败';
-        });
-      } else {
-        setState(() {
-          _mockLocationTestStatus =
-              '⚠️ 尚未获得模拟位置权限：\n'
-              '• 系统模拟位置：请在「开发者选项 → 选择模拟位置信息应用」中选择本项目\n'
-              '• Shizuku 模式：请先启动并授权 Shizuku';
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _mockLocationTestStatus = '测试失败：$e';
-      });
-    } finally {
-      if (mounted) setState(() => _linkageBusy = false);
-    }
+  void _toggleLinkage(VoidCallback change) {
+    setState(change);
+    unawaited(_persistLinkage());
   }
 
-  Future<void> _testProxyController() async {
-    setState(() {
-      _linkageBusy = true;
-      _linkageStatus = '正在连接 External Controller…';
-      _linkageStatusIsError = false;
-    });
-    final service = ProxyLinkageService(
-      controllerUrl: _proxyUrlController.text.trim().isEmpty
-          ? 'http://127.0.0.1:9090'
-          : _proxyUrlController.text.trim(),
-      secret: _proxySecretController.text.trim().isEmpty
-          ? AppSettings().proxySecret
-          : _proxySecretController.text.trim(),
+  /// The console owns injection testing now: it can pick a coordinate, show the
+  /// providers that actually registered and report a real failure, none of which
+  /// fits in a settings card.
+  Future<void> _openLocationConsole() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const LocationConsolePage()),
     );
-    try {
-      final result = await service.testConnection();
-      final groups = result.alive ? await service.getSelectorGroups() : const <ProxyGroupInfo>[];
-      if (!mounted) return;
-      setState(() {
-        _linkageStatusIsError = !result.alive;
-        _linkageStatus = result.alive
-            ? '连接成功：${result.version ?? 'ok'}；可选策略组 ${groups.length} 个'
-                '${groups.isEmpty ? '' : '（${groups.map((g) => g.name).take(5).join('、')}）'}'
-            : '连接失败：${result.error ?? 'unknown'}。请检查 FlClash/Mihomo 是否已开启外部控制。';
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _linkageStatus = '连接失败：$error';
-        _linkageStatusIsError = true;
-      });
-    } finally {
-      if (mounted) setState(() => _linkageBusy = false);
-    }
+    if (!mounted) return;
+    _hydrateLinkage();
+    setState(() {});
+  }
+
+  Future<void> _openProxyConsole() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const ProxyConsolePage()),
+    );
+    if (!mounted) return;
+    _hydrateLinkage();
+    setState(() {});
   }
 
   @override
@@ -232,9 +163,6 @@ class _SmsRelayPageState extends State<SmsRelayPage>
     _chatIdController.dispose();
     _activationCodeController.dispose();
     _confirmationCodeController.dispose();
-    _proxyUrlController.dispose();
-    _proxySecretController.dispose();
-    _proxyGroupController.dispose();
     super.dispose();
   }
 
@@ -715,6 +643,70 @@ class _SmsRelayPageState extends State<SmsRelayPage>
     );
   }
 
+  /// Secondary sections are folded by default: the page's primary job is
+  /// "forward SMS", and the card list had grown to five screens of controls the
+  /// user only needs occasionally.
+  Widget _buildCollapsibleCard({
+    required String title,
+    required IconData icon,
+    required bool expanded,
+    required VoidCallback onToggle,
+    required List<Widget> children,
+    String? subtitle,
+    List<Widget> actions = const <Widget>[],
+  }) {
+    final theme = Theme.of(context);
+    return _buildCardContainer(
+      padding: EdgeInsets.zero,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: onToggle,
+            borderRadius: BorderRadius.circular(20),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+              child: Row(
+                children: [
+                  Icon(icon, color: theme.colorScheme.primary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        if (subtitle != null)
+                          Text(subtitle, style: theme.textTheme.bodySmall),
+                      ],
+                    ),
+                  ),
+                  ...actions,
+                  Icon(
+                    expanded ? Icons.expand_less : Icons.expand_more,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (expanded)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: children,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildPermissionCard(AppLocalizations l10n) {
     return _buildCardContainer(
       child: Column(
@@ -977,289 +969,166 @@ class _SmsRelayPageState extends State<SmsRelayPage>
   Widget _buildLinkageCard() {
     final theme = Theme.of(context);
     final subtle = theme.colorScheme.onSurfaceVariant;
-    final fieldBorder = OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
-    );
-    return _buildCardContainer(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.bolt_outlined, color: theme.colorScheme.primary),
-                const SizedBox(width: 8),
-                Text(
-                  '切卡自动化（流量卫士 / 代理联动）',
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold,
-                    color: theme.colorScheme.onSurface,
-                  ),
-                ),
-              ],
+    return _buildCollapsibleCard(
+      title: '切卡自动化',
+      icon: Icons.bolt_outlined,
+      expanded: _linkageExpanded,
+      onToggle: () => setState(() => _linkageExpanded = !_linkageExpanded),
+      subtitle: '开关即时生效，无需保存',
+      actions: [
+        if (_linkageStatus != null)
+          Padding(
+            padding: const EdgeInsets.only(right: 4),
+            child: Text(
+              _linkageStatus!,
+              style: TextStyle(
+                fontSize: 12,
+                color: _linkageStatusIsError
+                    ? theme.colorScheme.error
+                    : theme.colorScheme.primary,
+              ),
             ),
-            const SizedBox(height: 6),
-            Text(
-              '每次切到国外保号卡时自动执行：关闭该卡移动数据，防止漫游偷跑流量；'
-              '并把 FlClash / Mihomo 的节点切到与卡归属地一致的国家。',
+          ),
+      ],
+      children: [
+        Text(
+          '控制器地址、策略组与节点切换都在代理控制台里调。',
+          style: TextStyle(fontSize: 12, color: subtle),
+        ),
+        const Divider(height: 24),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('流量卫士：切卡时关闭移动数据'),
+            subtitle: Text(
+              '需要特权构建（MODIFY_PHONE_STATE）或 root；都没有时只提示、不强制',
               style: TextStyle(fontSize: 12, color: subtle),
             ),
-            const Divider(height: 24),
+            value: _guardEnabled,
+            onChanged: _linkageBusy
+                ? null
+                : (value) => _toggleLinkage(() => _guardEnabled = value),
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('切回默认卡时恢复数据开关'),
+            subtitle: Text(
+              '按切卡前记录的状态还原，不会把主卡数据永久关掉',
+              style: TextStyle(fontSize: 12, color: subtle),
+            ),
+            value: _guardRestoreOnRevert,
+            onChanged: _linkageBusy
+                ? null
+                : (value) => _toggleLinkage(() => _guardRestoreOnRevert = value),
+          ),
+          const Divider(height: 24),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('代理联动：按卡国别自动切节点'),
+            subtitle: Text(
+              '控制器不可达时只告警，不影响切卡',
+              style: TextStyle(fontSize: 12, color: subtle),
+            ),
+            value: _proxyEnabled,
+            onChanged: _linkageBusy
+                ? null
+                : (value) => _toggleLinkage(() => _proxyEnabled = value),
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('回滚时还原切卡前的节点'),
+            value: _proxyAutoRestore,
+            onChanged: _linkageBusy
+                ? null
+                : (value) => _toggleLinkage(() => _proxyAutoRestore = value),
+          ),
+          const SizedBox(height: 4),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+              onPressed: _openProxyConsole,
+              icon: const Icon(Icons.wifi_tethering, size: 16),
+              label: const Text('代理控制台（节点 / 策略组 / 测速）'),
+            ),
+          ),
+          const Divider(height: 24),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('虚拟定位联动：切卡时注入对应国家坐标'),
+            subtitle: Text(
+              '如香港 ClubSim ➔ 尖沙咀，美国 Saily ➔ 洛杉矶',
+              style: TextStyle(fontSize: 12, color: subtle),
+            ),
+            value: _mockLocationEnabled,
+            onChanged: _linkageBusy
+                ? null
+                : (value) => _toggleLinkage(() => _mockLocationEnabled = value),
+          ),
+          if (_mockLocationEnabled)
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text('流量卫士：切卡时关闭移动数据'),
-              subtitle: Text(
-                '需要特权构建（MODIFY_PHONE_STATE）或 root；'
-                '都没有时只提示、不强制',
-                style: TextStyle(fontSize: 12, color: subtle),
-              ),
-              value: _guardEnabled,
+              title: const Text('回滚时停止模拟定位'),
+              value: _mockLocationAutoRestore,
               onChanged: _linkageBusy
                   ? null
-                  : (value) => setState(() => _guardEnabled = value),
+                  : (value) =>
+                      _toggleLinkage(() => _mockLocationAutoRestore = value),
             ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('切回默认卡时恢复数据开关'),
-              subtitle: Text(
-                '按切卡前记录的状态还原，不会把主卡数据永久关掉',
-                style: TextStyle(fontSize: 12, color: subtle),
-              ),
-              value: _guardRestoreOnRevert,
-              onChanged: _linkageBusy
-                  ? null
-                  : (value) => setState(() => _guardRestoreOnRevert = value),
+          const SizedBox(height: 4),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+              onPressed: _openLocationConsole,
+              icon: const Icon(Icons.my_location, size: 16),
+              label: const Text('虚拟定位控制台（坐标 / 通道 / 权限）'),
             ),
-            const Divider(height: 24),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('代理联动：按卡国别自动切节点'),
-              subtitle: Text(
-                '需在 FlClash / Mihomo 里开启「外部控制」；'
-                '控制器不可达时只告警，不影响切卡',
-                style: TextStyle(fontSize: 12, color: subtle),
-              ),
-              value: _proxyEnabled,
-              onChanged: _linkageBusy
-                  ? null
-                  : (value) => setState(() => _proxyEnabled = value),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('回滚时还原切卡前的节点'),
-              value: _proxyAutoRestore,
-              onChanged: _linkageBusy
-                  ? null
-                  : (value) => setState(() => _proxyAutoRestore = value),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _proxyUrlController,
-              enabled: !_linkageBusy,
-              decoration: InputDecoration(
-                labelText: 'External Controller 地址',
-                hintText: 'http://127.0.0.1:9090',
-                border: fieldBorder,
-                isDense: true,
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _proxySecretController,
-              enabled: !_linkageBusy,
-              obscureText: true,
-              decoration: InputDecoration(
-                labelText: 'Secret（留空保持原值）',
-                border: fieldBorder,
-                isDense: true,
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _proxyGroupController,
-              enabled: !_linkageBusy,
-              decoration: InputDecoration(
-                labelText: '策略组名称',
-                hintText: 'PROXY / 🚀 节点选择',
-                border: fieldBorder,
-                isDense: true,
-              ),
-            ),
-            const Divider(height: 24),
-            Row(
-              children: [
-                Icon(Icons.location_on_outlined, color: theme.colorScheme.primary, size: 20),
-                const SizedBox(width: 8),
-                Text(
-                  '虚拟定位联动 (免 Root / Shizuku)',
-                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('启用免Root虚拟定位联动'),
-              subtitle: Text(
-                '切卡时自动将系统 GPS 经纬度注入至目标国家（如香港 ClubSim ➔ 尖沙咀，美国 Saily ➔ 洛杉矶）',
-                style: TextStyle(fontSize: 12, color: subtle),
-              ),
-              value: _mockLocationEnabled,
-              onChanged: _linkageBusy ? null : (v) => setState(() => _mockLocationEnabled = v),
-            ),
-            if (_mockLocationEnabled) ...[
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('回滚时停止模拟定位'),
-                value: _mockLocationAutoRestore,
-                onChanged: _linkageBusy ? null : (v) => setState(() => _mockLocationAutoRestore = v),
-              ),
-              const SizedBox(height: 8),
-              DropdownButtonFormField<String>(
-                // ignore: deprecated_member_use
-                value: _mockLocationMode,
-                decoration: InputDecoration(
-                  labelText: '定位伪装方案',
-                  border: fieldBorder,
-                  isDense: true,
-                ),
-                items: const [
-                  DropdownMenuItem(
-                    value: 'system',
-                    child: Text('系统模拟位置 (开发者选项，免Root)'),
-                  ),
-                  DropdownMenuItem(
-                    value: 'shizuku',
-                    child: Text('Shizuku 底层 FusedLocation (免Root框架)'),
-                  ),
-                ],
-                onChanged: _linkageBusy ? null : (v) => setState(() => _mockLocationMode = v ?? 'system'),
-              ),
-              const SizedBox(height: 8),
-              if (_mockLocationTestStatus != null) ...[
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    _mockLocationTestStatus!,
-                    style: TextStyle(fontSize: 12, color: theme.colorScheme.primary),
-                  ),
-                ),
-                const SizedBox(height: 8),
-              ],
-              OutlinedButton.icon(
-                onPressed: _linkageBusy ? null : _testMockLocation,
-                icon: const Icon(Icons.my_location, size: 16),
-                label: const Text('检查权限并测试注入'),
-              ),
-            ],
-            if (_linkageStatus != null) ...[
-              const SizedBox(height: 12),
-              Text(
-                _linkageStatus!,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: _linkageStatusIsError
-                      ? theme.colorScheme.error
-                      : theme.colorScheme.primary,
-                ),
-              ),
-            ],
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: _linkageBusy ? null : _saveLinkage,
-                    icon: _linkageBusy
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.save_outlined),
-                    label: const Text('保存'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _linkageBusy ? null : _testProxyController,
-                    icon: const Icon(Icons.wifi_tethering),
-                    label: const Text('测试连接'),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
+          ),
+      ],
     );
   }
 
   Widget _buildHistoryCard(AppLocalizations l10n) {
     final theme = Theme.of(context);
-    return _buildCardContainer(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.history_edu_outlined, color: theme.colorScheme.primary),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    '历史短信转发记录 (${_history.length})',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                IconButton(
-                  onPressed: _refreshHistory,
-                  tooltip: '刷新记录',
-                  icon: const Icon(Icons.refresh, size: 20),
-                ),
-                if (_history.isNotEmpty)
-                  TextButton.icon(
-                    onPressed: _clearAllHistory,
-                    icon: Icon(
-                      Icons.delete_sweep_outlined,
-                      size: 18,
-                      color: theme.colorScheme.error,
-                    ),
-                    label: Text(
-                      '清空',
-                      style: TextStyle(color: theme.colorScheme.error),
-                    ),
-                  ),
-              ],
+    return _buildCollapsibleCard(
+      title: '历史短信转发记录 (${_history.length})',
+      icon: Icons.history_edu_outlined,
+      expanded: _historyExpanded,
+      onToggle: () => setState(() => _historyExpanded = !_historyExpanded),
+      subtitle: _deliveryLabel(l10n),
+      actions: [
+        IconButton(
+          onPressed: _refreshHistory,
+          tooltip: '刷新记录',
+          icon: const Icon(Icons.refresh, size: 20),
+        ),
+        if (_history.isNotEmpty)
+          IconButton(
+            onPressed: _clearAllHistory,
+            tooltip: '清空记录',
+            icon: Icon(
+              Icons.delete_sweep_outlined,
+              size: 20,
+              color: theme.colorScheme.error,
             ),
-            const SizedBox(height: 4),
-            Text(
-              _deliveryLabel(l10n),
-              style: theme.textTheme.bodySmall,
+          ),
+      ],
+      children: [
+        if (_history.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+              borderRadius: BorderRadius.circular(12),
             ),
-            const SizedBox(height: 12),
-            if (_history.isEmpty)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  '暂无短信转发记录。当收到新短信或点击上方“发送测试消息”后，此处将显示完整的短信内容、发件号码与接收卡槽。',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              )
-            else
-              ListView.separated(
+            child: Text(
+              '暂无短信转发记录。收到新短信或发送测试消息后，此处会显示完整内容、发件号码与接收卡槽。',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          )
+        else
+          ListView.separated(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 itemCount: _history.length,
@@ -1389,8 +1258,7 @@ class _SmsRelayPageState extends State<SmsRelayPage>
                   );
                 },
               ),
-          ],
-        ),
+      ],
     );
   }
 
@@ -1398,73 +1266,59 @@ class _SmsRelayPageState extends State<SmsRelayPage>
     final theme = Theme.of(context);
     final gateway = RemoteGatewayService.instance;
     final apiUrl = gateway.apiUrl;
-    return _buildCardContainer(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.cloud_sync_outlined, color: theme.colorScheme.primary),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    '远程下卡 / 切卡 / 删卡控制中心',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+    return _buildCollapsibleCard(
+      title: '远程下卡 / 切卡 / 删卡',
+      icon: Icons.cloud_sync_outlined,
+      expanded: _remoteOpsExpanded,
+      onToggle: () => setState(() => _remoteOpsExpanded = !_remoteOpsExpanded),
+      subtitle: gateway.isRunning
+          ? '🟢 网关运行中 · ${apiUrl ?? "http://127.0.0.1:8787/"}'
+          : '⚪ 网关待命（保存上方配置后自动启动）',
+      actions: [
+        IconButton(
+          onPressed: _loadingGatewayProfiles ? null : _loadGatewayProfiles,
+          tooltip: '刷新卡内列表与网关状态',
+          icon: _loadingGatewayProfiles
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.refresh, size: 20),
+        ),
+      ],
+      children: [
+        if (apiUrl != null || (_gatewayApiToken?.isNotEmpty ?? false)) ...[
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              if (apiUrl != null)
+                OutlinedButton.icon(
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: apiUrl));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('已复制 Web 面板地址: $apiUrl')),
+                    );
+                  },
+                  icon: const Icon(Icons.link, size: 16),
+                  label: const Text('复制 Web 面板地址'),
                 ),
-                IconButton(
-                  onPressed: _loadingGatewayProfiles ? null : _loadGatewayProfiles,
-                  tooltip: '刷新卡内列表与网关状态',
-                  icon: _loadingGatewayProfiles
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.refresh, size: 20),
+              if (_gatewayApiToken != null && _gatewayApiToken!.isNotEmpty)
+                OutlinedButton.icon(
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: _gatewayApiToken!));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('已复制 Web Bearer Token')),
+                    );
+                  },
+                  icon: const Icon(Icons.key_outlined, size: 16),
+                  label: const Text('复制 Web Token'),
                 ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Text(
-              gateway.isRunning
-                  ? '🟢 网关运行中 · Web 面板: ${apiUrl ?? "http://127.0.0.1:8787/"}'
-                  : '⚪ 网关待命（保存上方配置后自动启动）',
-              style: theme.textTheme.bodySmall,
-            ),
-            if (apiUrl != null || (_gatewayApiToken?.isNotEmpty ?? false)) ...[
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  if (apiUrl != null)
-                    OutlinedButton.icon(
-                      onPressed: () {
-                        Clipboard.setData(ClipboardData(text: apiUrl));
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('已复制 Web 面板地址: $apiUrl')),
-                        );
-                      },
-                      icon: const Icon(Icons.link, size: 16),
-                      label: const Text('复制 Web 面板地址'),
-                    ),
-                  if (_gatewayApiToken != null && _gatewayApiToken!.isNotEmpty)
-                    OutlinedButton.icon(
-                      onPressed: () {
-                        Clipboard.setData(ClipboardData(text: _gatewayApiToken!));
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('已复制 Web Bearer Token')),
-                        );
-                      },
-                      icon: const Icon(Icons.key_outlined, size: 16),
-                      label: const Text('复制 Web Token'),
-                    ),
-                ],
-              ),
             ],
+          ),
+        ],
             const Divider(height: 24),
             Text(
               '📥 远程 / 快捷下卡 (Download eSIM)',
@@ -1680,8 +1534,7 @@ class _SmsRelayPageState extends State<SmsRelayPage>
                   ),
               ],
             ),
-          ],
-        ),
+      ],
     );
   }
 
