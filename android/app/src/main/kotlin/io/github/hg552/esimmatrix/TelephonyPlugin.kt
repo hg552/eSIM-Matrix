@@ -22,7 +22,7 @@ import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Method
 
 private fun ByteArray.toHex(): String =
-        joinToString(separator = "") { eachByte -> "%02x".format(eachByte) }
+        joinToString(separator = "") { eachByte -> "%02X".format(eachByte) }
 
 private fun hexStringToByteArray(hex: String): ByteArray {
     val cleanHex = hex.replace(" ", "").replace("\n", "")

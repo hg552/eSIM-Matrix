@@ -124,7 +124,7 @@ class NBridgeAdapter extends BaseAdapter {
 
     final responseHex = await NBridgeService.transmitBasic(
       slotId: slotId,
-      apdu: HexUtils.bytesToHex(apdu),
+      apdu: HexUtils.bytesToHexUpper(apdu),
     );
     return HexUtils.hexToBytes(responseHex);
   }
@@ -201,7 +201,7 @@ class NBridgeAdapter extends BaseAdapter {
 
     final responseHex = await NBridgeService.transmitLogical(
       connectionId: connection.connectionId,
-      apdu: HexUtils.bytesToHex(apdu),
+      apdu: HexUtils.bytesToHexUpper(apdu),
     );
     return HexUtils.hexToBytes(responseHex);
   }

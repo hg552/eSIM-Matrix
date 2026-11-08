@@ -25,7 +25,7 @@ import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
 
 private fun ByteArray.toHex(): String =
-        joinToString(separator = "") { eachByte -> "%02x".format(eachByte) }
+        joinToString(separator = "") { eachByte -> "%02X".format(eachByte) }
 
 private fun hexStringToByteArray(hex: String): ByteArray {
     require(hex.length % 2 == 0) { "Hex string must have an even length" }

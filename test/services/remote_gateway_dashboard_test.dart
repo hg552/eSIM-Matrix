@@ -290,6 +290,8 @@ class _Profiles implements RemoteProfileControl {
   @override
   Future<RemoteReaderEntry> selectReader(String selector) async =>
       const RemoteReaderEntry(id: 'reader_0', name: 'SIM2', selected: true);
+  @override
+  Future<bool> accelerateNetworkSearch() async => true;
 }
 
 class _Relay extends SmsRelayService {

@@ -49,6 +49,8 @@ class _StubProfiles implements RemoteProfileControl {
   @override
   Future<RemoteReaderEntry> selectReader(String selector) async =>
       const RemoteReaderEntry(id: 'reader_0', name: 'SIM2', selected: true);
+  @override
+  Future<bool> accelerateNetworkSearch() async => true;
 }
 
 const List<String> _nodes = [

@@ -86,6 +86,7 @@ abstract interface class RemoteProfileControl {
       const <RemoteReaderEntry>[];
   Future<RemoteReaderEntry> selectReader(String selector) async =>
       throw UnsupportedError('selectReader');
+  Future<bool> accelerateNetworkSearch() async => false;
 }
 class LpaRemoteProfileControl implements RemoteProfileControl {
   LpaRemoteProfileControl({
@@ -119,6 +120,10 @@ class LpaRemoteProfileControl implements RemoteProfileControl {
 
   @override
   Future<void> refreshNetworkStatus() => _networkStatus.refresh();
+
+  @override
+  Future<bool> accelerateNetworkSearch() =>
+      _networkStatus.accelerateNetworkSearch();
 
   @override
   Future<List<RemoteProfileEntry>> listProfiles() async {

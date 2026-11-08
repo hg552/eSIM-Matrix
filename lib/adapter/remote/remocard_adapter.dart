@@ -346,7 +346,7 @@ class RemoCardAdapter extends BaseAdapter {
 
     final response = await _post('/sendRawApdu', {
       'reader': _internalReaderName,
-      'apdu': HexUtils.bytesToHex(apdu),
+      'apdu': HexUtils.bytesToHexUpper(apdu),
     });
 
     if (response.statusCode == 200) {
@@ -434,7 +434,7 @@ class _RemoChannel extends BaseChannel {
     final response = await _adapter._post('/sendApdu', {
       'reader': _adapter.internalReaderName,
       'aid': _aidHex,
-      'apdu': HexUtils.bytesToHex(apdu),
+      'apdu': HexUtils.bytesToHexUpper(apdu),
     });
 
     if (response.statusCode == 200) {
@@ -457,7 +457,7 @@ class _RemoChannel extends BaseChannel {
   ]) async {
     // If this is a blank channel and we see a SELECT AID, open it remotely
     if (_aidHex == null && ins == 0xA4 && p1 == 0x04 && data != null) {
-      final targetAid = HexUtils.bytesToHex(data);
+      final targetAid = HexUtils.bytesToHexUpper(data);
       final response = await _adapter._post('/openChannel', {
         'reader': _adapter.internalReaderName,
         'aids': [targetAid],

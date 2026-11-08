@@ -19,6 +19,10 @@ import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import android.os.Handler
+import android.os.Looper
+import android.telephony.CellInfo
+import java.util.concurrent.Executors
 
 class NetworkStatusPlugin :
     FlutterPlugin,
@@ -95,6 +99,7 @@ class NetworkStatusPlugin :
     private var currentError: String? = null
     private val registrations = linkedMapOf<Int, CallbackRegistration>()
     private val snapshots = linkedMapOf<Int, SubscriptionSnapshot>()
+    private val kickExecutor = Executors.newSingleThreadExecutor()
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         appContext = binding.applicationContext
         methodChannel = MethodChannel(binding.binaryMessenger, METHOD_CHANNEL).also {
@@ -121,6 +126,38 @@ class NetworkStatusPlugin :
                     result.success(null)
                 } else {
                     result.error(error, error, null)
+                }
+            }
+            "accelerateNetworkSearch" -> {
+                val ctx = appContext
+                kickExecutor.execute {
+                    var kicked = false
+                    if (ctx != null) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            val tm = ctx.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
+                            runCatching {
+                                tm?.requestCellInfoUpdate(ctx.mainExecutor, object : TelephonyManager.CellInfoCallback() {
+                                    override fun onCellInfo(cellInfo: List<CellInfo>) {}
+                                })
+                            }
+                        }
+                        val hasRoot = runCatching {
+                            listOf("/system/bin/su", "/system/xbin/su", "/sbin/su").any { java.io.File(it).exists() }
+                        }.getOrDefault(false)
+                        if (hasRoot) {
+                            runCatching {
+                                val script = "cmd connectivity airplane-mode enable && sleep 1 && cmd connectivity airplane-mode disable"
+                                val p = ProcessBuilder("su", "-c", script)
+                                    .redirectErrorStream(true)
+                                    .start()
+                                p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)
+                                kicked = p.exitValue() == 0
+                            }
+                        }
+                    }
+                    Handler(Looper.getMainLooper()).post {
+                        result.success(mapOf("success" to true, "kicked" to kicked))
+                    }
                 }
             }
             else -> result.notImplemented()

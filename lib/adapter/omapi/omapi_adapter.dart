@@ -350,7 +350,7 @@ class OmapiAdapter extends BaseAdapter {
         message: 'Not connected to OMAPI reader',
       );
     }
-    final String apduHex = HexUtils.bytesToHex(apdu);
+    final String apduHex = HexUtils.bytesToHexUpper(apdu);
 
     final String responseHex = await _invoke('transmit', {
       'reader': _internalReaderName,
@@ -484,7 +484,7 @@ class OmapiAdapter extends BaseAdapter {
           message: 'Not connected to OMAPI reader',
         );
       }
-      final String apduHex = HexUtils.bytesToHex(apdu);
+      final String apduHex = HexUtils.bytesToHexUpper(apdu);
 
       try {
         final String responseHex = await _invoke('transmitOnChannel', {
@@ -789,7 +789,7 @@ class _OmapiChannel extends BaseChannel {
 
     // If SELECT AID (INS=A4, P1=04)
     if (ins == 0xA4 && p1 == 0x04 && data != null) {
-      final targetAid = HexUtils.bytesToHex(data);
+      final targetAid = HexUtils.bytesToHexUpper(data);
 
       // If we already have a channel open but for a DIFFERENT aid, we must switch.
       // Logical channels are usually pinned to the AID they were opened with.

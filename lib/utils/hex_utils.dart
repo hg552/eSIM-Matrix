@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 class HexUtils {
   static const String _lowerHex = '0123456789abcdef';
+  static const String _upperHex = '0123456789ABCDEF';
 
   /// Lowercase hex, no separators.
   ///
@@ -14,6 +15,20 @@ class HexUtils {
     for (final byte in bytes) {
       out[i++] = _lowerHex.codeUnitAt((byte >> 4) & 0x0F);
       out[i++] = _lowerHex.codeUnitAt(byte & 0x0F);
+    }
+    return String.fromCharCodes(out);
+  }
+  /// Uppercase hex, no separators.
+  ///
+  /// High-performance zero-copy lookup for APDU transmission over channels
+  /// where baseband modems (e.g. Unisoc, older Qualcomm) strictly reject
+  /// lowercase hex representations.
+  static String bytesToHexUpper(Uint8List bytes) {
+    final out = Uint8List(bytes.length * 2);
+    var i = 0;
+    for (final byte in bytes) {
+      out[i++] = _upperHex.codeUnitAt((byte >> 4) & 0x0F);
+      out[i++] = _upperHex.codeUnitAt(byte & 0x0F);
     }
     return String.fromCharCodes(out);
   }

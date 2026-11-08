@@ -166,7 +166,7 @@ class TelephonyAdapter extends BaseAdapter {
     if (_slotIndex == null) {
       throw AppException(AppErrorCode.ERROR_UNKNOWN, message: 'Not connected');
     }
-    final apduHex = HexUtils.bytesToHex(apdu);
+    final apduHex = HexUtils.bytesToHexUpper(apdu);
     final String responseHex = await _channel.invokeMethod('transmit', {
       'slotIndex': _slotIndex,
       'portIndex': _portIndex,
@@ -301,7 +301,7 @@ class _TelephonyChannel extends BaseChannel {
         message: 'Channel not opened',
       );
     }
-    final apduHex = HexUtils.bytesToHex(apdu);
+    final apduHex = HexUtils.bytesToHexUpper(apdu);
     final String responseHex = await TelephonyAdapter._channel
         .invokeMethod('transmit', {
           'slotIndex': _slotIndex,
@@ -323,7 +323,7 @@ class _TelephonyChannel extends BaseChannel {
   ]) async {
     // If SELECT AID (INS=A4, P1=04) and channel not yet opened with an AID
     if (_channelHandle == null && ins == 0xA4 && p1 == 0x04 && data != null) {
-      final targetAid = HexUtils.bytesToHex(data);
+      final targetAid = HexUtils.bytesToHexUpper(data);
       TelephonyAdapter._log.info(
         'Telephony Opening: Selecting AID $targetAid on TM Slot ${_slotIndex + 1} Port $_portIndex',
       );

@@ -26,6 +26,27 @@ void main() {
       expect(HexUtils.bytesToHex(Uint8List(0)), '');
     });
   });
+  group('bytesToHexUpper', () {
+    test('renders uppercase, zero-padded, without separators', () {
+      expect(
+        HexUtils.bytesToHexUpper(Uint8List.fromList([0x00, 0x0A, 0xFF, 0x5A])),
+        '000AFF5A',
+      );
+    });
+
+    test('handles every byte value in uppercase', () {
+      final all = Uint8List.fromList(List.generate(256, (i) => i));
+      final hex = HexUtils.bytesToHexUpper(all);
+      expect(hex.length, 512);
+      expect(hex.startsWith('000102'), isTrue);
+      expect(hex.endsWith('FDFEFF'), isTrue);
+      expect(HexUtils.hexToBytes(hex), all);
+    });
+
+    test('empty input gives an empty string', () {
+      expect(HexUtils.bytesToHexUpper(Uint8List(0)), '');
+    });
+  });
 
   group('hexToBytes', () {
     test('parses upper and lower case alike', () {

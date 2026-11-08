@@ -231,7 +231,7 @@ class AdbBridgeServer(context: Context) : IAdbBridge.Stub() {
         private val INT = Integer.TYPE
         private val STRING = String::class.java
 
-        private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
+        private fun ByteArray.toHex(): String = joinToString("") { "%02X".format(it) }
     }
 }
 
@@ -262,7 +262,7 @@ private class Apdu(
             // still takes here as p3.
             val p3 = bytes[4].toInt() and 0xFF
             val data = if (bytes.size > 5) {
-                bytes.copyOfRange(5, bytes.size).joinToString("") { "%02x".format(it) }
+                bytes.copyOfRange(5, bytes.size).joinToString("") { "%02X".format(it) }
             } else {
                 ""
             }

@@ -161,13 +161,13 @@ class SimLinkAdapter extends BaseAdapter implements BleAdapter {
 
   @override
   Future<Uint8List> sendRawApdu(Uint8List apdu) async {
-    final hex = HexUtils.bytesToHex(apdu);
+    final hex = HexUtils.bytesToHexUpper(apdu);
     final respHex = await _transmit(hex);
     return HexUtils.hexToBytes(respHex);
   }
 
   Future<String> _transmit(String apduHex) async {
-    // Reference special handling for C0 (GET RESPONSE)
+    apduHex = apduHex.toUpperCase();
     if (apduHex.length == 10 && apduHex.substring(2).startsWith('c00000')) {
       int len = int.parse(apduHex.substring(8), radix: 16);
       if (len > 0x4F || len == 0) {

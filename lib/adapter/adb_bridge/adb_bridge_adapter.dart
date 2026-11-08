@@ -97,7 +97,7 @@ class AdbBridgeAdapter extends BaseAdapter {
 
     final responseHex = await AdbBridgeService.transmitBasic(
       slotId: slotId,
-      apdu: HexUtils.bytesToHex(apdu),
+      apdu: HexUtils.bytesToHexUpper(apdu),
     );
     return HexUtils.hexToBytes(responseHex);
   }
@@ -174,7 +174,7 @@ class AdbBridgeAdapter extends BaseAdapter {
 
     final responseHex = await AdbBridgeService.transmitLogical(
       connectionId: connection.connectionId,
-      apdu: HexUtils.bytesToHex(apdu),
+      apdu: HexUtils.bytesToHexUpper(apdu),
     );
     return HexUtils.hexToBytes(responseHex);
   }

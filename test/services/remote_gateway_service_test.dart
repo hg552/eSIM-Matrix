@@ -349,6 +349,21 @@ void main() {
       expect('${readerSwitchPayload!['text']}', contains('SIM 2'));
       expect(mockProfiles.selectedReaderId, equals('omapi:SIM2'));
     });
+    test('telegram /kick command accelerates network search', () async {
+      final kickPayload = await service.handleTelegramUpdateForTesting({
+        'update_id': 9991,
+        'message': {
+          'message_id': 9991,
+          'date': 1700000000,
+          'chat': {'id': 10000001, 'type': 'private'},
+          'from': {'id': 10000001, 'is_bot': false},
+          'text': '/kick',
+        },
+      }, '10000001');
+      expect(kickPayload, isNotNull);
+      expect(kickPayload!['text'], contains('已向基带下发快速重搜与射频复位指令'));
+      expect(mockProfiles.accelerateCalls, greaterThanOrEqualTo(1));
+    });
   });
 }
 
@@ -468,6 +483,12 @@ class MockProfileControl implements RemoteProfileControl {
       alias: nickname,
       enabled: old.enabled,
     );
+  }
+  int accelerateCalls = 0;
+  @override
+  Future<bool> accelerateNetworkSearch() async {
+    accelerateCalls++;
+    return true;
   }
 
   @override

@@ -167,6 +167,7 @@ class RemoteGatewayService {
   bool _wasInServiceBeforeSwitch = false;
   bool _sawDisconnectAfterSwitch = false;
   int _switchCompletedAtMillis = 0;
+  bool _basebandKickTriggered = false;
   String? _lastTelegramError;
   bool? _wasCharging;
   int _lastHealthAlertMillis = 0;
@@ -750,6 +751,7 @@ class RemoteGatewayService {
     _wasInServiceBeforeSwitch = wasInService;
     _sawDisconnectAfterSwitch = false;
     await _saveSession(_session);
+    _basebandKickTriggered = false;
     _lastLinkedProxyNode = null;
     if (AppSettings().proxyLinkageEnabled || AppSettings().mockLocationLinkageEnabled) {
       unawaited(_triggerProxySwitch(target).catchError((Object e) {
@@ -1174,6 +1176,19 @@ class RemoteGatewayService {
         _basebandPollTimer?.cancel();
         _basebandPollTimer = null;
         return;
+      }
+      final elapsedSeconds =
+          (DateTime.now().millisecondsSinceEpoch - _switchCompletedAtMillis) ~/ 1000;
+      if (elapsedSeconds >= 25 && !_basebandKickTriggered) {
+        _basebandKickTriggered = true;
+        _log.info('Baseband registration wait >25s: triggering network search kick fallback...');
+        unawaited(_profiles.accelerateNetworkSearch().then((kicked) {
+          if (kicked) {
+            _log.info('Baseband search kick successfully dispatched');
+          }
+        }).catchError((Object e) {
+          _log.warning('Baseband search kick error: $e');
+        }));
       }
       unawaited(_profiles.refreshNetworkStatus().catchError((Object _) {}));
     });
@@ -1668,6 +1683,9 @@ class RemoteGatewayService {
           HttpStatus.ok,
           await switchProfile(profile, duration: duration),
         );
+      } else if (request.method == 'POST' && path == '/api/v1/network/kick') {
+        final ok = await _profiles.accelerateNetworkSearch();
+        await _writeJson(request.response, HttpStatus.ok, {'status': 'kicked', 'success': ok});
       } else if (request.method == 'POST' && path == '/api/v1/rename') {
         final body = await _readJsonBody(request);
         final profile = body['profile'];
@@ -1978,6 +1996,7 @@ class RemoteGatewayService {
           {'command': 'list', 'description': '📋 卡内 eSIM 列表与快捷按钮面板'},
           {'command': 'status', 'description': '📡 基带漫游、电量温度与芯片空间状态'},
           {'command': 'keepalive', 'description': '🛡️ 定时自动切卡保号管理'},
+          {'command': 'kick', 'description': '⚡ 快速刷新基带重搜网络 (防跨国漫游搜网卡顿)'},
           {'command': 'readers', 'description': '🔀 切换物理卡槽 / 读卡器 (SIM 1 / SIM 2)'},
           {'command': 'rename', 'description': '✏️ 修改卡片备注名 (例: /rename 2 英国卡)'},
           {'command': 'use', 'description': '🔄 持久切换卡位 (例: /use 2)'},
@@ -2205,7 +2224,7 @@ class RemoteGatewayService {
         ? ''
         : trimmedText.substring(firstNewline + 1).trim();
     final command = RegExp(
-      r'^/(start|help|menu|list|status|use|use_temp|back|default|rename|keepalive|keepalive_now|readers|reader|retry_sms|download|download_test|delete|delete_confirm|delete_cancel|announce|guard|guard_toggle|guard_now|proxy|proxy_toggle|proxy_group|proxy_node|tunnel)(?:@[A-Za-z0-9_]+)?(?:\s+(.*))?$',
+      r'^/(start|help|menu|list|status|use|use_temp|back|default|rename|keepalive|keepalive_now|readers|reader|retry_sms|download|download_test|delete|delete_confirm|delete_cancel|announce|guard|guard_toggle|guard_now|proxy|proxy_toggle|proxy_group|proxy_node|tunnel|kick)(?:@[A-Za-z0-9_]+)?(?:\s+(.*))?$',
       caseSensitive: false,
     ).firstMatch(commandLine);
     if (command == null) return null;
@@ -2887,6 +2906,9 @@ class RemoteGatewayService {
               keyboard: const [
                 [
                   _TelegramButton('📡 查看搜网进度', 'cmd:status'),
+                  _TelegramButton('⚡ 刷新基带搜网', 'cmd:kick'),
+                ],
+                [
                   _TelegramButton('🏠 立即切回主卡', 'cmd:back'),
                 ],
               ],
@@ -3051,6 +3073,17 @@ class RemoteGatewayService {
               [
                 _TelegramButton('📡 查看基带状态', 'cmd:status'),
                 _TelegramButton('📋 卡内 eSIM 列表', 'cmd:list'),
+              ],
+            ],
+          );
+        case 'kick':
+          unawaited(_profiles.accelerateNetworkSearch().catchError((Object _) => false));
+          return const _TelegramReply(
+            '⚡ 已向基带下发快速重搜与射频复位指令，正在加速漫游网络握手...',
+            keyboard: [
+              [
+                _TelegramButton('📡 查看基带状态', 'cmd:status'),
+                _TelegramButton('🏠 立即切回主卡', 'cmd:back'),
               ],
             ],
           );

@@ -124,4 +124,15 @@ class NetworkStatusService {
   Future<void> refresh() async {
     await _methodChannel.invokeMethod<void>('refresh');
   }
+
+  Future<bool> accelerateNetworkSearch() async {
+    try {
+      final res = await _methodChannel.invokeMapMethod<String, dynamic>(
+        'accelerateNetworkSearch',
+      );
+      return res?['success'] == true;
+    } catch (_) {
+      return false;
+    }
+  }
 }

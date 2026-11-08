@@ -111,7 +111,7 @@ class CcidAdapter extends BaseAdapter {
     if (card == null) {
       throw PlatformException(code: 'DISCONNECTED', message: 'USB 读卡器未连接');
     }
-    final hexCmd = HexUtils.bytesToHex(apdu);
+    final hexCmd = HexUtils.bytesToHexUpper(apdu);
     final String? responseHex;
     try {
       responseHex = await card.transceive(hexCmd);
