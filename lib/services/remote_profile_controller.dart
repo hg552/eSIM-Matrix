@@ -9,7 +9,6 @@ import '../services/network_status_service.dart';
 import '../services/notification_service.dart';
 import '../services/profile_metadata_service.dart';
 import '../settings/app_settings.dart';
-import '../utils/apdu_exception.dart';
 import '../utils/error_codes.dart';
 import '../utils/foreground_card_session.dart';
 import '../utils/profile_tag_utils.dart';
@@ -89,11 +88,8 @@ abstract interface class RemoteProfileControl {
   Future<bool> accelerateNetworkSearch() async => false;
 }
 class LpaRemoteProfileControl implements RemoteProfileControl {
-  LpaRemoteProfileControl({
-    CompositeAdapter? adapter,
-    Duration verificationDelay = const Duration(milliseconds: 1500),
-  }) : _adapter = adapter ?? CompositeAdapter(),
-       _verificationDelay = verificationDelay {
+  LpaRemoteProfileControl({CompositeAdapter? adapter})
+    : _adapter = adapter ?? CompositeAdapter() {
     _manager = ProfileManager(_adapter);
     for (final plugin in BuildPluginRegistry.createSessionPlugins()) {
       _manager.addSessionPlugin(plugin);
@@ -103,7 +99,6 @@ class LpaRemoteProfileControl implements RemoteProfileControl {
   final CompositeAdapter _adapter;
   late final ProfileManager _manager;
   final NetworkStatusService _networkStatus = const NetworkStatusService();
-  final Duration _verificationDelay;
   List<RemoteProfileEntry>? _cachedProfiles;
   RemoteCardResourceInfo? _cachedResourceInfo;
   String? _cachedReaderId;
@@ -206,7 +201,17 @@ class LpaRemoteProfileControl implements RemoteProfileControl {
         return;
       } catch (error) {
         if (!_isTransientSwitchError(error)) rethrow;
-        await Future<void>.delayed(_verificationDelay);
+        // A profile switch power-cycles the SIM, so the SE service answers
+        // "Secure Element is not present" for a while afterwards. A fixed 1.5s
+        // pause is shorter than that window, so wait for the card itself.
+        final recovered = await _waitForSecureElement(reader);
+        if (!recovered) {
+          throw AppException(
+            AppErrorCode.ERROR_OMAPI_READER_NOT_AVAILABLE,
+            message: 'The eUICC did not come back after the reset',
+            originalError: error,
+          );
+        }
         try {
           await _adapter.reconnect();
         } catch (reconnectError) {
@@ -556,7 +561,13 @@ class LpaRemoteProfileControl implements RemoteProfileControl {
       await AppSettings().setLastSelectedReader(r.id);
       return r;
     }
-    throw StateError('selected_reader_unavailable');
+    // The eUICC is briefly absent while the SIM resets after a profile switch.
+    // A StateError here is not retryable, so the revert path would give up
+    // immediately; a reader-unavailable AppException is classified transient.
+    throw AppException(
+      AppErrorCode.ERROR_OMAPI_READER_NOT_AVAILABLE,
+      message: 'No reader answered; the SIM may still be resetting',
+    );
   }
 
   Future<RemoteCardResourceInfo> _readResourceInfoOnChannel(Channel channel) async {
@@ -605,26 +616,42 @@ class LpaRemoteProfileControl implements RemoteProfileControl {
     enabled: profile.enabled,
   );
 
-  bool _isTransientSwitchError(Object error) {
-    if (isOmapiSessionCorruptedError(error)) return false;
-    final errorStr = error.toString();
-    if (errorStr.contains('ENABLE_FAILED:') ||
-        errorStr.contains('DISABLE_FAILED:')) {
-      return false;
+  bool _isTransientSwitchError(Object error) =>
+      isTransientProfileSwitchError(error);
+
+  /// Blocks until the eUICC answers again, or [timeout] elapses.
+  ///
+  /// Switching a profile resets the SIM, and the platform reports
+  /// `CONNECTION_FAILED: Secure Element is not present` until the card is
+  /// re-enumerated. Retrying before that only burns attempts, so this waits for
+  /// the card instead of guessing a fixed delay.
+  Future<bool> _waitForSecureElement(
+    Reader reader, {
+    Duration timeout = const Duration(seconds: 20),
+  }) async {
+    final deadline = DateTime.now().add(timeout);
+    var first = true;
+    while (DateTime.now().isBefore(deadline)) {
+      try {
+        await _adapter.runExclusive(() async {
+          // connect() short-circuits while the adapter still believes it is
+          // attached, which is exactly the state a mid-transaction failure
+          // leaves behind, so drop the cached session before probing.
+          if (first) {
+            try {
+              await _adapter.disconnect();
+            } catch (_) {}
+          }
+          await _adapter.connect(reader);
+        });
+        return true;
+      } catch (error) {
+        first = false;
+        if (!_isTransientSwitchError(error)) return false;
+        await Future<void>.delayed(const Duration(milliseconds: 900));
+      }
     }
-    if (error is CardBusyException ||
-        error is ConditionOfUseNotSatisfiedException ||
-        error is ProactiveRefreshException) {
-      return true;
-    }
-    if (error is! AppException) return false;
-    return error.code == AppErrorCode.ERROR_BLUETOOTH_TIMEOUT ||
-        error.code == AppErrorCode.ERROR_BLUETOOTH_NOT_CONNECTED ||
-        error.code == AppErrorCode.ERROR_BLUETOOTH_CONNECT_FAILED ||
-        error.code == AppErrorCode.ERROR_BLUETOOTH_DISABLED ||
-        error.code == AppErrorCode.ERROR_OMAPI_READER_NOT_AVAILABLE ||
-        error.code == AppErrorCode.ERROR_OMAPI_CHANNEL_OPEN_FAILED ||
-        error.code == AppErrorCode.ERROR_OMAPI_TRANSMIT_FAILED;
+    return false;
   }
   static int? _slotIndex(String? readerId) {
     if (readerId == null) return null;

@@ -11,6 +11,9 @@ import android.telephony.SubscriptionManager
 import android.telephony.TelephonyManager
 import android.util.Log
 import org.json.JSONObject
+import java.net.InetSocketAddress
+import java.net.Socket
+import java.net.URI
 import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.util.UUID
@@ -45,14 +48,58 @@ internal class SmsRelayReceiver : BroadcastReceiver() {
         /** How many messages one sweep resends before the next one takes over. */
         private const val MAX_RETRY_ITEMS_PER_SWEEP = 20
 
+        private fun buildWebhookPayload(
+            messageId: String,
+            sender: String,
+            body: String,
+            origin: SmsRelayOrigin,
+            receivedAtMillis: Long,
+        ): String = JSONObject()
+            .put("event", "sms.received")
+            .put("messageId", messageId)
+            .put("sender", sender)
+            .put("body", body)
+            .put("otp", TelegramBotClient.extractOtp(body) ?: JSONObject.NULL)
+            .put("receivedAtEpochMillis", receivedAtMillis)
+            .put("subscriptionId", origin.subscriptionId ?: JSONObject.NULL)
+            .put("slotIndex", origin.slotIndex ?: JSONObject.NULL)
+            .put("carrierName", origin.carrierName ?: JSONObject.NULL)
+            .toString()
+
         internal fun deliverSingle(
             settings: SmsRelaySettings,
             sender: String,
             body: String,
             origin: SmsRelayOrigin,
             receivedAtMillis: Long,
+            // Stable across attempts so a receiver can de-duplicate, and reused
+            // by a resend sweep so the same message is recognisable.
+            messageId: String = UUID.randomUUID().toString(),
+            // A resend sweep must not re-deliver the courtesy channel: the
+            // primary never got through, so the copy would be a duplicate.
+            sendSecondary: Boolean = true,
         ): String? {
-            val token = settings.token ?: return "token_missing"
+            val token = settings.token ?: settings.webhookToken ?: settings.telegramToken ?: return "token_missing"
+            val webhookPayload = buildWebhookPayload(messageId, sender, body, origin, receivedAtMillis)
+            val hasWebhookCopy = !settings.webhookEndpoint.isNullOrBlank() &&
+                !settings.webhookToken.isNullOrBlank()
+            // The channel that is not the active mode is a courtesy copy. Sending
+            // it inside the retry loop delivered the same verification code up to
+            // three times whenever the primary failed.
+            var secondarySent = false
+            fun sendSecondaryCopy() {
+                if (!sendSecondary || secondarySent) return
+                secondarySent = true
+                if (!hasWebhookCopy) return
+                runCatching {
+                    SmsRelayWebhookClient.post(
+                        settings.webhookEndpoint!!,
+                        settings.webhookToken!!,
+                        webhookPayload,
+                    )
+                }
+            }
+
             var lastError: String? = "network_error"
             for (delayMs in retryBackoffMillis) {
                 if (delayMs > 0L) {
@@ -76,31 +123,33 @@ internal class SmsRelayReceiver : BroadcastReceiver() {
                         }
                         lastSendEpochMillis.set(System.currentTimeMillis())
                     }
+
                     val errorCode = when (settings.mode) {
                         SmsRelayMode.WEBHOOK -> {
-                            val endpoint = settings.endpoint ?: return "endpoint_missing"
-                            val payload = JSONObject()
-                                .put("event", "sms.received")
-                                .put("messageId", UUID.randomUUID().toString())
-                                .put("sender", sender)
-                                .put("body", body)
-                                .put("otp", TelegramBotClient.extractOtp(body) ?: JSONObject.NULL)
-                                .put("receivedAtEpochMillis", receivedAtMillis)
-                                .put("subscriptionId", origin.subscriptionId ?: JSONObject.NULL)
-                                .put("slotIndex", origin.slotIndex ?: JSONObject.NULL)
-                                .put("carrierName", origin.carrierName ?: JSONObject.NULL)
-                                .toString()
-                            val responseCode = SmsRelayWebhookClient.post(endpoint, token, payload)
+                            val endpoint = settings.webhookEndpoint ?: settings.endpoint ?: return "endpoint_missing"
+                            val whToken = settings.webhookToken ?: token
+                            val responseCode = SmsRelayWebhookClient.post(endpoint, whToken, webhookPayload)
+                            if (!settings.telegramChatId.isNullOrBlank() && !settings.telegramToken.isNullOrBlank()) {
+                                if (sendSecondary && !secondarySent) {
+                                    secondarySent = true
+                                    runCatching {
+                                        TelegramBotClient.sendSms(settings.telegramToken, settings.telegramChatId, sender, body, origin)
+                                    }
+                                }
+                            }
                             if (responseCode in 200..299) null else "http_$responseCode"
                         }
                         SmsRelayMode.TELEGRAM -> {
                             val chatId = settings.telegramChatId ?: return "chat_id_missing"
-                            TelegramBotClient.sendSms(token, chatId, sender, body, origin)
+                            val tgToken = settings.telegramToken ?: token
+                            sendSecondaryCopy()
+                            TelegramBotClient.sendSms(tgToken, chatId, sender, body, origin)
                             null
                         }
                         SmsRelayMode.CF_WORKER -> {
                             val endpoint = settings.endpoint ?: return "endpoint_missing"
                             val channelId = settings.cfChannelId ?: return "channel_missing"
+                            sendSecondaryCopy()
                             SmsRelayCfWorkerClient.post(endpoint, channelId, token, sender, body, origin, receivedAtMillis)
                         }
                         else -> return "invalid_mode"
@@ -141,7 +190,15 @@ internal class SmsRelayReceiver : BroadcastReceiver() {
                 val carrierName = item["carrierName"] as? String
                 val receivedAtMillis = (item["receivedAtMillis"] as? Number)?.toLong() ?: System.currentTimeMillis()
                 val origin = SmsRelayOrigin(null, slotIndex, carrierName)
-                val err = deliverSingle(settings, sender, body, origin, receivedAtMillis)
+                val err = deliverSingle(
+                    settings,
+                    sender,
+                    body,
+                    origin,
+                    receivedAtMillis,
+                    messageId = id,
+                    sendSecondary = false,
+                )
                 SmsRelayStore.markDelivered(appContext, id, err == null, err)
                 if (err == null) deliveredCount++
                 attempted++
@@ -310,23 +367,35 @@ internal class CallRelayReceiver : BroadcastReceiver() {
                         return@Thread
                     }
                 }
+                fun buildCallWebhookPayload(): String = JSONObject()
+                    .put("event", "call.ringing")
+                    .put("caller", callerDisplay)
+                    .put("receivedAtEpochMillis", now)
+                    .put("slotIndex", origin.slotIndex ?: JSONObject.NULL)
+                    .put("carrierName", origin.carrierName ?: JSONObject.NULL)
+                    .toString()
+
                 val errorCode = try {
                     when (settings.mode) {
                         SmsRelayMode.TELEGRAM -> {
+                            if (!settings.webhookEndpoint.isNullOrBlank() && !settings.webhookToken.isNullOrBlank()) {
+                                runCatching {
+                                    SmsRelayWebhookClient.post(settings.webhookEndpoint, settings.webhookToken, buildCallWebhookPayload())
+                                }
+                            }
                             val chatId = settings.telegramChatId ?: "chat_id_missing"
-                            TelegramBotClient.sendCallAlert(settings.token, chatId, callerDisplay, origin)
+                            TelegramBotClient.sendCallAlert(settings.telegramToken ?: settings.token, chatId, callerDisplay, origin)
                             null
                         }
                         SmsRelayMode.WEBHOOK -> {
-                            val endpoint = settings.endpoint ?: "endpoint_missing"
-                            val payload = JSONObject()
-                                .put("event", "call.ringing")
-                                .put("caller", callerDisplay)
-                                .put("receivedAtEpochMillis", now)
-                                .put("slotIndex", origin.slotIndex ?: JSONObject.NULL)
-                                .put("carrierName", origin.carrierName ?: JSONObject.NULL)
-                                .toString()
-                            val code = SmsRelayWebhookClient.post(endpoint, settings.token, payload)
+                            if (!settings.telegramChatId.isNullOrBlank() && !settings.telegramToken.isNullOrBlank()) {
+                                runCatching {
+                                    TelegramBotClient.sendCallAlert(settings.telegramToken, settings.telegramChatId, callerDisplay, origin)
+                                }
+                            }
+                            val endpoint = settings.webhookEndpoint ?: settings.endpoint ?: "endpoint_missing"
+                            val whToken = settings.webhookToken ?: settings.token ?: ""
+                            val code = SmsRelayWebhookClient.post(endpoint, whToken, buildCallWebhookPayload())
                             if (code in 200..299) null else "http_$code"
                         }
                         SmsRelayMode.CF_WORKER -> {
@@ -373,8 +442,22 @@ internal class CallRelayReceiver : BroadcastReceiver() {
 internal object SmsRelayWebhookClient {
     fun post(endpoint: String, token: String, payload: String): Int {
         val normalizedEndpoint = SmsRelayEndpointValidator.normalize(endpoint)
-        val connection = URL(normalizedEndpoint).openConnection() as? HttpsURLConnection
-            ?: throw IllegalArgumentException("https_required")
+        val uri = URI(normalizedEndpoint)
+        return if (uri.scheme.equals("https", ignoreCase = true)) {
+            postHttps(normalizedEndpoint, token, payload)
+        } else {
+            // Cleartext is disabled application-wide (network_security_config), so
+            // HttpURLConnection refuses http:// outright. A LAN or adb-reverse
+            // webhook still has to work, and a raw socket is the only transport
+            // that is not subject to that policy — the endpoint validator already
+            // restricts it to loopback, RFC1918 and the Tailscale range.
+            postPlainHttp(uri, token, payload)
+        }
+    }
+
+    private fun postHttps(endpoint: String, token: String, payload: String): Int {
+        val connection = URL(endpoint).openConnection() as? java.net.HttpURLConnection
+            ?: throw IllegalArgumentException("invalid_endpoint")
         try {
             connection.requestMethod = "POST"
             connection.connectTimeout = 5000
@@ -399,6 +482,42 @@ internal object SmsRelayWebhookClient {
             return responseCode
         } finally {
             connection.disconnect()
+        }
+    }
+
+    private fun postPlainHttp(uri: URI, token: String, payload: String): Int {
+        val host = uri.host ?: throw IllegalArgumentException("invalid_endpoint")
+        val port = if (uri.port != -1) uri.port else 80
+        val path = buildString {
+            append(uri.rawPath?.takeIf { it.isNotEmpty() } ?: "/")
+            uri.rawQuery?.let { append('?').append(it) }
+        }
+        val bytes = payload.toByteArray(StandardCharsets.UTF_8)
+        val head = buildString {
+            append("POST ").append(path).append(" HTTP/1.1\r\n")
+            append("Host: ").append(host)
+            if (port != 80) append(':').append(port)
+            append("\r\n")
+            append("Authorization: Bearer ").append(token).append("\r\n")
+            append("Content-Type: application/json; charset=utf-8\r\n")
+            append("Accept: application/json\r\n")
+            append("Content-Length: ").append(bytes.size).append("\r\n")
+            append("Connection: close\r\n\r\n")
+        }
+        Socket().use { socket ->
+            socket.connect(InetSocketAddress(host, port), 5000)
+            socket.soTimeout = 5000
+            socket.getOutputStream().let { output ->
+                output.write(head.toByteArray(StandardCharsets.US_ASCII))
+                output.write(bytes)
+                output.flush()
+            }
+            // Only the status line matters; the body is drained by closing.
+            val statusLine = socket.getInputStream()
+                .bufferedReader(StandardCharsets.ISO_8859_1)
+                .readLine()
+                ?: return 0
+            return statusLine.split(' ').getOrNull(1)?.toIntOrNull() ?: 0
         }
     }
 }

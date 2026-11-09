@@ -1,5 +1,6 @@
 import 'package:flutter/services.dart';
 
+import '../../utils/apdu_exception.dart';
 import '../../utils/error_codes.dart';
 
 const String omapiSessionCorruptedCode = 'OMAPI_SESSION_CORRUPTED';
@@ -34,6 +35,49 @@ bool canAutomaticallyRetryProfileSwitch(
   Object error, {
   required bool commandSubmitted,
 }) => !commandSubmitted && !isOmapiSessionCorruptedError(error);
+
+/// Platform codes the OMAPI plugin emits when the APDU channel itself failed.
+///
+/// These arrive as raw [PlatformException]s rather than [AppException]s, so a
+/// predicate that only inspected AppException let a dropped channel escape
+/// every retry path and surface as an opaque `control_error`.
+const Set<String> transientOmapiPlatformCodes = <String>{
+  'TRANSMIT_FAILED',
+  'NOT_CONNECTED',
+  'CHANNEL_FAILED',
+  'CONNECTION_FAILED',
+  'CHANNEL_ALREADY_OPEN',
+};
+
+/// Whether repeating the profile switch can plausibly succeed.
+///
+/// A corrupted session is excluded because only a process restart clears it,
+/// and an explicit ENABLE_FAILED/DISABLE_FAILED means the card refused the
+/// command rather than dropping the transport.
+bool isTransientProfileSwitchError(Object error) {
+  if (isOmapiSessionCorruptedError(error)) return false;
+  final errorStr = error.toString();
+  if (errorStr.contains('ENABLE_FAILED:') ||
+      errorStr.contains('DISABLE_FAILED:')) {
+    return false;
+  }
+  if (error is PlatformException) {
+    return transientOmapiPlatformCodes.contains(error.code);
+  }
+  if (error is CardBusyException ||
+      error is ConditionOfUseNotSatisfiedException ||
+      error is ProactiveRefreshException) {
+    return true;
+  }
+  if (error is! AppException) return false;
+  return error.code == AppErrorCode.ERROR_BLUETOOTH_TIMEOUT ||
+      error.code == AppErrorCode.ERROR_BLUETOOTH_NOT_CONNECTED ||
+      error.code == AppErrorCode.ERROR_BLUETOOTH_CONNECT_FAILED ||
+      error.code == AppErrorCode.ERROR_BLUETOOTH_DISABLED ||
+      error.code == AppErrorCode.ERROR_OMAPI_READER_NOT_AVAILABLE ||
+      error.code == AppErrorCode.ERROR_OMAPI_CHANNEL_OPEN_FAILED ||
+      error.code == AppErrorCode.ERROR_OMAPI_TRANSMIT_FAILED;
+}
 
 class OmapiChannelOwnershipTracker {
   int _nextToken = 0;

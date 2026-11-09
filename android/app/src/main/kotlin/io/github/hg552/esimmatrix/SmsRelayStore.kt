@@ -26,6 +26,7 @@ internal data class SmsRelaySettings(
     val mode: String,
     val enabled: Boolean,
     val endpoint: String?,
+    val webhookEndpoint: String?,
     val telegramChatId: String?,
     val cfChannelId: String?,
     val token: String?,
@@ -37,6 +38,24 @@ internal data class SmsRelaySettings(
 )
 
 internal object SmsRelayEndpointValidator {
+    fun isPrivateOrTailnetHost(rawHost: String): Boolean {
+        val host = rawHost.trim().lowercase().removeSurrounding("[", "]")
+        if (host == "localhost" || host == "::1" || host.startsWith("fd7a:115c:a1e0:")) {
+            return true
+        }
+        val parts = host.split('.')
+        if (parts.size != 4) return false
+        val octets = parts.map { it.toIntOrNull() ?: return false }
+        if (octets.any { it !in 0..255 }) return false
+        val a = octets[0]
+        val b = octets[1]
+        return a == 127 ||
+            a == 10 ||
+            (a == 192 && b == 168) ||
+            (a == 172 && b in 16..31) ||
+            (a == 100 && b in 64..127)
+    }
+
     fun normalize(rawValue: String): String {
         val value = rawValue.trim()
         require(value.isNotEmpty()) { "invalid_endpoint" }
@@ -46,8 +65,11 @@ internal object SmsRelayEndpointValidator {
         } catch (error: URISyntaxException) {
             throw IllegalArgumentException("invalid_endpoint", error)
         }
-        require(uri.scheme.equals("https", ignoreCase = true)) { "https_required" }
-        require(!uri.host.isNullOrBlank()) { "invalid_endpoint" }
+        val host = uri.host
+        require(!host.isNullOrBlank()) { "invalid_endpoint" }
+        val isHttps = uri.scheme.equals("https", ignoreCase = true)
+        val isAllowedHttp = uri.scheme.equals("http", ignoreCase = true) && isPrivateOrTailnetHost(host)
+        require(isHttps || isAllowedHttp) { "https_required" }
         require(uri.userInfo == null && uri.fragment == null) { "invalid_endpoint" }
         require(uri.port == -1 || uri.port in 1..65535) { "invalid_endpoint" }
         return value
@@ -75,6 +97,7 @@ internal object SmsRelayStore {
     private const val KEY_ENABLED = "enabled"
     private const val KEY_MODE = "mode"
     private const val KEY_ENDPOINT = "endpoint"
+    private const val KEY_WEBHOOK_ENDPOINT = "webhook_endpoint"
     private const val KEY_TELEGRAM_CHAT_ID = "telegram_chat_id"
     private const val KEY_WEBHOOK_TOKEN_IV = "token_iv"
     private const val KEY_WEBHOOK_TOKEN_CIPHERTEXT = "token_ciphertext"
@@ -103,6 +126,8 @@ internal object SmsRelayStore {
             else -> SmsRelayMode.TELEGRAM
         }
         val endpoint = preferences.getString(KEY_ENDPOINT, null)
+        val webhookEndpoint = preferences.getString(KEY_WEBHOOK_ENDPOINT, null)
+            ?: endpoint?.takeIf { !it.contains(".workers.dev", ignoreCase = true) }
         val telegramChatId = preferences.getString(KEY_TELEGRAM_CHAT_ID, null)?.let { raw ->
             runCatching { TelegramChatIdValidator.normalize(raw) }.getOrNull()
         }
@@ -137,10 +162,13 @@ internal object SmsRelayStore {
             SmsRelayMode.CF_WORKER -> cfToken
             else -> webhookToken
         }
+        val hasTelegram = !telegramChatId.isNullOrBlank() && !telegramToken.isNullOrBlank()
+        val hasWebhook = !webhookEndpoint.isNullOrBlank() && !webhookToken.isNullOrBlank()
+        val hasCf = !endpoint.isNullOrBlank() && !cfChannelId.isNullOrBlank() && !cfToken.isNullOrBlank()
         val configured = when (mode) {
-            SmsRelayMode.TELEGRAM -> !telegramChatId.isNullOrBlank() && !telegramToken.isNullOrBlank()
-            SmsRelayMode.CF_WORKER -> !endpoint.isNullOrBlank() && !cfChannelId.isNullOrBlank() && !cfToken.isNullOrBlank()
-            else -> !endpoint.isNullOrBlank() && !webhookToken.isNullOrBlank()
+            SmsRelayMode.TELEGRAM -> hasTelegram || hasWebhook
+            SmsRelayMode.CF_WORKER -> hasCf || hasWebhook
+            else -> hasWebhook || hasTelegram
         }
         val enabled = preferences.getBoolean(KEY_ENABLED, false) && configured
         val lastDelivery = if (preferences.contains(KEY_LAST_DELIVERY)) {
@@ -151,7 +179,8 @@ internal object SmsRelayStore {
         return SmsRelaySettings(
             mode = mode,
             enabled = enabled,
-            endpoint = endpoint,
+            endpoint = if (mode == SmsRelayMode.WEBHOOK) (webhookEndpoint ?: endpoint) else endpoint,
+            webhookEndpoint = webhookEndpoint,
             telegramChatId = telegramChatId,
             cfChannelId = cfChannelId,
             token = activeToken,
@@ -219,6 +248,7 @@ internal object SmsRelayStore {
             editor.putString(KEY_CF_CHANNEL_ID, cfChannelId)
         } else if (mode == SmsRelayMode.WEBHOOK) {
             editor.putString(KEY_ENDPOINT, endpoint)
+            editor.putString(KEY_WEBHOOK_ENDPOINT, endpoint)
         } else {
             editor.putString(KEY_TELEGRAM_CHAT_ID, telegramChatId)
         }

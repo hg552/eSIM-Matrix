@@ -36,7 +36,20 @@ void main() {
       await File(
         '${plugins.path}/private_vendor.dart',
       ).writeAsString('class PrivateVendorPlugin extends ProfilePlugin {}');
-      final dart = Platform.isWindows ? 'dart.exe' : 'dart';
+      // `flutter test` runs this in flutter_tester, so resolvedExecutable is not
+      // Dart. Locate the SDK through FLUTTER_ROOT, which the tool always exports.
+      String resolveDart() {
+        final root = Platform.environment['FLUTTER_ROOT'];
+        if (root != null && root.isNotEmpty) {
+          final candidate = File(
+            '$root/bin/cache/dart-sdk/bin/${Platform.isWindows ? 'dart.exe' : 'dart'}',
+          );
+          if (candidate.existsSync()) return candidate.path;
+        }
+        return Platform.isWindows ? 'dart.exe' : 'dart';
+      }
+
+      final dart = resolveDart();
 
       final public = await run(dart, [script, '--public']);
       expect(public.exitCode, 0, reason: public.stderr.toString());

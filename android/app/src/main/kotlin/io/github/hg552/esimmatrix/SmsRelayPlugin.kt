@@ -74,6 +74,7 @@ class SmsRelayPlugin :
             "saveConfiguration" -> saveConfiguration(call, result)
             "discoverTelegramChat" -> discoverTelegramChat(call, result)
             "testTelegram" -> testTelegram(result)
+            "testWebhook" -> testWebhook(result)
             "testCfWorker" -> testCfWorker(result)
             "clearToken" -> clearToken(result)
             "isGatewayAvailable" -> result.success(isGatewayAvailable())
@@ -201,6 +202,7 @@ class SmsRelayPlugin :
                     "mode" to settings.mode,
                     "enabled" to settings.enabled,
                     "endpoint" to settings.endpoint,
+                    "webhookEndpoint" to settings.webhookEndpoint,
                     "telegramChatId" to settings.telegramChatId,
                     "cfChannelId" to settings.cfChannelId,
                     "cfTokenConfigured" to !settings.cfToken.isNullOrBlank(),
@@ -233,7 +235,9 @@ class SmsRelayPlugin :
                 val updatedSms = SmsRelayStore.load(appContext!!)
                 val hasTelegramControl = !updatedSms.telegramToken.isNullOrBlank() &&
                     !updatedSms.telegramChatId.isNullOrBlank()
-                if (enabled || hasTelegramControl) {
+                val hasWebhookControl = !updatedSms.webhookEndpoint.isNullOrBlank() &&
+                    !updatedSms.webhookToken.isNullOrBlank()
+                if (enabled || hasTelegramControl || hasWebhookControl) {
                     RemoteGatewayForegroundService.start(appContext!!)
                 } else if (!SmsRelayStore.loadGateway(appContext!!).enabled) {
                     RemoteGatewayForegroundService.stop(appContext!!)
@@ -316,6 +320,8 @@ class SmsRelayPlugin :
                     "apiToken" to gateway.apiToken,
                     "telegramToken" to sms.telegramToken,
                     "telegramChatId" to sms.telegramChatId,
+                    "webhookEndpoint" to sms.webhookEndpoint,
+                    "webhookToken" to sms.webhookToken,
                     "canScheduleExactAlarms" to canScheduleExactAlarms(),
                 ),
             )
@@ -548,6 +554,61 @@ class SmsRelayPlugin :
                         Handler(Looper.getMainLooper()).post { result.success(true) }
                     } else {
                         Handler(Looper.getMainLooper()).post { result.error(err, err, null) }
+                    }
+                } catch (e: Exception) {
+                    Handler(Looper.getMainLooper()).post {
+                        result.error("network_error", e.message, null)
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            result.error("queue_unavailable", "Request could not be queued", null)
+        }
+    }
+    private fun testWebhook(result: MethodChannel.Result) {
+        if (!isAvailable()) {
+            result.error("unsupported", "SMS relay is not included in this app variant", null)
+            return
+        }
+        val settings = try {
+            SmsRelayStore.load(appContext!!)
+        } catch (_: Exception) {
+            result.error("settings_unavailable", "SMS relay settings could not be read", null)
+            return
+        }
+        val endpoint = settings.webhookEndpoint ?: settings.endpoint
+        val token = settings.webhookToken ?: settings.token
+        if (endpoint.isNullOrBlank() || token.isNullOrBlank()) {
+            result.error("webhook_config_required", "Save a Webhook URL and Bearer token first", null)
+            return
+        }
+        try {
+            networkExecutor.execute {
+                try {
+                    val payload = org.json.JSONObject()
+                        .put("event", "sms.received")
+                        .put("messageId", java.util.UUID.randomUUID().toString())
+                        .put("sender", "eSIM-Matrix 测试")
+                        .put("body", "【eSIM-Matrix】Webhook 连通性测试成功，示例验证码：654321。")
+                        .put("otp", "654321")
+                        .put("receivedAtEpochMillis", System.currentTimeMillis())
+                        .put("slotIndex", 1)
+                        .put("carrierName", "eSIM-Matrix")
+                        .toString()
+                    val code = SmsRelayWebhookClient.post(endpoint, token, payload)
+                    if (code in 200..299) {
+                        SmsRelayStore.recordDelivery(
+                            appContext!!,
+                            delivered = true,
+                            sender = "eSIM-Matrix 测试",
+                            body = "这是一条来自 eSIM-Matrix 的 Webhook 连通性测试消息。",
+                            mode = SmsRelayMode.WEBHOOK,
+                        )
+                        Handler(Looper.getMainLooper()).post { result.success(true) }
+                    } else {
+                        Handler(Looper.getMainLooper()).post {
+                            result.error("http_$code", "Webhook returned HTTP $code", null)
+                        }
                     }
                 } catch (e: Exception) {
                     Handler(Looper.getMainLooper()).post {

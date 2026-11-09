@@ -1,0 +1,2097 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>eSIM-Matrix Hub · 远程切卡与接码网关</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --surface: #ffffff;
+    --surface-2: #f9fafb;
+    --border: #e5e7eb;
+    --border-strong: #d1d5db;
+    --fg: #111827;
+    --fg-soft: #374151;
+    --muted: #6b7280;
+    --accent: #2563eb;
+    --accent-soft: #eff6ff;
+    --accent-border: #bfdbfe;
+    --success: #16a34a;
+    --success-soft: #f0fdf4;
+    --warning: #d97706;
+    --warning-soft: #fffbeb;
+    --danger: #dc2626;
+    --danger-soft: #fef2f2;
+    --radius: 12px;
+    --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
+
+    /* Springs from WWDC23 "Animate with springs": mass = 1,
+       stiffness = (2pi/duration)^2, damping ratio = 1 - bounce.
+       Each curve is that solution sampled into CSS linear(); cubic-bezier
+       cannot overshoot, linear() can, so these keep the real bounce.
+       The -ms value is the settle time, not the perceptual duration. */
+    --spring-snappy: linear(0,0.032 3.1%,0.108 6.3%,0.207 9.4%,0.315 12.5%,0.422 15.6%,0.522 18.8%,0.612 21.9%,0.69 25%,0.757 28.1%,0.812 31.3%,0.858 34.4%,0.894 37.5%,0.923 40.6%,0.945 43.8%,0.962 46.9%,0.975 50%,0.984 53.1%,0.991 56.3%,0.996 59.4%,0.999 62.5%,1.001 65.6%,1.002 68.8%,1.003 71.9%,1.003 75%,1.003 78.1%,1.003 81.3%,1.002 84.4%,1.002 87.5%,1.002 90.6%,1.002 93.8%,1.001 96.9%,1 100%);
+    --spring-snappy-ms: 554ms;
+    --spring-bouncy: linear(0,0.045 3.1%,0.155 6.3%,0.297 9.4%,0.447 12.5%,0.591 15.6%,0.717 18.8%,0.823 21.9%,0.906 25%,0.967 28.1%,1.009 31.3%,1.035 34.4%,1.049 37.5%,1.054 40.6%,1.053 43.8%,1.047 46.9%,1.04 50%,1.032 53.1%,1.024 56.3%,1.017 59.4%,1.011 62.5%,1.006 65.6%,1.002 68.8%,1 71.9%,0.998 75%,0.997 78.1%,0.997 81.3%,0.997 84.4%,0.997 87.5%,0.998 90.6%,0.998 93.8%,0.999 96.9%,1 100%);
+    --spring-bouncy-ms: 826ms;
+    --spring-smooth: linear(0,0.034 3.1%,0.115 6.3%,0.215 9.4%,0.321 12.5%,0.423 15.6%,0.517 18.8%,0.6 21.9%,0.672 25%,0.733 28.1%,0.784 31.3%,0.826 34.4%,0.86 37.5%,0.889 40.6%,0.912 43.8%,0.93 46.9%,0.945 50%,0.956 53.1%,0.966 56.3%,0.973 59.4%,0.979 62.5%,0.984 65.6%,0.987 68.8%,0.99 71.9%,0.992 75%,0.994 78.1%,0.995 81.3%,0.996 84.4%,0.997 87.5%,0.998 90.6%,0.998 93.8%,0.999 96.9%,1 100%);
+    --spring-smooth-ms: 662ms;
+    --spring-interactive: linear(0,0.031 3.1%,0.108 6.3%,0.209 9.4%,0.321 12.5%,0.432 15.6%,0.536 18.8%,0.631 21.9%,0.713 25%,0.782 28.1%,0.84 31.3%,0.886 34.4%,0.922 37.5%,0.95 40.6%,0.971 43.8%,0.986 46.9%,0.997 50%,1.004 53.1%,1.008 56.3%,1.01 59.4%,1.011 62.5%,1.011 65.6%,1.01 68.8%,1.009 71.9%,1.008 75%,1.007 78.1%,1.006 81.3%,1.004 84.4%,1.004 87.5%,1.003 90.6%,1.002 93.8%,1.001 96.9%,1 100%);
+    --spring-interactive-ms: 302ms;
+    --spring-expand: linear(0,0.029 3.1%,0.103 6.3%,0.201 9.4%,0.311 12.5%,0.422 15.6%,0.528 18.8%,0.625 21.9%,0.71 25%,0.783 28.1%,0.843 31.3%,0.892 34.4%,0.931 37.5%,0.961 40.6%,0.982 43.8%,0.998 46.9%,1.009 50%,1.015 53.1%,1.019 56.3%,1.02 59.4%,1.02 62.5%,1.018 65.6%,1.017 68.8%,1.014 71.9%,1.012 75%,1.01 78.1%,1.008 81.3%,1.006 84.4%,1.005 87.5%,1.003 90.6%,1.002 93.8%,1.002 96.9%,1 100%);
+    --spring-expand-ms: 728ms;
+  }
+  body.dark {
+    --bg: #0b1220;
+    --surface: #111a2b;
+    --surface-2: #0f172a;
+    --border: #1f2a3d;
+    --border-strong: #2b3a52;
+    --fg: #e8eef8;
+    --fg-soft: #c7d2e2;
+    --muted: #8ea0b8;
+    --accent: #60a5fa;
+    --accent-soft: #14243f;
+    --accent-border: #1e3a5f;
+    --success: #34d399;
+    --success-soft: #10261d;
+    --warning: #fbbf24;
+    --warning-soft: #2a2110;
+    --danger: #f87171;
+    --danger-soft: #2a1414;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    font-size: 14px;
+    line-height: 1.55;
+    display: flex;
+    min-height: 100vh;
+  }
+
+  /* ---------- sidebar ---------- */
+  .sidebar {
+    width: 236px;
+    flex: 0 0 236px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    padding: 18px 12px 12px;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; padding: 0 8px 18px; }
+  .brand-logo {
+    width: 34px; height: 34px; border-radius: 9px;
+    background: var(--accent); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 15px;
+  }
+  .brand-name { font-size: 14px; font-weight: 700; letter-spacing: .2px; }
+  .brand-sub { font-size: 11px; color: var(--muted); }
+
+  .nav { display: flex; flex-direction: column; gap: 2px; flex: 1; overflow-y: auto; }
+  .nav-item {
+    display: flex; align-items: center; gap: 9px;
+    padding: 8px 10px; border-radius: 8px;
+    color: var(--fg-soft); font-size: 13px; font-weight: 500;
+    cursor: pointer; border: none; background: none; width: 100%; text-align: left;
+    transition: background .12s ease, color .12s ease;
+  }
+  .nav-item:hover { background: var(--surface-2); }
+  .nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .nav-item .ico { width: 16px; text-align: center; font-size: 13px; }
+  .nav-dot {
+    margin-left: auto; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--warning);
+  }
+  .nav-count {
+    margin-left: auto; font-size: 11px; font-weight: 600;
+    background: var(--accent-soft); color: var(--accent);
+    border-radius: 99px; padding: 0 6px;
+  }
+
+  .sidebar-foot { border-top: 1px solid var(--border); padding-top: 10px; margin-top: 8px; }
+  .theme-row { display: flex; gap: 6px; padding: 0 4px 10px; }
+  .theme-btn {
+    flex: 1; height: 28px; border-radius: 7px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--muted); cursor: pointer; font-size: 12px;
+  }
+  .theme-btn.active { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent); }
+  .foot-meta { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 8px; font-size: 11px; color: var(--muted); }
+  .foot-actions { display: flex; gap: 8px; padding: 0 8px; font-size: 11px; color: var(--muted); }
+
+  /* ---------- main ---------- */
+  .main { flex: 1; min-width: 0; padding: 22px 26px 40px; }
+  /* ---------- motion ---------- */
+  /* Every transition below is a spring, never a timing curve: a curve cannot
+     carry the velocity a gesture ends with, so it stops dead on release. */
+  .page { display: none; }
+  .page.active { display: block; }
+  .page.active > * {
+    animation: spring-rise var(--spring-expand-ms) var(--spring-expand) both;
+  }
+  /* Stagger by document order. Capped so a long page never feels slow. */
+  .page.active > *:nth-child(1) { animation-delay: 0ms; }
+  .page.active > *:nth-child(2) { animation-delay: 28ms; }
+  .page.active > *:nth-child(3) { animation-delay: 56ms; }
+  .page.active > *:nth-child(4) { animation-delay: 84ms; }
+  .page.active > *:nth-child(n+5) { animation-delay: 104ms; }
+
+  @keyframes spring-rise {
+    from { opacity: 0; transform: translateY(10px) scale(0.985); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  /* Press feedback: the same interactive spring iOS uses while a finger is
+     down, so the control tracks the pointer instead of easing behind it. */
+  button:not(:disabled), .btn, .nav-item, .list-item, .dropzone, .summary, .device-card {
+    transition:
+      background .12s ease, border-color .12s ease, color .12s ease,
+      transform var(--spring-interactive-ms) var(--spring-interactive),
+      box-shadow var(--spring-interactive-ms) var(--spring-interactive);
+  }
+  button:not(:disabled):active, .btn:active, .nav-item:active {
+    transform: scale(0.96);
+  }
+  .summary:active, .device-card:active { transform: scale(0.995); }
+
+  /* Cards lift on hover; the shadow lags the transform so the lift reads as
+     depth rather than a glow. */
+  .summary:hover, .device-card:hover {
+    box-shadow: 0 4px 14px rgba(16, 24, 40, 0.09), 0 1px 3px rgba(16, 24, 40, 0.06);
+  }
+  body.dark .summary:hover, body.dark .device-card:hover {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  }
+
+  /* List rows arrive one after another when a list is rebuilt. */
+  .list-item { animation: spring-rise var(--spring-snappy-ms) var(--spring-snappy) both; }
+
+  /* The OTP digits are the one thing worth a bounce: they are what the user
+     is waiting for, and the overshoot draws the eye to them. The hero itself
+     keeps the page stagger, so this must stay on the inner element — putting
+     it on .otp-hero would replace spring-rise and break the stagger. */
+  .otp-code.flash { animation: otp-digit var(--spring-bouncy-ms) var(--spring-bouncy); }
+  @keyframes otp-digit {
+    from { opacity: 0; transform: translateY(8px) scale(0.9); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  /* Status dots breathe while a device is live, so "connected" is visible
+     peripherally without a spinner. */
+  .dot.ok.live { animation: dot-breathe 2.4s ease-in-out infinite; }
+  @keyframes dot-breathe {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.45); }
+    50%      { box-shadow: 0 0 0 4px rgba(22, 163, 74, 0); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .page.active > *, .list-item, .otp-code.flash, .dot.ok.live {
+      animation: none !important;
+    }
+    button:not(:disabled):active, .btn:active, .nav-item:active,
+    .summary:active, .device-card:active { transform: none; }
+    * { transition-duration: 1ms !important; }
+  }
+
+  .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+  .page-title { font-size: 20px; font-weight: 700; letter-spacing: .2px; }
+  .page-sub { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); box-shadow: var(--shadow);
+    padding: 16px 18px; margin-bottom: 14px;
+  }
+  .card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+  .card-title { font-size: 14px; font-weight: 650; display: flex; align-items: center; gap: 7px; }
+
+  .notice {
+    background: var(--warning-soft); border: 1px solid #fde68a;
+    border-radius: 10px; padding: 10px 14px; font-size: 12.5px;
+    color: #92400e; margin-bottom: 16px;
+  }
+  body.dark .notice { border-color: #4a3a12; color: #fbbf24; }
+
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .summary {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 14px 16px; box-shadow: var(--shadow);
+  }
+  .summary-label { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .summary-value { font-size: 22px; font-weight: 700; line-height: 1.2; }
+  .summary-value.small { font-size: 15px; }
+
+  .device-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 14px; }
+  .device-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px 18px; }
+  .device-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+  .device-name { font-size: 15px; font-weight: 700; }
+  .device-line { font-size: 12px; color: var(--muted); margin-top: 1px; }
+  .status-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: 0 0 auto; }
+  .dot.ok { background: var(--success); }
+  .dot.warn { background: var(--warning); }
+  .dot.bad { background: var(--danger); }
+
+  .row-line {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 9px 0; border-top: 1px solid var(--border); font-size: 13px;
+  }
+  .row-line:first-of-type { border-top: none; }
+  .row-label { color: var(--fg-soft); }
+  .row-value { color: var(--muted); font-size: 12.5px; text-align: right; }
+
+  .panel { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin: 10px 0; font-size: 12.5px; }
+  .panel-title { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+
+  .uptime { height: 22px; border-radius: 5px; background: var(--success); opacity: .85; margin: 6px 0; }
+  .uptime.empty { background: var(--border-strong); opacity: .5; }
+
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+
+  button, .btn {
+    font-family: inherit; font-size: 12.5px; font-weight: 600;
+    padding: 7px 13px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--border-strong); background: var(--surface); color: var(--fg-soft);
+    transition: background .12s ease, border-color .12s ease, color .12s ease;
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  button:hover { border-color: var(--accent-border); color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover { filter: brightness(1.06); color: #fff; }
+  button.ghost { background: transparent; }
+  button.danger { color: var(--danger); border-color: #fecaca; background: var(--danger-soft); }
+  button.danger:hover { border-color: var(--danger); color: var(--danger); }
+  button.success { color: var(--success); border-color: #bbf7d0; background: var(--success-soft); }
+  button.sm { padding: 5px 10px; font-size: 12px; border-radius: 7px; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+
+  input, select, textarea {
+    width: 100%; font-family: inherit; font-size: 13px;
+    padding: 8px 11px; border-radius: 8px;
+    border: 1px solid var(--border-strong); background: var(--surface); color: var(--fg);
+    outline: none;
+  }
+  input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  label.field { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 12px; }
+
+  .toggle { position: relative; width: 38px; height: 21px; flex: 0 0 auto; }
+  .toggle input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+  .toggle span {
+    position: absolute; inset: 0; border-radius: 99px; background: var(--border-strong);
+    transition: background .15s ease; pointer-events: none;
+  }
+  .toggle span::after {
+    content: ""; position: absolute; width: 15px; height: 15px; border-radius: 50%;
+    background: #fff; top: 3px; left: 3px; transition: transform .15s ease;
+  }
+  .toggle input:checked + span { background: var(--accent); }
+  .toggle input:checked + span::after { transform: translateX(17px); }
+
+  .badge { display: inline-block; padding: 1px 7px; border-radius: 99px; font-size: 11px; font-weight: 650; }
+  .badge.on { background: var(--success-soft); color: var(--success); }
+  .badge.off { background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); }
+  .badge.info { background: var(--accent-soft); color: var(--accent); }
+
+  .list-item {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px;
+    background: var(--surface); margin-bottom: 8px; flex-wrap: wrap;
+  }
+  .list-item.active { border-color: #bbf7d0; background: var(--success-soft); }
+  .list-main { min-width: 0; }
+  .list-title { font-weight: 650; font-size: 13.5px; }
+  .list-sub { font-size: 12px; color: var(--muted); }
+  .mono { font-family: Consolas, "JetBrains Mono", monospace; }
+
+  .otp-hero {
+    display: flex; align-items: center; justify-content: space-between; gap: 18px;
+    flex-wrap: wrap; padding: 16px 18px; border-radius: var(--radius);
+    border: 1px solid #bbf7d0; background: var(--success-soft); margin-bottom: 14px;
+  }
+  .otp-code { font-family: Consolas, monospace; font-size: 30px; font-weight: 800; letter-spacing: 4px; color: var(--success); }
+
+  .empty { color: var(--muted); font-size: 13px; padding: 6px 0; }
+  pre.code {
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px; font-family: Consolas, monospace; font-size: 12px;
+    color: var(--fg-soft); white-space: pre-wrap; word-break: break-word;
+    max-height: 420px; overflow: auto;
+  }
+  .dropzone {
+    margin-top: 8px; padding: 18px 14px; text-align: center;
+    border: 1.5px dashed var(--border-strong); border-radius: 10px;
+    background: var(--surface-2); color: var(--fg-soft); cursor: pointer;
+    transition: border-color .12s ease, background .12s ease;
+  }
+  .dropzone:hover { border-color: var(--accent-border); }
+  .dropzone.dragging {
+    border-color: var(--accent); background: var(--accent-soft); color: var(--accent);
+  }
+  .toast {
+    position: fixed; right: 20px; bottom: 20px; z-index: 9999;
+    background: var(--fg); color: var(--surface);
+    padding: 10px 16px; border-radius: 10px; font-size: 13px; font-weight: 600;
+    box-shadow: 0 8px 24px rgba(0,0,0,.18); display: none; max-width: 460px;
+    transform-origin: bottom right;
+  }
+  /* Toast slides in with a bounce and leaves without one: arriving is the
+     event, leaving is cleanup and should not draw attention. */
+  .toast.show {
+    display: block;
+    animation: toast-in var(--spring-bouncy-ms) var(--spring-bouncy) both;
+  }
+  .toast.hide {
+    display: block;
+    animation: toast-out 180ms cubic-bezier(.4, 0, 1, 1) both;
+  }
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateY(14px) scale(0.94); }
+    to   { opacity: 1; transform: none; }
+  }
+  @keyframes toast-out {
+    from { opacity: 1; transform: none; }
+    to   { opacity: 0; transform: translateY(6px) scale(0.97); }
+  }
+  .modal-mask {
+    position: fixed; inset: 0; background: rgba(17,24,39,.45);
+    display: flex; align-items: center; justify-content: center; z-index: 10000;
+    animation: mask-in 200ms ease both;
+  }
+  .modal-mask.closing { animation: mask-out 160ms ease both; }
+  @keyframes mask-in  { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes mask-out { from { opacity: 1; } to { opacity: 0; } }
+  /* WWDC24 zoom transition: the presented view grows out of its source
+     instead of sliding in, so the eye keeps the same object on screen. */
+  .modal {
+    background: var(--surface); border-radius: 14px; padding: 20px;
+    width: 440px; max-width: 92vw; box-shadow: 0 20px 50px rgba(0,0,0,.22);
+    transform-origin: center;
+    animation: modal-zoom var(--spring-expand-ms) var(--spring-expand) both;
+  }
+  .modal-mask.closing .modal {
+    animation: modal-zoom-out 160ms cubic-bezier(.4, 0, 1, 1) both;
+  }
+  @keyframes modal-zoom {
+    from { opacity: 0; transform: scale(0.92) translateY(8px); }
+    to   { opacity: 1; transform: none; }
+  }
+  @keyframes modal-zoom-out {
+    from { opacity: 1; transform: none; }
+    to   { opacity: 0; transform: scale(0.96) translateY(4px); }
+  }
+  @media (max-width: 900px) {
+    body { flex-direction: column; }
+    .sidebar { width: 100%; flex: none; height: auto; position: static; }
+    .nav { flex-direction: row; overflow-x: auto; }
+    .nav-item { white-space: nowrap; }
+  }
+</style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="brand">
+    <div class="brand-logo">eM</div>
+    <div>
+      <div class="brand-name">eSIM-Matrix Hub</div>
+      <div class="brand-sub">远程切卡 · 接码 · 基带监控</div>
+    </div>
+  </div>
+
+  <nav class="nav" id="navList">
+    <button class="nav-item active" data-page="overview"><span class="ico">▦</span>概览</button>
+    <button class="nav-item" data-page="sms"><span class="ico">✉</span>短信<span class="nav-count" id="navSmsCount">0</span></button>
+    <button class="nav-item" data-page="esim"><span class="ico">▤</span>eSIM</button>
+    <button class="nav-item" data-page="network"><span class="ico">⇄</span>网络出口</button>
+    <button class="nav-item" data-page="keepalive"><span class="ico">◷</span>保号</button>
+    <button class="nav-item" data-page="toolbox"><span class="ico">⚙</span>工具箱</button>
+    <button class="nav-item" data-page="notify"><span class="ico">◔</span>通知与二传手</button>
+    <button class="nav-item" data-page="settings"><span class="ico">⚒</span>系统设置</button>
+    <button class="nav-item" data-page="diagnostics"><span class="ico">⌁</span>诊断</button>
+  </nav>
+
+  <div class="sidebar-foot">
+    <div class="theme-row">
+      <button class="theme-btn active" id="themeLight" title="浅色">☀</button>
+      <button class="theme-btn" id="themeDark" title="深色">☾</button>
+    </div>
+    <div class="foot-meta">
+      <span id="footDeviceCount">0 个设备</span>
+      <span id="footVersion">v1.4.7</span>
+    </div>
+    <div class="foot-actions">
+      <button class="sm ghost" onclick="refreshAll()">刷新全部</button>
+    </div>
+  </div>
+</aside>
+
+<main class="main">
+
+  <!-- ============ 概览 ============ -->
+  <section class="page active" id="page-overview">
+    <div class="page-head">
+      <div>
+        <div class="page-title">概览</div>
+        <div class="page-sub">备用机基带、漫游驻留与切卡会话的实时状态</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span class="status-chip"><span class="dot" id="ovPhoneDot"></span><span id="ovPhoneText">未连接</span></span>
+        <button class="primary" onclick="oneClickADBBridge()">ADB 一键打通</button>
+      </div>
+    </div>
+
+    <div class="notice">
+      <b>合规提示：</b>本工具仅用于本人名下 eSIM 的远程管理与接码，请遵守所在地法律与运营商协议，不得用于转租、代收验证码或向第三方提供电信服务。
+    </div>
+
+    <div class="summary-grid">
+      <div class="summary"><div class="summary-label">设备</div><div class="summary-value" id="sumDevices">0</div></div>
+      <div class="summary"><div class="summary-label">已启用 eSIM</div><div class="summary-value" id="sumActive">0</div></div>
+      <div class="summary"><div class="summary-label">基带驻留</div><div class="summary-value small" id="sumCarrier">—</div></div>
+      <div class="summary"><div class="summary-label">需处理</div><div class="summary-value" id="sumIssues">0</div></div>
+    </div>
+
+    <div class="device-grid">
+      <div class="device-card">
+        <div class="device-head">
+          <div>
+            <div class="device-name" id="devName">备用机</div>
+            <div class="device-line" id="devLine">等待读取…</div>
+          </div>
+          <span class="status-chip"><span class="dot" id="devDot"></span><span id="devState">未检测</span></span>
+        </div>
+
+        <div class="row-line">
+          <span class="row-label">切卡会话</span>
+          <span class="row-value" id="devSession">—</span>
+        </div>
+        <div class="row-line">
+          <span class="row-label">电池 / 温度</span>
+          <span class="row-value" id="devBattery">—</span>
+        </div>
+        <div class="row-line">
+          <span class="row-label">读卡器 / 默认主卡</span>
+          <span class="row-value" id="devReader">—</span>
+        </div>
+        <div class="row-line">
+          <span class="row-label">漫游流量护盾</span>
+          <span class="row-value" id="devGuard">—</span>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">后台状态</div>
+          <div class="status-chip"><span class="dot" id="devBgDot"></span><span id="devBgText">等待读取…</span></div>
+        </div>
+
+        <div class="actions">
+          <button class="sm" onclick="kickNetwork()">踢基带重搜网</button>
+          <button class="sm" onclick="revertToDefault()">切回默认主卡</button>
+          <button class="sm primary" onclick="loadPhoneDashboard()">刷新状态</button>
+        </div>
+      </div>
+
+      <div class="device-card">
+        <div class="device-head">
+          <div>
+            <div class="device-name">当前启用</div>
+            <div class="device-line" id="activeLine">—</div>
+          </div>
+          <span class="status-chip"><span class="dot" id="activeDot"></span><span id="activeState">—</span></span>
+        </div>
+
+        <div class="row-line">
+          <span class="row-label">运营商</span>
+          <span class="row-value" id="activeCarrier">—</span>
+        </div>
+        <div class="row-line">
+          <span class="row-label">注册状态</span>
+          <span class="row-value" id="activeReg">—</span>
+        </div>
+        <div class="row-line">
+          <span class="row-label">信号强度</span>
+          <span class="row-value" id="activeSignal">—</span>
+        </div>
+        <div class="row-line">
+          <span class="row-label">芯片剩余空间</span>
+          <span class="row-value" id="activeMem">—</span>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">连接历史</div>
+          <div class="uptime" id="activeUptime"></div>
+          <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted);">
+            <span>已连接</span><span id="activeUptimeLabel">—</span>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="sm" onclick="setCurrentAsDefault()">设为默认主卡</button>
+          <button class="sm" onclick="openReaderModal()">切换读卡器</button>
+          <button class="sm" onclick="toggleDataGuard()">护盾开关</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 短信 ============ -->
+  <section class="page" id="page-sms">
+    <div class="page-head">
+      <div>
+        <div class="page-title">短信</div>
+        <div class="page-sub">Webhook 实时推送、验证码提取与自动复制</div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button onclick="simulateSms()">模拟一条验证码</button>
+        <button onclick="exportSmsJson()">导出 JSON</button>
+        <button class="danger" onclick="clearAllHistory()">清空记录</button>
+      </div>
+    </div>
+
+    <div class="otp-hero">
+      <div>
+        <div style="font-size:12px;color:var(--success);font-weight:650;">最新验证码（收到即自动写入 Windows 剪贴板）</div>
+        <div class="otp-code" id="latestOtpText">------</div>
+        <div style="font-size:12px;color:var(--muted);" id="latestOtpMeta">暂无验证码短信</div>
+      </div>
+      <div class="actions" style="margin:0;">
+        <button class="primary" onclick="copyLatestOtp()">复制验证码</button>
+        <button onclick="retryFailedSms()">手机补发未送达</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><div class="card-title">一键全自动接码闭环</div></div>
+      <div class="form-grid">
+        <div><label class="field">目标 eSIM（卡名或序号）</label><input id="autoOtpProfile" placeholder="例如 Club Sim 或 2" /></div>
+        <div><label class="field">发件人 / 关键词过滤（可选）</label><input id="autoOtpSender" placeholder="例如 Google" /></div>
+        <div><label class="field">最长等待秒数</label><input id="autoOtpTimeout" type="number" value="120" /></div>
+      </div>
+      <div class="actions" style="margin-top:0;">
+        <button class="primary" onclick="runSwitchAndWaitOtp()">启动：切卡 → 等驻网 → 等验证码 → 回主卡</button>
+        <span id="autoOtpResultText" style="font-size:12.5px;color:var(--accent);"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">短信与来电时间线</div>
+        <input id="smsSearchInput" placeholder="按发件人、验证码、运营商或正文过滤" oninput="renderSmsList()" style="max-width:320px;" />
+      </div>
+      <div id="smsListContainer"></div>
+    </div>
+  </section>
+
+  <!-- ============ eSIM ============ -->
+  <section class="page" id="page-esim">
+    <div class="page-head">
+      <div>
+        <div class="page-title">eSIM</div>
+        <div class="page-sub">切卡、换卡与远程下卡</div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button onclick="loadPhoneDashboard()">重新读卡</button>
+        <button onclick="downloadSpeedtestCard()">下 Speedtest 测试卡</button>
+      </div>
+    </div>
+
+    <!-- 临时会话横幅 -->
+    <div id="sessionBanner" style="display:none;margin-bottom:14px;">
+      <div class="card" style="border-color:#bfdbfe;background:var(--accent-soft);margin:0;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;">
+          <div>
+            <div style="font-size:12px;color:var(--accent);font-weight:650;">临时接码会话进行中</div>
+            <div style="font-size:15px;font-weight:700;margin-top:2px;" id="sessionBannerTitle">—</div>
+            <div style="font-size:12.5px;color:var(--fg-soft);margin-top:2px;" id="sessionBannerSub">—</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div style="text-align:right;">
+              <div style="font-size:11.5px;color:var(--muted);">剩余</div>
+              <div class="mono" style="font-size:20px;font-weight:800;color:var(--accent);" id="sessionBannerCountdown">--:--</div>
+            </div>
+            <button class="primary" onclick="revertToDefault()">立即切回主卡</button>
+          </div>
+        </div>
+        <div style="height:6px;border-radius:99px;background:rgba(37,99,235,.15);margin-top:12px;overflow:hidden;">
+          <div id="sessionBannerBar" style="height:100%;width:0%;background:var(--accent);transition:width .5s linear;"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">卡内配置</div>
+        <div style="font-size:12px;color:var(--muted);" id="profilesMeta">—</div>
+      </div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">
+        切卡会把 SIM 断电复位，<b>两次切卡之间至少间隔 15 秒</b>；临时接码到期后会自动切回默认主卡。
+      </div>
+      <div id="profilesListContainer"><div class="empty">正在读取…</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">远程下卡（LPA 激活码）</div>
+        <button class="sm" onclick="decodeQrFromClipboard()">从剪贴板粘贴并识别</button>
+      </div>
+
+      <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:12px;">
+        <span class="badge info" style="flex:0 0 auto;">1</span>
+        <div style="flex:1;">
+          <label class="field">激活码（可从运营商邮件复制，或把二维码图片直接拖进下面的框）</label>
+          <input id="lpaCodeInput" class="mono" placeholder="LPA:1$smdp.example.com$MATCHING-ID" />
+          <div id="lpaDropZone" class="dropzone" title="拖入二维码图片，或点击选择文件">
+            <div style="font-size:22px;line-height:1;">🖼️</div>
+            <div style="font-weight:600;margin-top:6px;">把 eSIM 二维码图片拖到这里</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:2px;">也可以点击选择文件，或直接 Ctrl+V 粘贴截图</div>
+            <input type="file" id="lpaFileInput" accept="image/*" style="display:none;" />
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:12px;">
+        <span class="badge info" style="flex:0 0 auto;">2</span>
+        <div style="flex:1;">
+          <label class="field">确认码 Confirmation Code（仅部分运营商需要，可留空）</label>
+          <input id="lpaConfirmCode" class="mono" placeholder="例如 123456" />
+        </div>
+      </div>
+
+      <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:12px;">
+        <span class="badge info" style="flex:0 0 auto;">3</span>
+        <div style="flex:1;">
+          <div class="actions" style="margin:0;">
+            <button onclick="parseAndRenderLpa()">校验激活码</button>
+            <button class="primary" onclick="remoteDownloadLpa()">推送到手机下卡</button>
+          </div>
+          <div id="lpaDownloadStatus" style="font-size:12.5px;margin-top:8px;color:var(--muted);"></div>
+        </div>
+      </div>
+
+      <div id="lpaParseResult" style="font-size:12.5px;margin-top:4px;"></div>
+      <div id="lpaSvgBox" style="margin-top:12px;overflow-x:auto;"></div>
+    </div>
+  </section>
+
+  <!-- ============ 网络出口 ============ -->
+  <section class="page" id="page-network">
+    <div class="page-head">
+      <div>
+        <div class="page-title">网络出口</div>
+        <div class="page-sub">虚拟定位注入与代理节点联动</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">虚拟定位</div>
+        <button class="danger sm" onclick="stopPhoneLocation()">停止注入</button>
+      </div>
+      <div class="panel" id="locationStatusBanner">正在读取…</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">常用基站坐标</div>
+      <div class="actions" id="presetLocationsRow" style="margin-top:0;margin-bottom:12px;"></div>
+      <div class="form-grid">
+        <div><label class="field">纬度</label><input id="locLatInput" placeholder="22.2988" /></div>
+        <div><label class="field">经度</label><input id="locLngInput" placeholder="114.1722" /></div>
+        <div><label class="field">标签</label><input id="locLabelInput" placeholder="香港 尖沙咀" /></div>
+      </div>
+      <button class="primary" onclick="injectCustomLocation()">注入此坐标</button>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">代理联动（FlClash / Mihomo）</div>
+        <button class="sm" onclick="loadProxyStatus()">刷新节点</button>
+      </div>
+      <div class="panel" id="proxyStatusBox">点击刷新读取控制器状态</div>
+      <div class="actions" id="proxyNodesRow" style="margin-top:0;"></div>
+    </div>
+  </section>
+
+  <!-- ============ 保号 ============ -->
+  <section class="page" id="page-keepalive">
+    <div class="page-head">
+      <div>
+        <div class="page-title">保号</div>
+        <div class="page-sub">定时自动切卡驻留，保持号码活跃</div>
+      </div>
+      <button onclick="loadKeepAliveRules()">刷新规则</button>
+    </div>
+    <div class="card">
+      <div class="card-head"><div class="card-title">现有规则</div></div>
+      <div id="keepAliveListBox"><div class="empty">尚未读取</div></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><div class="card-title">新增 / 更新规则</div></div>
+      <div class="form-grid">
+        <div><label class="field">卡名或 ICCID 尾号</label><input id="kaProfileInput" placeholder="Club Sim" /></div>
+        <div><label class="field">间隔天数</label><input id="kaIntervalInput" type="number" value="30" /></div>
+        <div><label class="field">单次驻留分钟</label><input id="kaDwellInput" type="number" value="5" /></div>
+      </div>
+      <button class="primary" onclick="saveKeepAliveRule()">保存规则</button>
+    </div>
+  </section>
+
+  <!-- ============ 工具箱 ============ -->
+  <section class="page" id="page-toolbox">
+    <div class="page-head">
+      <div>
+        <div class="page-title">工具箱</div>
+        <div class="page-sub">ADB 免配桥接、底层日志抓取与二维码</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">ADB 调试桥</div>
+        <button class="sm" onclick="checkAdbStatus()">检测设备</button>
+      </div>
+      <div class="panel" id="adbStatusBox">点击检测当前 ADB 设备</div>
+      <div class="form-grid">
+        <div style="grid-column: span 2;"><label class="field">无线调试地址（USB 可留空）</label><input id="adbConnectAddr" placeholder="192.168.1.9:37993" /></div>
+      </div>
+      <div class="actions" style="margin-top:0;">
+        <button class="primary" onclick="oneClickADBBridge()">建立双向隧道并同步</button>
+        <button onclick="fetchAdbLogcat()">抓取手机诊断日志</button>
+      </div>
+      <pre class="code" id="adbLogcatBox" style="margin-top:12px;max-height:300px;">点击「抓取手机诊断日志」查看 OMAPI / 基带 / Webhook 日志…</pre>
+    </div>
+  </section>
+
+  <!-- ============ 通知 ============ -->
+  <section class="page" id="page-notify">
+    <div class="page-head">
+      <div>
+        <div class="page-title">通知与二传手</div>
+        <div class="page-sub">把手机推送的短信与告警二次转发到其它渠道</div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button onclick="testFanout()">发送测试推送</button>
+        <button class="primary" onclick="addFanoutRow()">新增目标</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head"><div class="card-title">转发目标</div></div>
+      <div id="fanoutListBox"></div>
+      <div class="actions"><button class="primary" onclick="saveHubSettings(false)">保存规则</button></div>
+    </div>
+  </section>
+
+  <!-- ============ 设置 ============ -->
+  <section class="page" id="page-settings">
+    <div class="page-head">
+      <div>
+        <div class="page-title">系统设置</div>
+        <div class="page-sub">Webhook 地址、Bearer Token 与手机网关连接</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head"><div class="card-title">连接配置</div></div>
+      <div class="form-grid">
+        <div style="grid-column: span 2;">
+          <label class="field">本机可用的 Webhook 接收地址（填入手机「短信转发 → Webhook URL」）</label>
+          <select id="webhookUrlSelect" class="mono"></select>
+        </div>
+        <div><label class="field">Webhook / 网关共享 Bearer Token</label><input id="cfgWebhookToken" class="mono" /></div>
+        <div><label class="field">手机网关地址</label><input id="cfgPhoneUrl" class="mono" placeholder="http://192.168.1.9:8787" /></div>
+        <div><label class="field">手机网关 API Token（留空则复用上方）</label><input id="cfgPhoneApiToken" class="mono" /></div>
+      </div>
+      <div class="actions" style="margin-top:0;gap:18px;">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--fg-soft);">
+          <input type="checkbox" id="cfgAutoCopy" style="width:auto;" /> 验证码自动复制
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--fg-soft);">
+          <input type="checkbox" id="cfgDesktopNotify" style="width:auto;" /> 桌面通知
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--fg-soft);">
+          <input type="checkbox" id="cfgSoundAlert" style="width:auto;" /> 提示音
+        </label>
+      </div>
+      <div class="actions">
+        <button class="primary" onclick="saveHubSettings(true)">保存并推送到手机</button>
+        <button onclick="saveHubSettings(false)">仅保存本地</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head"><div class="card-title">本地自动化 API</div></div>
+      <pre class="code" id="apiDocsPre"></pre>
+    </div>
+  </section>
+
+  <!-- ============ 诊断 ============ -->
+  <section class="page" id="page-diagnostics">
+    <div class="page-head">
+      <div>
+        <div class="page-title">诊断</div>
+        <div class="page-sub">手机网关最近失败原因（含真实异常，不再被折叠成 control_error）</div>
+      </div>
+      <button onclick="loadGatewayLogs()">刷新</button>
+    </div>
+    <div class="card">
+      <div class="card-head"><div class="card-title">网关失败记录</div></div>
+      <div id="gatewayLogsBox"><div class="empty">点击刷新读取</div></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><div class="card-title">本机事件</div></div>
+      <pre class="code" id="hubEventsPre" style="max-height:300px;"></pre>
+    </div>
+  </section>
+
+</main>
+
+<div class="toast" id="toastBox"></div>
+
+<script src="/jsqr.js"></script>
+<script>
+let hubState = null;
+let currentDataGuardEnabled = true;
+
+/* ---------- 基础 ---------- */
+function showToast(msg) {
+  const box = document.getElementById('toastBox');
+  box.textContent = msg;
+  box.classList.remove('hide');
+  // Re-adding the class restarts the spring even when a toast is already up,
+  // which is what makes a rapid second toast feel like a new arrival.
+  box.classList.remove('show');
+  void box.offsetWidth;
+  box.classList.add('show');
+  clearTimeout(window._toastTimer);
+  clearTimeout(window._toastHideTimer);
+  window._toastTimer = setTimeout(() => {
+    box.classList.add('hide');
+    window._toastHideTimer = setTimeout(() => {
+      box.classList.remove('show', 'hide');
+    }, 190);
+  }, 3800);
+}
+
+/* Closes a modal with its exit animation, then removes it. Every call site
+   must go through this: removing the node directly would skip the transition
+   and the dialog would vanish instead of zooming back out. */
+function dismissModal(mask) {
+  if (!mask || mask.dataset.closing === '1') return;
+  mask.dataset.closing = '1';
+  mask.classList.add('closing');
+  setTimeout(() => mask.remove(), 170);
+}
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+// Attribute values need HTML escaping, not JS string escaping: a backslash is
+// literal in HTML, so `\"` still terminates the attribute. Webhook payloads
+// reach these attributes, so this must match escapeHtml exactly.
+function escapeAttr(s) { return escapeHtml(s); }
+function nonEmpty(v, f) { return (v === undefined || v === null || v === '') ? f : v; }
+
+/* ---------- 导航 ---------- */
+function switchPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+  const page = document.getElementById('page-' + name);
+  if (page) {
+    page.classList.add('active');
+    // CSS animations only run once per element. Forcing a reflow between
+    // removing and re-adding the class makes the stagger replay on every
+    // visit, so navigating always feels like an arrival.
+    page.querySelectorAll(':scope > *').forEach(child => {
+      child.style.animation = 'none';
+      void child.offsetWidth;
+      child.style.animation = '';
+    });
+  }
+  const btn = document.querySelector('.nav-item[data-page="' + name + '"]');
+  if (btn) btn.classList.add('active');
+  if (name === 'diagnostics') loadGatewayLogs();
+  if (name === 'keepalive') loadKeepAliveRules();
+  if (name === 'network') loadProxyStatus();
+}
+document.querySelectorAll('.nav-item').forEach(btn => {
+  btn.addEventListener('click', () => switchPage(btn.dataset.page));
+});
+
+/* ---------- 主题 ---------- */
+function applyTheme(dark) {
+  document.body.classList.toggle('dark', dark);
+  document.getElementById('themeLight').classList.toggle('active', !dark);
+  document.getElementById('themeDark').classList.toggle('active', dark);
+  try { localStorage.setItem('esim-hub-theme', dark ? 'dark' : 'light'); } catch (_) {}
+}
+document.getElementById('themeLight').onclick = () => applyTheme(false);
+document.getElementById('themeDark').onclick = () => applyTheme(true);
+try { applyTheme(localStorage.getItem('esim-hub-theme') === 'dark'); } catch (_) {}
+
+/* ---------- 状态拉取 ---------- */
+async function fetchState() {
+  try {
+    const res = await fetch('/api/local/state');
+    hubState = await res.json();
+    renderFromState();
+  } catch (e) { console.error(e); }
+}
+
+function renderFromState() {
+  if (!hubState) return;
+  const cfg = hubState.config || {};
+
+  const reachable = hubState.phoneReachable;
+  const dot = document.getElementById('ovPhoneDot');
+  const txt = document.getElementById('ovPhoneText');
+  dot.className = 'dot ' + (reachable ? 'ok live' : (cfg.phoneGatewayUrl ? 'warn' : ''));
+  txt.textContent = reachable
+    ? '实时设备控制 · 已连接'
+    : (cfg.phoneGatewayUrl ? '网关待响应' : '未配置手机网关');
+
+  const sel = document.getElementById('webhookUrlSelect');
+  const prev = sel.value;
+  sel.innerHTML = '';
+  (hubState.webhookUrls || []).forEach(u => {
+    const o = document.createElement('option');
+    o.value = u; o.textContent = u;
+    sel.appendChild(o);
+  });
+  if (prev) sel.value = prev;
+
+  if (document.activeElement !== document.getElementById('cfgWebhookToken'))
+    document.getElementById('cfgWebhookToken').value = cfg.webhookToken || '';
+  if (document.activeElement !== document.getElementById('cfgPhoneUrl'))
+    document.getElementById('cfgPhoneUrl').value = cfg.phoneGatewayUrl || '';
+  if (document.activeElement !== document.getElementById('cfgPhoneApiToken'))
+    document.getElementById('cfgPhoneApiToken').value = cfg.phoneApiToken || '';
+  document.getElementById('cfgAutoCopy').checked = !!cfg.autoCopyOtp;
+  document.getElementById('cfgDesktopNotify').checked = !!cfg.desktopNotify;
+  document.getElementById('cfgSoundAlert').checked = !!cfg.soundAlert;
+
+  const locRow = document.getElementById('presetLocationsRow');
+  if (locRow && locRow.children.length === 0 && hubState.presetLocations) {
+    hubState.presetLocations.forEach(p => {
+      const b = document.createElement('button');
+      b.className = 'sm';
+      b.textContent = p.region + ' · ' + p.label.split(' ')[1];
+      b.title = p.label + ' (' + p.latitude + ', ' + p.longitude + ')';
+      b.onclick = () => {
+        document.getElementById('locLatInput').value = p.latitude;
+        document.getElementById('locLngInput').value = p.longitude;
+        document.getElementById('locLabelInput').value = p.label;
+        injectCustomLocation();
+      };
+      locRow.appendChild(b);
+    });
+  }
+
+  renderSmsList();
+  renderFanoutList();
+  renderApiDocs();
+  document.getElementById('hubEventsPre').textContent =
+    JSON.stringify((hubState.events || []).slice(0, 20), null, 2);
+}
+
+/* ---------- 概览 / 手机看板 ---------- */
+let _dashSeq = 0;
+
+async function loadPhoneDashboard() {
+  const seq = ++_dashSeq;
+  try {
+    const res = await fetch('/api/phone/dashboard');
+    if (seq !== _dashSeq) return; // a newer request already answered
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      markPhoneOffline(body.message || body.error || ('HTTP ' + res.status));
+      return;
+    }
+    const data = await res.json();
+    if (seq !== _dashSeq) return;
+    renderPhoneDashboard(data);
+  } catch (e) {
+    if (seq === _dashSeq) markPhoneOffline(String(e));
+  }
+}
+
+function markPhoneOffline(reason) {
+  ['devSession','devBattery','devReader','devGuard','activeCarrier','activeReg','activeSignal','activeMem']
+    .forEach(id => { const el = document.getElementById(id); if (el) el.textContent = '—'; });
+  document.getElementById('devDot').className = 'dot bad';
+  document.getElementById('devState').textContent = '离线';
+  document.getElementById('devBgDot').className = 'dot bad';
+  document.getElementById('devBgText').textContent = reason || '手机网关不可达';
+  document.getElementById('profilesListContainer').innerHTML =
+    '<div class="empty">手机网关当前不可达：' + escapeHtml(reason || '') + '</div>';
+  document.getElementById('sumDevices').textContent = '0';
+  document.getElementById('sumActive').textContent = '0';
+  document.getElementById('sumCarrier').textContent = '离线';
+  document.getElementById('footDeviceCount').textContent = '0 个设备';
+  document.getElementById('profilesMeta').textContent = '—';
+  const banner = document.getElementById('sessionBanner');
+  if (banner) banner.style.display = 'none';
+  window._sessionDeadline = 0;
+}
+
+function renderPhoneDashboard(d) {
+  if (!d || typeof d !== 'object') return;
+  const st = d.status || d;
+  const profiles = d.profiles || st.profiles || [];
+  const active = profiles.filter(p => p.enabled);
+
+  document.getElementById('sumDevices').textContent = '1';
+  document.getElementById('sumActive').textContent = String(active.length);
+  document.getElementById('footDeviceCount').textContent = '1 个设备';
+
+  document.getElementById('devDot').className = 'dot ok live';
+  document.getElementById('devState').textContent = '已检测';
+  document.getElementById('devBgDot').className = 'dot ok live';
+  document.getElementById('devBgText').textContent = '运行正常 · ' + (st.selectedReader || '默认读卡器');
+  document.getElementById('devName').textContent = st.card && st.card.eid ? 'eSIM 备用机' : '备用机';
+  document.getElementById('devLine').textContent =
+    (st.defaultProfile || '未设主卡') + ' · EID …' + String((st.card && st.card.eid) || '').slice(-6);
+
+  const sess = st.session;
+  document.getElementById('devSession').textContent = sess && sess.state
+    ? (sess.state + ' → ' + (sess.target || '') + (sess.remainingSeconds != null ? '（' + sess.remainingSeconds + 's 后回主卡）' : ''))
+    : '常驻待命';
+
+  const dev = st.device || {};
+  document.getElementById('devBattery').textContent =
+    (dev.batteryPercent != null ? dev.batteryPercent + '%' : '—') +
+    (dev.charging ? ' · 充电中' : '') +
+    (dev.temperatureCelsius != null ? ' · ' + dev.temperatureCelsius.toFixed(1) + '°C' : '');
+
+  document.getElementById('devReader').textContent =
+    (st.selectedReader || '—') + ' / ' + (st.defaultProfile || '未设');
+
+  const guard = st.dataGuard || {};
+  currentDataGuardEnabled = guard.enabled !== false;
+  document.getElementById('devGuard').textContent = currentDataGuardEnabled
+    ? (guard.enforced ? '已开启 · 移动数据已锁定' : '已开启 · 待切卡生效')
+    : '未启用';
+
+  const net = st.network || {};
+  const carrier = net.carrier || net.carrierName || '—';
+  document.getElementById('sumCarrier').textContent = carrier;
+  document.getElementById('activeCarrier').textContent = carrier;
+  document.getElementById('activeReg').textContent =
+    (net.registration || '—') + (net.roaming ? ' · 漫游' : '');
+  document.getElementById('activeSignal').textContent =
+    net.signalDbm != null ? net.signalDbm + ' dBm' : '—';
+
+  const card = st.card || {};
+  document.getElementById('activeMem').textContent = card.freeNonVolatileMemoryBytes != null
+    ? (card.freeNonVolatileMemoryBytes / 1024).toFixed(1) + ' KB' : '—';
+
+  const activeProfile = active[0];
+  document.getElementById('activeLine').textContent = activeProfile
+    ? (activeProfile.alias + ' · 尾号 ' + (activeProfile.iccidSuffix || ''))
+    : '无启用配置';
+  document.getElementById('activeDot').className = 'dot ' + (activeProfile ? 'ok' : 'warn');
+  document.getElementById('activeState').textContent = activeProfile ? '已启用' : '无激活卡';
+
+  const up = document.getElementById('activeUptime');
+  const upLabel = document.getElementById('activeUptimeLabel');
+  if (net.registration === 'inService') {
+    up.className = 'uptime';
+    upLabel.textContent = '已驻留';
+  } else {
+    up.className = 'uptime empty';
+    upLabel.textContent = net.registration || '未驻留';
+  }
+
+  document.getElementById('sumIssues').textContent =
+    String((net.registration && net.registration !== 'inService' ? 1 : 0) + (active.length === 1 ? 0 : 1));
+
+  const loc = st.location || {};
+  const locBanner = document.getElementById('locationStatusBanner');
+  if (locBanner) {
+    locBanner.textContent = loc.injecting
+      ? '正在注入：' + (loc.label || 'Custom') + '（' + Number(loc.latitude || 0).toFixed(4) + ', ' + Number(loc.longitude || 0).toFixed(4) + '）'
+      : '当前未注入虚拟定位（使用真实 GPS）';
+  }
+
+  document.getElementById('profilesMeta').textContent =
+    profiles.length + ' 张配置 · 已启用 ' + active.length + ' 张' +
+    (card.freeNonVolatileMemoryBytes != null
+      ? ' · 芯片剩余 ' + (card.freeNonVolatileMemoryBytes / 1024).toFixed(1) + ' KB'
+      : '');
+
+  renderSessionBanner(sess);
+
+  const container = document.getElementById('profilesListContainer');
+  if (!profiles.length) {
+    container.innerHTML = '<div class="empty">卡内没有可读取的配置</div>';
+    return;
+  }
+  container.innerHTML = '';
+  profiles.forEach((p, idx) => {
+    const slot = idx + 1;
+    const alias = p.alias || ('Card #' + slot);
+    const row = document.createElement('div');
+    row.className = 'list-item' + (p.enabled ? ' active' : '');
+    row.style.alignItems = 'center';
+    row.innerHTML =
+      '<div class="list-main" style="flex:1;min-width:220px;">' +
+        '<div class="list-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+          '<span class="badge ' + (p.enabled ? 'on' : 'off') + '" style="font-size:11px;">#' + slot + '</span>' +
+          '<span>' + escapeHtml(alias) + '</span>' +
+          (p.enabled ? '<span class="badge on">当前启用</span>' : '') +
+        '</div>' +
+        '<div class="list-sub mono">ICCID ' + escapeHtml(p.iccidPrefix || '') + '…' + escapeHtml(p.iccidSuffix || '') + '</div>' +
+      '</div>' +
+      '<div class="actions" style="margin:0;flex:0 0 auto;">' +
+        (p.enabled
+          ? '<button class="sm" disabled>已启用</button>'
+          : '<button class="sm primary" data-act="temp">临时接码</button>' +
+            '<button class="sm" data-act="persist">持久启用</button>') +
+        '<button class="sm" data-act="rename">改名</button>' +
+        '<button class="sm danger" data-act="delete">删除</button>' +
+      '</div>';
+    row.querySelectorAll('button[data-act]').forEach(b => {
+      b.onclick = () => {
+        const act = b.dataset.act;
+        if (act === 'temp') showDurationPicker(slot, alias);
+        else if (act === 'persist') switchPhoneProfile(slot, alias, 0);
+        else if (act === 'rename') renamePhoneProfile(slot, alias);
+        else deletePhoneProfile(slot, alias);
+      };
+    });
+    container.appendChild(row);
+  });
+}
+
+/* 临时会话横幅 + 倒计时 */
+function renderSessionBanner(sess) {
+  const banner = document.getElementById('sessionBanner');
+  if (!banner) return;
+  const hasTemp = sess && sess.state && sess.deadlineEpochMillis && sess.deadlineEpochMillis > 0;
+  if (!hasTemp) {
+    banner.style.display = 'none';
+    window._sessionDeadline = 0;
+    return;
+  }
+  banner.style.display = 'block';
+  window._sessionDeadline = sess.deadlineEpochMillis;
+  window._sessionTotal = sess.remainingSeconds || 0;
+  document.getElementById('sessionBannerTitle').textContent =
+    '已切换到「' + (sess.target || '临时卡') + '」';
+  document.getElementById('sessionBannerSub').textContent =
+    '到期自动切回「' + (sess.returnTo || '默认主卡') + '」' +
+    (sess.state === 'waiting_for_service' ? ' · 正在等待基带驻网' : '');
+  tickSessionBanner();
+}
+
+function tickSessionBanner() {
+  const deadline = window._sessionDeadline || 0;
+  if (!deadline) return;
+  const left = Math.max(0, Math.round((deadline - Date.now()) / 1000));
+  const mm = String(Math.floor(left / 60)).padStart(2, '0');
+  const ss = String(left % 60).padStart(2, '0');
+  const el = document.getElementById('sessionBannerCountdown');
+  if (el) el.textContent = mm + ':' + ss;
+  const bar = document.getElementById('sessionBannerBar');
+  const total = window._sessionTotal || 0;
+  if (bar && total > 0) bar.style.width = Math.min(100, Math.round((left / total) * 100)) + '%';
+  if (left === 0) {
+    window._sessionDeadline = 0;
+    setTimeout(loadPhoneDashboard, 2500);
+  }
+}
+setInterval(tickSessionBanner, 1000);
+
+/* 临时接码时长选择 */
+function showDurationPicker(slot, alias) {
+  return new Promise(resolve => {
+    const mask = document.createElement('div');
+    mask.className = 'modal-mask';
+    mask.innerHTML =
+      '<div class="modal">' +
+        '<div class="card-title" style="margin-bottom:6px;">临时接码：' + escapeHtml(alias) + '</div>' +
+        '<div style="font-size:12.5px;color:var(--muted);margin-bottom:14px;">' +
+          '切到这张卡并保持驻留，到期后自动切回默认主卡。' +
+        '</div>' +
+        '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px;">' +
+          [5, 10, 15, 30, 60, 120].map(m =>
+            '<button data-min="' + m + '">' + m + ' 分钟</button>').join('') +
+        '</div>' +
+        '<div class="actions" style="justify-content:flex-end;margin:0;">' +
+          '<button id="dpCancel">取消</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(mask);
+    const close = v => { dismissModal(mask); resolve(v); };
+    mask.querySelector('#dpCancel').onclick = () => close(null);
+    mask.querySelectorAll('button[data-min]').forEach(b => {
+      b.onclick = () => close(Number(b.dataset.min));
+    });
+  }).then(minutes => {
+    if (minutes) switchPhoneProfile(slot, alias, minutes);
+  });
+}
+
+/* 把网关错误码翻译成可操作的中文提示 */
+function explainGatewayError(code, detail) {
+  const map = {
+    waiting_for_baseband: '上一次切卡还在等待基带驻网，请等它完成后再操作',
+    profile_switch_cooldown: '芯片正在复位，请等 15 秒后再切卡',
+    switch_in_progress: '已有切卡操作正在执行，请稍候',
+    exactly_one_profile_must_be_enabled: '卡内必须且只能有一张配置处于启用状态',
+    profile_not_found: '找不到这张卡，请点「重新读卡」刷新',
+    no_profiles: '卡内没有可用的 eSIM 配置',
+    reader_not_selected: '还没有选择读卡器，请先切换读卡器',
+    gateway_stopped: '手机网关未运行，请在手机上打开 App',
+    activation_code_required: '缺少激活码',
+    request_timeout: '手机网关响应超时',
+    profile_alias_ambiguous_use_iccid: '卡名重复，请改用序号操作',
+    cannot_delete_active_profile: '不能删除当前启用的卡，请先切到别的卡',
+    invalid_delete_token: '确认码不正确',
+    delete_token_expired: '确认码已失效，请重新发起删除'
+  };
+  const friendly = map[code];
+  if (friendly) return friendly;
+  if (code === 'control_error' && detail) return '底层异常：' + detail;
+  return code + (detail ? ' · ' + detail : '');
+}
+
+/* ---------- 切卡动作 ---------- */
+async function switchPhoneProfile(slotNum, alias, durationMinutes) {
+  const label = durationMinutes > 0 ? '临时接码 ' + durationMinutes + ' 分钟' : '持久启用';
+  showToast('正在切换至 #' + slotNum + ' ' + alias + '（' + label + '）…');
+  try {
+    const res = await fetch('/api/phone/switch', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        profile: String(slotNum),
+        temporaryMinutes: durationMinutes,
+        durationMinutes: durationMinutes
+      })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      showToast(data.state === 'already_active'
+        ? '该卡已处于启用状态'
+        : '已切换至 ' + (data.target || alias) + '，正在等待基带驻网');
+    } else {
+      showToast('切卡失败：' + explainGatewayError(data.error, data.detail));
+    }
+  } catch (e) { showToast('切卡请求异常：' + e); }
+  await loadPhoneDashboard();
+}
+
+async function revertToDefault() {
+  showToast('正在切回默认主卡…');
+  const res = await fetch('/api/phone/back', {method: 'POST', body: '{}'});
+  const data = await res.json().catch(() => ({}));
+  if (res.ok) showToast('已切回默认主卡' + (data.profile ? '：' + data.profile : ''));
+  else showToast('切回失败：' + (data.error || res.status) + (data.detail ? ' · ' + data.detail : ''));
+  await loadPhoneDashboard();
+}
+
+async function setCurrentAsDefault() {
+  const res = await fetch('/api/phone/default', {method: 'POST', body: '{}'});
+  const data = await res.json().catch(() => ({}));
+  if (res.ok) showToast('已设为默认主卡：' + (data.defaultProfile || ''));
+  else showToast('设置失败：' + (data.error || res.status));
+  await loadPhoneDashboard();
+}
+
+async function kickNetwork() {
+  showToast('正在触发基带重搜网…');
+  await fetch('/api/phone/network/kick', {method: 'POST', body: '{}'});
+  showToast('已触发重搜网');
+  setTimeout(loadPhoneDashboard, 1500);
+}
+
+async function renamePhoneProfile(slotNum, currentAlias) {
+  const next = await showGlassPrompt('修改卡片名称', currentAlias);
+  if (!next || !next.trim()) return;
+  const res = await fetch('/api/phone/rename', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({profile: String(slotNum), alias: next.trim()})
+  });
+  const d = await res.json().catch(() => ({}));
+  if (res.ok) { showToast('已重命名为 ' + next.trim()); await loadPhoneDashboard(); }
+  else showToast('改名失败：' + (d.error || res.status));
+}
+
+async function deletePhoneProfile(slotNum, alias) {
+  const res = await fetch('/api/phone/delete/request', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({profile: String(slotNum)})
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.token) { showToast('发起删除失败：' + (data.error || res.status)); return; }
+  const typed = await showGlassPrompt('确认永久删除「' + alias + '」\n请输入确认码：' + data.token, data.token);
+  if (!typed || typed.trim() !== String(data.token)) return;
+  showToast('正在从芯片抹除…');
+  const cfm = await fetch('/api/phone/delete/confirm', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({token: typed.trim()})
+  });
+  const cd = await cfm.json().catch(() => ({}));
+  if (cfm.ok) { showToast('已删除 ' + alias); await loadPhoneDashboard(); }
+  else showToast('删除失败：' + (cd.error || cfm.status));
+}
+
+async function openReaderModal() {
+  const res = await fetch('/api/phone/readers');
+  const data = await res.json().catch(() => ({}));
+  const readers = data.readers || [];
+  const selected = data.selectedReader || '';
+  const mask = document.createElement('div');
+  mask.className = 'modal-mask';
+  mask.innerHTML =
+    '<div class="modal">' +
+      '<div class="card-title" style="margin-bottom:12px;">选择读卡器</div>' +
+      '<div id="readerModalList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;"></div>' +
+      '<div class="actions" style="justify-content:flex-end;margin:0;"><button id="readerModalClose">关闭</button></div>' +
+    '</div>';
+  document.body.appendChild(mask);
+  mask.querySelector('#readerModalClose').onclick = () => dismissModal(mask);
+  const list = mask.querySelector('#readerModalList');
+  if (!readers.length) list.innerHTML = '<div class="empty">没有可用读卡器</div>';
+  readers.forEach(r => {
+    const id = r.id || r.name || String(r);
+    const b = document.createElement('button');
+    b.className = id === selected ? 'primary' : '';
+    b.style.justifyContent = 'flex-start';
+    b.textContent = (id === selected ? '● ' : '○ ') + (r.name || id) + '（' + id + '）';
+    b.onclick = async () => {
+      dismissModal(mask);
+      showToast('正在切换读卡器…');
+      const sw = await fetch('/api/phone/reader', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({reader: id})
+      });
+      if (sw.ok) showToast('已切换读卡器：' + id);
+      await loadPhoneDashboard();
+    };
+    list.appendChild(b);
+  });
+}
+
+async function toggleDataGuard() {
+  const next = !currentDataGuardEnabled;
+  const res = await fetch('/api/phone/dataguard', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({enabled: next})
+  });
+  if (res.ok) { showToast(next ? '已开启漫游流量护盾' : '已关闭流量护盾'); await loadPhoneDashboard(); }
+}
+
+async function retryFailedSms() {
+  showToast('正在请求手机补发…');
+  const res = await fetch('/api/phone/sms/retry', {method: 'POST', body: '{}'});
+  const data = await res.json().catch(() => ({}));
+  showToast('补发完成，成功 ' + (data.delivered != null ? data.delivered : 0) + ' 条');
+}
+
+async function downloadSpeedtestCard() {
+  showToast('正在下发 Speedtest 测试卡…');
+  const res = await fetch('/api/phone/download', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({activationCode: 'LPA:1$rsp.truphone.com$QRF-SPEEDTEST'})
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.ok) showToast('测试卡下载成功');
+  else showToast('下载失败：' + (data.error || res.status) + (data.detail ? ' · ' + data.detail : ''));
+  await loadPhoneDashboard();
+}
+
+/* ---------- 短信 ---------- */
+function renderSmsList() {
+  const events = (hubState && hubState.events) || [];
+  const sms = events.filter(e => e.event === 'sms.received' || e.event === 'call.ringing');
+  document.getElementById('navSmsCount').textContent = String(sms.length);
+
+  const latest = sms.find(e => e.otp);
+  if (latest) {
+    const hero = document.getElementById('latestOtpText');
+    const changed = hero.textContent !== latest.otp;
+    hero.textContent = latest.otp;
+    document.getElementById('latestOtpMeta').textContent =
+      '来自 ' + nonEmpty(latest.sender, '未知') + ' · ' + nonEmpty(latest.carrierName, 'SIM') +
+      ' · ' + new Date(latest.receivedAtEpochMillis).toLocaleTimeString();
+    if (changed) {
+      // Only a genuinely new code animates. Re-rendering the same code on
+      // every poll would make the digits twitch once a second.
+      hero.classList.remove('flash');
+      void hero.offsetWidth;
+      hero.classList.add('flash');
+    }
+  } else {
+    // Without this the hero kept showing a code that had just been cleared,
+    // and "copy" would put a stale OTP on the clipboard.
+    document.getElementById('latestOtpText').textContent = '------';
+    document.getElementById('latestOtpMeta').textContent = '暂无验证码短信';
+  }
+
+  const q = (document.getElementById('smsSearchInput').value || '').trim().toLowerCase();
+  const box = document.getElementById('smsListContainer');
+  const filtered = sms.filter(e => !q ||
+    (e.sender || '').toLowerCase().includes(q) ||
+    (e.body || '').toLowerCase().includes(q) ||
+    (e.otp || '').toLowerCase().includes(q) ||
+    (e.carrierName || '').toLowerCase().includes(q));
+
+  if (!filtered.length) {
+    box.innerHTML = '<div class="empty">暂无短信或来电记录（可点「模拟一条验证码」验证链路）</div>';
+    return;
+  }
+  box.innerHTML = '';
+  filtered.forEach(e => {
+    const isCall = e.event === 'call.ringing';
+    const item = document.createElement('div');
+    item.className = 'list-item';
+    item.style.alignItems = 'flex-start';
+    item.innerHTML =
+      '<div class="list-main" style="flex:1;">' +
+        '<div class="list-title">' + (isCall ? '来电 ' + escapeHtml(nonEmpty(e.caller, '未知')) : escapeHtml(nonEmpty(e.sender, '未知号码'))) +
+          ' <span class="badge info">SIM ' + (e.slotIndex != null ? e.slotIndex + 1 : '?') + ' · ' + escapeHtml(nonEmpty(e.carrierName, '未知')) + '</span>' +
+        '</div>' +
+        '<div style="font-size:13px;margin-top:4px;white-space:pre-wrap;">' +
+          escapeHtml(isCall ? '收到呼入电话振铃' : (e.body || '')) + '</div>' +
+        '<div class="list-sub" style="margin-top:4px;">' + new Date(e.receivedAtEpochMillis || Date.now()).toLocaleString() + '</div>' +
+      '</div>' +
+      (e.otp ? '<button class="sm success" data-otp="' + escapeAttr(e.otp) + '">验证码 ' + escapeHtml(e.otp) + '</button>' : '');
+    const btn = item.querySelector('button[data-otp]');
+    if (btn) btn.onclick = () => copyText(btn.dataset.otp);
+    box.appendChild(item);
+  });
+}
+
+async function simulateSms() {
+  await fetch('/api/tools/simulate-sms', {method: 'POST', body: '{}'});
+  showToast('已模拟推送一条验证码短信');
+  fetchState();
+}
+
+async function copyText(text) {
+  if (typeof window.nativeCopyClipboard === 'function') {
+    try { await window.nativeCopyClipboard(text); } catch (_) {}
+  }
+  try { await navigator.clipboard.writeText(text); } catch (_) {}
+  await fetch('/api/tools/clipboard', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({text})
+  });
+  showToast('已复制：' + text);
+}
+
+function copyLatestOtp() {
+  const code = document.getElementById('latestOtpText').textContent.trim();
+  if (code && code !== '------') copyText(code);
+}
+
+function exportSmsJson() {
+  const blob = new Blob([JSON.stringify((hubState && hubState.events) || [], null, 2)], {type: 'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'esim-hub-events.json';
+  a.click();
+}
+
+async function clearAllHistory() {
+  await fetch('/api/local/clear', {method: 'POST'});
+  showToast('已清空本地记录');
+  fetchState();
+}
+
+async function runSwitchAndWaitOtp() {
+  const profile = document.getElementById('autoOtpProfile').value.trim();
+  const senderContains = document.getElementById('autoOtpSender').value.trim();
+  const timeoutSeconds = parseInt(document.getElementById('autoOtpTimeout').value || '120', 10);
+  if (!profile) { showToast('请填写目标卡名或序号'); return; }
+  const out = document.getElementById('autoOtpResultText');
+  out.textContent = '已切换至 ' + profile + '，等待验证码（最长 ' + timeoutSeconds + 's）…';
+  try {
+    const res = await fetch('/api/local/switch-and-wait-otp', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({profile, senderContains, timeoutSeconds, autoBack: true})
+    });
+    const data = await res.json();
+    if (data.ok && data.otp) {
+      out.textContent = '收到验证码 ' + data.otp + '（已复制，并已切回主卡）';
+      copyText(data.otp);
+    } else {
+      out.textContent = '等待结束：' + (data.error || data.detail || '未收到验证码');
+    }
+  } catch (e) { out.textContent = '请求异常：' + e; }
+}
+
+/* ---------- 定位 / 代理 ---------- */
+async function injectCustomLocation() {
+  const latitude = parseFloat(document.getElementById('locLatInput').value);
+  const longitude = parseFloat(document.getElementById('locLngInput').value);
+  const label = document.getElementById('locLabelInput').value.trim() || 'Custom';
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    showToast('请输入合法经纬度'); return;
+  }
+  const res = await fetch('/api/phone/location', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({latitude, longitude, label})
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.ok && data.success !== false) { showToast('已注入：' + label); loadPhoneDashboard(); }
+  else showToast('注入失败：' + (data.error || res.status));
+}
+
+async function stopPhoneLocation() {
+  await fetch('/api/phone/location', {method: 'DELETE'});
+  showToast('已停止虚拟定位');
+  loadPhoneDashboard();
+}
+
+async function loadProxyStatus() {
+  const box = document.getElementById('proxyStatusBox');
+  const row = document.getElementById('proxyNodesRow');
+  row.innerHTML = '';
+  try {
+    const res = await fetch('/api/phone/proxy');
+    const data = await res.json();
+    box.textContent = '控制器 ' + (data.controllerUrl || '—') +
+      ' · 策略组 ' + (data.targetGroup || 'PROXY') +
+      ' · 当前节点 ' + (data.currentNode || '未知');
+    ((data.group && data.group.all) || []).forEach(node => {
+      const b = document.createElement('button');
+      b.className = 'sm' + (node === data.currentNode ? ' primary' : '');
+      b.textContent = node;
+      b.onclick = async () => {
+        await fetch('/api/phone/proxy/switch', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({node})
+        });
+        showToast('已切换节点：' + node);
+        loadProxyStatus();
+      };
+      row.appendChild(b);
+    });
+  } catch (e) { box.textContent = '读取失败：' + e; }
+}
+
+/* ---------- 保号 ---------- */
+async function loadKeepAliveRules() {
+  const box = document.getElementById('keepAliveListBox');
+  try {
+    const res = await fetch('/api/phone/keepalive');
+    const data = await res.json();
+    const rules = data.rules || [];
+    if (!rules.length) { box.innerHTML = '<div class="empty">当前没有保号规则</div>'; return; }
+    box.innerHTML = '';
+    rules.forEach(r => {
+      const item = document.createElement('div');
+      item.className = 'list-item';
+      item.innerHTML =
+        '<div class="list-main">' +
+          '<div class="list-title">' + escapeHtml(r.alias || r.iccid) + '</div>' +
+          '<div class="list-sub">每 ' + r.intervalDays + ' 天驻留 ' + Math.round((r.dwellSeconds || 300) / 60) + ' 分钟</div>' +
+        '</div>' +
+        '<div class="actions" style="margin:0;">' +
+          '<button class="sm primary" data-run="' + escapeAttr(r.iccid) + '">立即执行</button>' +
+          '<button class="sm danger" data-del="' + escapeAttr(r.iccid) + '">删除</button>' +
+        '</div>';
+      item.querySelector('[data-run]').onclick = () => sendBotCallback('ka_run:' + r.iccid);
+      item.querySelector('[data-del]').onclick = () => deleteKeepAliveRule(r.iccid);
+      box.appendChild(item);
+    });
+  } catch (e) { box.innerHTML = '<div class="empty">读取失败：' + escapeHtml(String(e)) + '</div>'; }
+}
+
+async function saveKeepAliveRule() {
+  const profile = document.getElementById('kaProfileInput').value.trim();
+  const intervalDays = parseInt(document.getElementById('kaIntervalInput').value || '30', 10);
+  const dwellMinutes = parseInt(document.getElementById('kaDwellInput').value || '5', 10);
+  if (!profile) { showToast('请填写卡名或 ICCID'); return; }
+  await fetch('/api/phone/keepalive', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({profile, intervalDays, dwellSeconds: dwellMinutes * 60, enabled: true})
+  });
+  showToast('保号规则已保存');
+  loadKeepAliveRules();
+}
+
+async function deleteKeepAliveRule(profile) {
+  await fetch('/api/phone/keepalive', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({profile, enabled: false})
+  });
+  loadKeepAliveRules();
+}
+
+/* ---------- LPA ---------- */
+async function parseAndRenderLpa() {
+  const code = document.getElementById('lpaCodeInput').value.trim();
+  if (!code) {
+    document.getElementById('lpaParseResult').textContent = '';
+    document.getElementById('lpaSvgBox').innerHTML = '';
+    return;
+  }
+  const res = await fetch('/api/tools/lpa/parse', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({code})
+  });
+  const parsed = await res.json();
+  const box = document.getElementById('lpaParseResult');
+  if (parsed.valid) {
+    box.innerHTML = '<span style="color:var(--success);font-weight:600;">格式有效</span> · SM-DP+ <code>' +
+      escapeHtml(parsed.smdpAddress) + '</code> · Matching ID <code>' + escapeHtml(parsed.matchingId) + '</code>';
+    document.getElementById('lpaSvgBox').innerHTML =
+      '<img src="/api/tools/lpa/voucher.svg?code=' + encodeURIComponent(parsed.raw) + '" style="max-width:100%;border-radius:10px;" />';
+  } else {
+    box.innerHTML = '<span style="color:var(--danger);">格式无效：' + escapeHtml(parsed.error || '') + '</span>';
+  }
+}
+
+async function decodeQrFile(file) {
+  if (!file) return;
+  if (!file.type || !file.type.startsWith('image/')) {
+    showToast('请拖入图片文件（PNG / JPG / WEBP）');
+    return;
+  }
+  showToast('正在解析二维码…');
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch (_) {
+    showToast('这张图片无法读取');
+    return;
+  }
+
+  // Native detector is faster, but Windows WebView2 does not ship it.
+  if ('BarcodeDetector' in window) {
+    try {
+      const codes = await new BarcodeDetector({formats: ['qr_code']}).detect(bitmap);
+      if (codes.length && codes[0].rawValue) {
+        applyDecodedCode(codes[0].rawValue);
+        return;
+      }
+    } catch (_) {}
+  }
+
+  const text = decodeWithJsQr(bitmap, 1400) || decodeWithJsQr(bitmap, 0);
+  if (text) {
+    applyDecodedCode(text);
+  } else {
+    showToast('没能识别出二维码，换一张更清晰、完整的图片试试');
+  }
+}
+
+/// Runs the bundled jsQR decoder over the image, optionally downscaled to
+/// [maxSide] pixels first (a phone screenshot is far larger than QR needs).
+function decodeWithJsQr(bitmap, maxSide) {
+  if (typeof window.jsQR !== 'function') return null;
+  let w = bitmap.width;
+  let h = bitmap.height;
+  if (maxSide > 0 && Math.max(w, h) > maxSide) {
+    const scale = maxSide / Math.max(w, h);
+    w = Math.max(1, Math.round(w * scale));
+    h = Math.max(1, Math.round(h * scale));
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d', {willReadFrequently: true});
+  if (!ctx) return null;
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  const image = ctx.getImageData(0, 0, w, h);
+  try {
+    const result = window.jsQR(image.data, image.width, image.height, {
+      inversionAttempts: 'attemptBoth'
+    });
+    return result && result.data ? result.data : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function applyDecodedCode(raw) {
+  const code = String(raw).trim();
+  document.getElementById('lpaCodeInput').value = code;
+  if (!/^LPA:/i.test(code)) {
+    showToast('识别到内容，但不是 eSIM 激活码：' + code.slice(0, 40));
+    return;
+  }
+  showToast('已识别激活码');
+  parseAndRenderLpa();
+}
+
+function wireDropZone() {
+  const zone = document.getElementById('lpaDropZone');
+  const input = document.getElementById('lpaFileInput');
+  if (!zone || !input) return;
+
+  ['dragenter', 'dragover'].forEach(ev =>
+    zone.addEventListener(ev, e => {
+      e.preventDefault();
+      e.stopPropagation();
+      zone.classList.add('dragging');
+    }));
+  ['dragleave', 'dragend'].forEach(ev =>
+    zone.addEventListener(ev, e => {
+      e.preventDefault();
+      zone.classList.remove('dragging');
+    }));
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    zone.classList.remove('dragging');
+    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (file) decodeQrFile(file);
+  });
+  zone.addEventListener('click', () => input.click());
+  input.addEventListener('change', e => {
+    const file = e.target.files && e.target.files[0];
+    if (file) decodeQrFile(file);
+    e.target.value = '';
+  });
+
+  // Dropping anywhere else would make the WebView navigate to the image file.
+  window.addEventListener('dragover', e => e.preventDefault());
+  window.addEventListener('drop', e => {
+    if (zone.contains(e.target)) return;
+    e.preventDefault();
+    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!file) return;
+    switchPage('esim');
+    decodeQrFile(file);
+  });
+}
+window.addEventListener('paste', e => {
+  if (!e.clipboardData) return;
+  for (const item of e.clipboardData.items) {
+    if (item.type.startsWith('image/')) decodeQrFile(item.getAsFile());
+  }
+});
+
+async function remoteDownloadLpa() {
+  const activationCode = document.getElementById('lpaCodeInput').value.trim();
+  const status = document.getElementById('lpaDownloadStatus');
+  if (!activationCode) { showToast('请先填写激活码'); return; }
+  const confirmationCode = (document.getElementById('lpaConfirmCode').value || '').trim();
+  status.style.color = 'var(--accent)';
+  status.textContent = '正在向手机下发下卡指令，过程中会与运营商服务器握手，请耐心等待…';
+  showToast('正在下发下卡指令…');
+  try {
+    const res = await fetch('/api/phone/download', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        activationCode,
+        confirmationCode: confirmationCode || null
+      })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      status.style.color = 'var(--success)';
+      status.textContent = '下卡成功' +
+        (data.iccid ? '：新卡 ICCID ' + data.iccid : '') +
+        (data.alias ? '（' + data.alias + '）' : '');
+      showToast('下卡成功');
+    } else {
+      status.style.color = 'var(--danger)';
+      status.textContent = '下卡失败：' + explainGatewayError(data.error, data.detail);
+      showToast('下卡失败：' + explainGatewayError(data.error, data.detail));
+    }
+  } catch (e) {
+    status.style.color = 'var(--danger)';
+    status.textContent = '请求异常：' + e;
+  }
+  await loadPhoneDashboard();
+}
+
+async function decodeQrFromClipboard() {
+  try {
+    const items = await navigator.clipboard.read();
+    for (const item of items) {
+      for (const type of item.types) {
+        if (type.startsWith('image/')) {
+          decodeQrFile(new File([await item.getType(type)], 'clip.png', {type}));
+          return;
+        }
+      }
+    }
+  } catch (_) {}
+  try {
+    const text = await navigator.clipboard.readText();
+    if (text && text.toUpperCase().includes('LPA:')) {
+      document.getElementById('lpaCodeInput').value = text.trim();
+      showToast('已从剪贴板读取激活码');
+      parseAndRenderLpa();
+      return;
+    }
+  } catch (_) {}
+  showToast('剪贴板里没有可识别的激活码或二维码');
+}
+
+/* ---------- ADB ---------- */
+async function checkAdbStatus() {
+  const res = await fetch('/api/tools/adb/status');
+  const data = await res.json();
+  const box = document.getElementById('adbStatusBox');
+  const devs = data.devices || [];
+  box.textContent = devs.length
+    ? devs.map(d => d.serial + '（' + d.state + '）' + (d.details ? ' · ' + d.details : '')).join('；')
+    : '未检测到 ADB 设备（adb: ' + (data.adbPath || '未找到') + '）';
+}
+
+async function oneClickADBBridge() {
+  const el = document.getElementById('adbConnectAddr');
+  const connectAddr = el ? el.value : '';
+  showToast('正在通过 ADB 建立隧道…');
+  const res = await fetch('/api/tools/adb/bridge', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({connectAddr})
+  });
+  const data = await res.json();
+  if (data.ok) {
+    showToast('ADB 桥接成功（' + data.serial + '）');
+    await fetchState();
+    await loadPhoneDashboard();
+    await checkAdbStatus();
+  } else {
+    showToast('ADB 桥接失败：' + (data.error || ''));
+  }
+}
+
+async function fetchAdbLogcat() {
+  const pre = document.getElementById('adbLogcatBox');
+  pre.textContent = '正在拉取…';
+  const res = await fetch('/api/tools/adb/logcat');
+  const data = await res.json();
+  pre.textContent = data.ok ? ((data.lines || []).join('\n') || '暂无匹配日志') : ('抓取失败：' + (data.error || ''));
+}
+
+/* ---------- 二传手 ---------- */
+function renderFanoutList() {
+  const box = document.getElementById('fanoutListBox');
+  // SSE refreshes state on every SMS/heartbeat; rebuilding while the operator is
+  // typing would silently discard the row they are editing.
+  if (box.contains(document.activeElement)) return;
+  const list = (hubState && hubState.config && hubState.config.fanoutTargets) || [];
+  if (!list.length) {
+    box.innerHTML = '<div class="empty">尚未添加转发目标</div>';
+    return;
+  }
+  box.innerHTML = '';
+  list.forEach((t, idx) => {
+    const item = document.createElement('div');
+    item.className = 'list-item';
+    item.innerHTML =
+      '<select data-k="type" style="max-width:150px;">' +
+        ['feishu','dingtalk','wecom','bark','discord','webhook','command'].map(v =>
+          '<option value="' + v + '"' + (t.type === v ? ' selected' : '') + '>' + v + '</option>').join('') +
+      '</select>' +
+      '<input data-k="name" value="' + escapeAttr(t.name || '') + '" placeholder="备注名" style="max-width:140px;" />' +
+      '<input data-k="endpoint" value="' + escapeAttr(t.endpoint || '') + '" placeholder="Webhook URL 或脚本命令" style="flex:1;min-width:220px;" />' +
+      '<label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--muted);">' +
+        '<input type="checkbox" data-k="onlyOtp"' + (t.onlyOtp ? ' checked' : '') + ' style="width:auto;" /> 仅验证码</label>' +
+      '<label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--muted);">' +
+        '<input type="checkbox" data-k="enabled"' + (t.enabled ? ' checked' : '') + ' style="width:auto;" /> 启用</label>' +
+      '<button class="sm danger" data-del="1">删除</button>';
+    item.querySelectorAll('[data-k]').forEach(el => {
+      el.onchange = () => {
+        const k = el.dataset.k;
+        hubState.config.fanoutTargets[idx][k] = el.type === 'checkbox' ? el.checked : el.value;
+      };
+    });
+    item.querySelector('[data-del]').onclick = () => {
+      hubState.config.fanoutTargets.splice(idx, 1);
+      renderFanoutList();
+    };
+    box.appendChild(item);
+  });
+}
+
+function addFanoutRow() {
+  if (!hubState.config.fanoutTargets) hubState.config.fanoutTargets = [];
+  hubState.config.fanoutTargets.push({
+    id: 'fo_' + Date.now(), name: '飞书通知', type: 'feishu', endpoint: '', enabled: true, onlyOtp: false
+  });
+  renderFanoutList();
+}
+
+async function testFanout() {
+  await saveHubSettings(false);
+  await fetch('/api/tools/fanout/test', {method: 'POST'});
+  showToast('已向所有启用的渠道发送测试消息');
+}
+
+/* ---------- 设置 ---------- */
+async function saveHubSettings(pushToPhone) {
+  const cfg = Object.assign({}, (hubState && hubState.config) || {});
+  cfg.webhookToken = document.getElementById('cfgWebhookToken').value.trim();
+  cfg.phoneGatewayUrl = document.getElementById('cfgPhoneUrl').value.trim();
+  cfg.phoneApiToken = document.getElementById('cfgPhoneApiToken').value.trim();
+  cfg.autoCopyOtp = document.getElementById('cfgAutoCopy').checked;
+  cfg.desktopNotify = document.getElementById('cfgDesktopNotify').checked;
+  cfg.soundAlert = document.getElementById('cfgSoundAlert').checked;
+  const webhookUrl = document.getElementById('webhookUrlSelect').value;
+
+  const res = await fetch('/api/local/config', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({config: cfg, pushToPhone, webhookUrl})
+  });
+  const data = await res.json();
+  if (pushToPhone) {
+    showToast(data.phoneSynced ? '已保存并同步到手机 Webhook' : ('已保存本地，同步手机失败：' + (data.syncDetail || '检查网关连接')));
+  } else {
+    showToast('配置已保存');
+  }
+  fetchState();
+}
+
+function renderApiDocs() {
+  const port = location.port || '9787';
+  const base = 'http://127.0.0.1:' + port;
+  document.getElementById('apiDocsPre').textContent =
+'# 全自动切卡接码闭环\n' +
+'curl -X POST "' + base + '/api/local/switch-and-wait-otp" \\\n' +
+'  -H "Content-Type: application/json" \\\n' +
+'  -d \'{"profile":"Club Sim","senderContains":"Google","timeoutSeconds":120,"autoBack":true}\'\n\n' +
+'# 阻塞等待最新验证码\n' +
+'curl "' + base + '/api/local/otp/latest?wait=60&sender=Google"\n\n' +
+'# 直接执行原 TG Bot 指令\n' +
+'curl -X POST "' + base + '/api/local/bot" -d \'{"text":"/status"}\'\n' +
+'curl -X POST "' + base + '/api/local/bot" -d \'{"text":"/use_temp 2"}\'\n\n' +
+'# 命令行\n' +
+'esim-hub.exe status\n' +
+'esim-hub.exe use_temp 2\n' +
+'esim-hub.exe otp --wait 60\n' +
+'esim-hub.exe switch-otp "Club Sim" --timeout 120\n' +
+'esim-hub.exe adb-bridge';
+}
+
+/* ---------- 诊断 ---------- */
+async function loadGatewayLogs() {
+  const box = document.getElementById('gatewayLogsBox');
+  box.innerHTML = '<div class="empty">读取中…</div>';
+  try {
+    const res = await fetch('/api/phone/logs');
+    if (!res.ok) {
+      box.innerHTML = '<div class="empty">手机网关不可达或该版本不支持日志接口（HTTP ' + res.status + '）</div>';
+      return;
+    }
+    const data = await res.json();
+    const failures = data.failures || [];
+    if (!failures.length) {
+      box.innerHTML = '<div class="empty">最近没有失败记录</div>';
+      return;
+    }
+    box.innerHTML = '';
+    failures.slice().reverse().forEach(f => {
+      const item = document.createElement('div');
+      item.className = 'list-item';
+      item.style.alignItems = 'flex-start';
+      item.innerHTML =
+        '<div class="list-main" style="flex:1;">' +
+          '<div class="list-title mono">' + escapeHtml(f.path) + ' <span class="badge off">' + escapeHtml(f.code) + '</span></div>' +
+          '<div style="font-size:12.5px;margin-top:4px;word-break:break-word;">' +
+            escapeHtml(f.type || '') + '：' + escapeHtml(f.detail || '') + '</div>' +
+          '<div class="list-sub" style="margin-top:4px;">' + escapeHtml(f.at || '') + '</div>' +
+        '</div>';
+      box.appendChild(item);
+    });
+  } catch (e) {
+    box.innerHTML = '<div class="empty">读取失败：' + escapeHtml(String(e)) + '</div>';
+  }
+}
+
+/* ---------- 弹窗 ---------- */
+function showGlassPrompt(title, defaultValue) {
+  return new Promise(resolve => {
+    const mask = document.createElement('div');
+    mask.className = 'modal-mask';
+    mask.innerHTML =
+      '<div class="modal">' +
+        '<div class="card-title" style="margin-bottom:12px;white-space:pre-wrap;">' + escapeHtml(title) + '</div>' +
+        '<input id="gpInput" value="' + escapeAttr(defaultValue || '') + '" style="margin-bottom:14px;" />' +
+        '<div class="actions" style="justify-content:flex-end;margin:0;">' +
+          '<button id="gpCancel">取消</button><button class="primary" id="gpOk">确定</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(mask);
+    const inp = mask.querySelector('#gpInput');
+    inp.focus(); inp.select();
+    const done = v => { dismissModal(mask); resolve(v); };
+    mask.querySelector('#gpCancel').onclick = () => done(null);
+    mask.querySelector('#gpOk').onclick = () => done(inp.value);
+    inp.onkeydown = e => {
+      if (e.key === 'Enter') done(inp.value);
+      if (e.key === 'Escape') done(null);
+    };
+  });
+}
+
+/* ---------- 通用 ---------- */
+async function sendBotCmd(text) {
+  showToast('执行：' + text);
+  await fetch('/api/local/bot', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({text})
+  });
+  await fetchState();
+  await loadPhoneDashboard();
+}
+
+async function sendBotCallback(callbackData) {
+  showToast('执行：' + callbackData);
+  await fetch('/api/local/bot', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({callbackData})
+  });
+  await fetchState();
+  await loadPhoneDashboard();
+}
+
+async function refreshAll() {
+  await fetchState();
+  await loadPhoneDashboard();
+  await checkAdbStatus();
+  showToast('已刷新');
+}
+
+function connectSSE() {
+  const es = new EventSource('/api/local/events');
+  es.onmessage = ev => {
+    try {
+      const msg = JSON.parse(ev.data);
+      if (msg.type === 'webhook_event' || msg.type === 'chat' || msg.type === 'heartbeat') {
+        fetchState();
+        if (msg.type === 'webhook_event') loadPhoneDashboard();
+      }
+    } catch (_) {}
+  };
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  fetchState();
+  loadPhoneDashboard();
+  checkAdbStatus();
+  parseAndRenderLpa();
+  wireDropZone();
+  connectSSE();
+});
+</script>
+</body>
+</html>

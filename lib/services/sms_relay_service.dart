@@ -11,6 +11,7 @@ class SmsRelayConfiguration {
     required this.mode,
     required this.enabled,
     required this.endpoint,
+    this.webhookEndpoint,
     required this.telegramChatId,
     required this.cfChannelId,
     required this.tokenConfigured,
@@ -38,6 +39,7 @@ class SmsRelayConfiguration {
     }
     final map = Map<Object?, Object?>.from(value);
     final endpoint = map['endpoint'];
+    final webhookEndpoint = map['webhookEndpoint'];
     final telegramChatId = map['telegramChatId'];
     final cfChannelId = map['cfChannelId'];
     final lastDeliveryAtMillis = map['lastDeliveryAtMillis'];
@@ -51,6 +53,7 @@ class SmsRelayConfiguration {
       mode: mode,
       enabled: map['enabled'] == true,
       endpoint: endpoint is String ? endpoint : null,
+      webhookEndpoint: webhookEndpoint is String ? webhookEndpoint : null,
       telegramChatId: telegramChatId is String ? telegramChatId : null,
       cfChannelId: cfChannelId is String ? cfChannelId : null,
       tokenConfigured: map['tokenConfigured'] == true,
@@ -67,6 +70,7 @@ class SmsRelayConfiguration {
   final String mode;
   final bool enabled;
   final String? endpoint;
+  final String? webhookEndpoint;
   final String? telegramChatId;
   final String? cfChannelId;
   final bool tokenConfigured;
@@ -103,6 +107,8 @@ class RemoteGatewayConfiguration {
     required this.apiToken,
     required this.telegramToken,
     required this.telegramChatId,
+    this.webhookEndpoint,
+    this.webhookToken,
     required this.canScheduleExactAlarms,
   });
 
@@ -113,6 +119,8 @@ class RemoteGatewayConfiguration {
         apiToken: null,
         telegramToken: null,
         telegramChatId: null,
+        webhookEndpoint: null,
+        webhookToken: null,
         canScheduleExactAlarms: false,
       );
     }
@@ -126,6 +134,12 @@ class RemoteGatewayConfiguration {
       telegramChatId: map['telegramChatId'] is String
           ? map['telegramChatId'] as String
           : null,
+      webhookEndpoint: map['webhookEndpoint'] is String
+          ? map['webhookEndpoint'] as String
+          : null,
+      webhookToken: map['webhookToken'] is String
+          ? map['webhookToken'] as String
+          : null,
       canScheduleExactAlarms: map['canScheduleExactAlarms'] == true,
     );
   }
@@ -134,6 +148,8 @@ class RemoteGatewayConfiguration {
   final String? apiToken;
   final String? telegramToken;
   final String? telegramChatId;
+  final String? webhookEndpoint;
+  final String? webhookToken;
   final bool canScheduleExactAlarms;
 }
 
@@ -277,6 +293,10 @@ class SmsRelayService {
     await _channel.invokeMethod<bool>('testTelegram');
   }
 
+  Future<void> testWebhook() async {
+    await _channel.invokeMethod<bool>('testWebhook');
+  }
+
   Future<void> testCfWorker() async {
     await _channel.invokeMethod<bool>('testCfWorker');
   }
@@ -339,15 +359,40 @@ class SmsRelayService {
         await _channel.invokeMethod<Object?>('getDeviceHealth'),
       );
 
+  static bool isPrivateOrTailnetHost(String rawHost) {
+    final host = rawHost.trim().toLowerCase().replaceAll(RegExp(r'^\[|\]$'), '');
+    if (host == 'localhost' || host == '::1' || host.startsWith('fd7a:115c:a1e0:')) {
+      return true;
+    }
+    final parts = host.split('.');
+    if (parts.length != 4) return false;
+    final octets = <int>[];
+    for (final p in parts) {
+      final v = int.tryParse(p);
+      if (v == null || v < 0 || v > 255) return false;
+      octets.add(v);
+    }
+    final a = octets[0];
+    final b = octets[1];
+    return a == 127 ||
+        a == 10 ||
+        (a == 192 && b == 168) ||
+        (a == 172 && b >= 16 && b <= 31) ||
+        (a == 100 && b >= 64 && b <= 127);
+  }
+
   static bool isSecureEndpoint(String value) {
     final uri = Uri.tryParse(value.trim());
     if (uri == null ||
-        uri.scheme.toLowerCase() != 'https' ||
         uri.host.isEmpty ||
         uri.userInfo.isNotEmpty ||
         uri.hasFragment) {
       return false;
     }
+    final scheme = uri.scheme.toLowerCase();
+    final allowedScheme =
+        scheme == 'https' || (scheme == 'http' && isPrivateOrTailnetHost(uri.host));
+    if (!allowedScheme) return false;
     try {
       return !uri.hasPort || (uri.port > 0 && uri.port <= 65535);
     } on FormatException {

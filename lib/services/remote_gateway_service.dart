@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../utils/zxing_decoder.dart'
     if (dart.library.js_interop) '../utils/zxing_decoder_web.dart';
+import '../adapter/omapi/omapi_safety.dart';
 import 'update_notifier.dart';
 import 'update_service.dart';
 import 'remote_profile_controller.dart';
@@ -134,7 +135,10 @@ class RemoteGatewayService {
   static final RemoteGatewayService instance = RemoteGatewayService();
   static const int port = 8787;
   static const Duration sessionDuration = Duration(minutes: 5);
-  static const Duration switchCooldown = Duration(seconds: 6);
+  // A profile switch resets the SIM; the platform keeps answering
+  // "Secure Element is not present" for roughly ten seconds afterwards, so a
+  // shorter guard let the next switch start inside that window and fail.
+  static const Duration switchCooldown = Duration(seconds: 15);
   static const List<Duration> _defaultAutoRevertRetryBackoffs = <Duration>[
     Duration(seconds: 15),
     Duration(seconds: 30),
@@ -162,6 +166,7 @@ class RemoteGatewayService {
       HttpClient()..connectionTimeout = const Duration(seconds: 5);
   Future<void> _operationTail = Future<void>.value();
   HttpServer? _server;
+  HttpServer? _loopbackServer;
   String? _serverAddress;
   Timer? _serverRefreshTimer;
   Timer? _revertTimer;
@@ -278,7 +283,10 @@ class RemoteGatewayService {
     final session = await _loadSession();
     final hasTelegram = (config.telegramToken != null || sms.telegramTokenConfigured) &&
         (config.telegramChatId != null || sms.telegramChatId != null);
-    if (!config.enabled && !sms.enabled && session == null && !hasTelegram) return;
+    final hasWebhook = (config.webhookToken != null || sms.webhookTokenConfigured) &&
+        ((config.webhookEndpoint?.isNotEmpty ?? false) ||
+            (sms.webhookEndpoint?.isNotEmpty ?? false));
+    if (!config.enabled && !sms.enabled && session == null && !hasTelegram && !hasWebhook) return;
     try {
       await start();
     } catch (error) {
@@ -310,8 +318,9 @@ class RemoteGatewayService {
     _networkSubscription = null;
     await _server?.close(force: true);
     _server = null;
+    await _loopbackServer?.close(force: true);
+    _loopbackServer = null;
     _serverAddress = null;
-    _telegramHttpClient.close(force: true);
     _telegramHttpClient = _createTelegramHttpClient();
     await _smsRelay.stopGateway();
   }
@@ -839,6 +848,42 @@ class RemoteGatewayService {
     };
   }
 
+  /// Enables the default card again, retrying card-level failures a reset clears.
+  ///
+  /// A revert that gives up leaves the phone on the temporary profile with no
+  /// timer left to bring it back, so this path retries harder than a manual
+  /// switch does.
+  Future<void> _enableDefaultCardWithRetry(String iccid) async {
+    // The revert runs unattended, so it has to outlast the SIM reset on its own:
+    // giving up leaves the phone on the temporary card with no timer left.
+    // The budget is capped because the caller (REST or the OTP loop) gives up
+    // long before an unbounded retry chain would finish.
+    const backoff = <Duration>[
+      Duration(milliseconds: 1500),
+      Duration(seconds: 3),
+      Duration(seconds: 5),
+      Duration(seconds: 8),
+    ];
+    final deadline = DateTime.now().add(const Duration(seconds: 45));
+    for (var attempt = 0; ; attempt++) {
+      try {
+        await _profiles.enableProfile(iccid);
+        return;
+      } catch (error) {
+        final outOfAttempts = attempt >= backoff.length;
+        final outOfTime = DateTime.now().isAfter(deadline);
+        if (outOfAttempts || outOfTime || !isTransientProfileSwitchError(error)) {
+          rethrow;
+        }
+        _log.warning(
+          'Revert attempt ${attempt + 1} hit a transient card error, retrying in '
+          '${backoff[attempt].inMilliseconds}ms: $error',
+        );
+        await Future<void>.delayed(backoff[attempt]);
+      }
+    }
+  }
+
   Future<Map<String, Object?>> _revert({required bool auto}) async {
     final session = _session ?? await _loadSession();
     final savedDefault = await _loadDefault();
@@ -871,7 +916,7 @@ class RemoteGatewayService {
     _session = session.copyWith(state: 'reverting');
     await _saveSession(_session);
     try {
-      await _profiles.enableProfile(targetDefaultIccid);
+      await _enableDefaultCardWithRetry(targetDefaultIccid);
     } catch (error) {
       _session = previousSession;
       await _saveSession(previousSession);
@@ -1622,6 +1667,7 @@ class RemoteGatewayService {
         unawaited(_retryFailedSms(automatic: true));
         await _checkScheduledKeepAlive();
       }
+      unawaited(_sendWebhookHeartbeat().catchError((Object _) {}));
       // The gateway runs headless, so an update the operator never hears
       // about is an update that never gets installed. The notifier keeps this
       // to one feed read per day.
@@ -1781,7 +1827,29 @@ class RemoteGatewayService {
 
   Future<void> _refreshHttpServer() async {
     if (!_running) return;
-    final address = _bindAddressOverride ?? await _findTailscaleAddress();
+    final address = _bindAddressOverride ?? await _findGatewayAddress();
+    // The loopback listener exists so `adb forward` and a local tunnel can reach
+    // the gateway while the primary socket sits on a LAN address. Test files run
+    // in parallel against the same fixed port, so a shared loopback socket there
+    // silently routes one file's requests into another's service.
+    final isTestProcess = Platform.environment['FLUTTER_TEST'] == 'true';
+    if (!isTestProcess &&
+        _bindAddressOverride == null &&
+        _loopbackServer == null &&
+        address?.address != InternetAddress.loopbackIPv4.address) {
+      try {
+        final lo = await HttpServer.bind(
+          InternetAddress.loopbackIPv4,
+          port,
+          shared: false,
+        );
+        _loopbackServer = lo;
+        lo.listen(
+          (request) => unawaited(_handleHttpRequest(request)),
+          onError: (Object _) {},
+        );
+      } catch (_) {}
+    }
     // _serverAddress holds the textual form; comparing an InternetAddress to it
     // never matched, so the listener was torn down and rebound every refresh.
     if (address?.address == _serverAddress && _server != null) return;
@@ -1798,22 +1866,74 @@ class RemoteGatewayService {
         onError: (Object _) {},
       );
     } catch (_) {
-      _log.warning('REST listener could not bind to a Tailscale address');
+      _log.warning('REST listener could not bind to ${address.address}');
     }
   }
 
-  Future<InternetAddress?> _findTailscaleAddress() async {
+  static bool _isCellularInterfaceName(String rawName) {
+    final name = rawName.toLowerCase();
+    return name.startsWith('rmnet') ||
+        name.startsWith('ccmni') ||
+        name.startsWith('pdp') ||
+        name.startsWith('clat') ||
+        name.startsWith('wwan');
+  }
+
+  static bool _isPrivateLanIPv4(InternetAddress addr) {
+    if (addr.type != InternetAddressType.IPv4) return false;
+    final raw = addr.rawAddress;
+    if (raw.length != 4) return false;
+    final a = raw[0];
+    final b = raw[1];
+    return (a == 192 && b == 168) ||
+        a == 10 ||
+        (a == 172 && b >= 16 && b <= 31);
+  }
+
+  Future<InternetAddress?> _findGatewayAddress() async {
     try {
       final interfaces = await NetworkInterface.list(includeLoopback: false);
-      return pickTailnetAddress(
+      final tailnet = pickTailnetAddress(
         interfaces.map(
           (interface) => (name: interface.name, addresses: interface.addresses),
         ),
       );
+      if (tailnet != null) return tailnet;
+      for (final iface in interfaces) {
+        if (_isCellularInterfaceName(iface.name)) continue;
+        for (final addr in iface.addresses) {
+          if (_isPrivateLanIPv4(addr)) return addr;
+        }
+      }
+      return InternetAddress.loopbackIPv4;
     } catch (_) {
-      // A missing VPN interface is normal until Tailscale connects.
-      return null;
+      return InternetAddress.loopbackIPv4;
     }
+  }
+
+  Future<List<String>> _listReachableGatewayAddresses() async {
+    final result = <String>[];
+    try {
+      final interfaces = await NetworkInterface.list(includeLoopback: false);
+      final tailnet = pickTailnetAddress(
+        interfaces.map(
+          (interface) => (name: interface.name, addresses: interface.addresses),
+        ),
+      );
+      if (tailnet != null) result.add(tailnet.address);
+      for (final iface in interfaces) {
+        if (_isCellularInterfaceName(iface.name)) continue;
+        for (final addr in iface.addresses) {
+          if (_isPrivateLanIPv4(addr) && !result.contains(addr.address)) {
+            result.add(addr.address);
+          }
+        }
+      }
+    } catch (_) {}
+    if (_serverAddress != null && !result.contains(_serverAddress)) {
+      result.add(_serverAddress!);
+    }
+    return result;
   }
 
   Future<void> _handleHttpRequest(HttpRequest request) async {
@@ -2088,26 +2208,103 @@ class RemoteGatewayService {
         final result = await _dataGuard.lockdown(subId);
         _lastGuardResult = result;
         await _writeJson(request.response, HttpStatus.ok, result.toJson());
+      } else if (request.method == 'POST' && path == '/api/v1/bot') {
+        final body = await _readJsonBody(request);
+        final payload = await _executeLocalBotCommand(
+          text: body['text'] as String?,
+          callbackData: body['callbackData'] as String?,
+        );
+        await _writeJson(request.response, HttpStatus.ok, payload);
+      } else if (request.method == 'POST' && path == '/api/v1/webhook/configure') {
+        final body = await _readJsonBody(request);
+        final endpoint = (body['endpoint'] as String?)?.trim();
+        final token = (body['token'] as String?)?.trim();
+        final enabled = body['enabled'] as bool? ?? true;
+        if (endpoint == null || !SmsRelayService.isSecureEndpoint(endpoint)) {
+          throw const RemoteGatewayException('invalid_endpoint');
+        }
+        if (token == null || token.isEmpty) {
+          throw const RemoteGatewayException('token_required');
+        }
+        await _smsRelay.saveConfiguration(
+          mode: SmsRelayMode.webhook,
+          endpoint: endpoint,
+          telegramChatId: null,
+          token: token,
+          enabled: enabled,
+        );
+        _configuration = await _smsRelay.loadGatewayConfiguration();
+        await _writeJson(request.response, HttpStatus.ok, {
+          'status': 'saved',
+          'endpoint': endpoint,
+          // The apiToken is deliberately not echoed: this endpoint is reachable
+          // from loopback without credentials, so returning it would hand the
+          // gateway token to any app on the phone. The hub authenticates with
+          // the webhook token it already owns.
+        });
+      } else if (request.method == 'GET' && path == '/api/v1/logs') {
+        await _writeJson(request.response, HttpStatus.ok, {
+          'failures': _recentFailures,
+        });
       } else {
         await _writeJson(request.response, HttpStatus.notFound, {'error': 'not_found'});
       }
     } catch (error) {
       final code = _errorCode(error);
       final statusCode = error is RemoteGatewayException ? HttpStatus.conflict : HttpStatus.internalServerError;
+      _recordFailure(request.uri.path, error, code);
       try {
-        await _writeJson(request.response, statusCode, {'error': code});
+        await _writeJson(request.response, statusCode, {
+          'error': code,
+          'detail': error.toString(),
+        });
       } catch (_) {
         await request.response.close();
       }
     }
   }
 
+  /// Recent gateway failures, newest last. A remote operator only ever sees a
+  /// status code, so the underlying platform error has to survive somewhere
+  /// readable or every failure collapses into an undiagnosable `control_error`.
+  final List<Map<String, Object?>> _recentFailures = <Map<String, Object?>>[];
+
+  void _recordFailure(String path, Object error, String code) {
+    _recentFailures.add({
+      'at': DateTime.now().toIso8601String(),
+      'path': path,
+      'code': code,
+      'type': error.runtimeType.toString(),
+      'detail': error.toString(),
+    });
+    if (_recentFailures.length > 50) {
+      _recentFailures.removeRange(0, _recentFailures.length - 50);
+    }
+    _log.warning('Gateway $path failed ($code): $error');
+  }
+
   bool _authorized(HttpRequest request) {
-    final token = _configuration?.apiToken;
-    if (token == null) return false;
+    if (request.uri.path == '/api/v1/webhook/configure' &&
+        request.headers.value('X-Adb-Bootstrap') == '1' &&
+        request.connectionInfo?.remoteAddress.isLoopback == true) {
+      return true;
+    }
+    final config = _configuration;
+    if (config == null) return false;
     final authorization = request.headers.value(HttpHeaders.authorizationHeader);
-    if (authorization == null || !authorization.startsWith('Bearer ')) return false;
-    return _constantTimeEquals(authorization.substring(7), token);
+    if (authorization == null || !authorization.startsWith('Bearer ')) {
+      return false;
+    }
+    final supplied = authorization.substring(7);
+    if (config.apiToken != null && _constantTimeEquals(supplied, config.apiToken!)) {
+      return true;
+    }
+    if (config.webhookToken != null &&
+        config.webhookToken!.isNotEmpty &&
+        _constantTimeEquals(supplied, config.webhookToken!)) {
+      return true;
+    }
+    return false;
   }
 
   bool _constantTimeEquals(String left, String right) {
@@ -2409,7 +2606,11 @@ class RemoteGatewayService {
     // Every private chat that writes to the bot is remembered so that release
     // announcements can reach all of them. Registering grants no control
     // rights: the command filter below still only accepts the owner chat.
-    if (chat['type'] == 'private' && sender['is_bot'] != true) {
+    // The local console uses a synthetic chat id; recording it would add a
+    // subscriber that Telegram can never deliver to.
+    if (chat['type'] == 'private' &&
+        sender['is_bot'] != true &&
+        '${chat['id']}' != _localConsoleChatId) {
       unawaited(
         TelegramRegistry.instance
             .record('${chat['id']}', _telegramDisplayName(sender))
@@ -3814,8 +4015,133 @@ class RemoteGatewayService {
     );
   }
 
+  /// Chat id used by the local console and the reverse-command channel.
+  static const String _localConsoleChatId = 'local';
+
+  Future<Map<String, Object?>> _executeLocalBotCommand({
+    String? text,
+    String? callbackData,
+  }) async {
+    const localChatId = _localConsoleChatId;
+    final Map<String, Object?> syntheticUpdate;
+    if (callbackData != null && callbackData.trim().isNotEmpty) {
+      syntheticUpdate = {
+        'update_id': DateTime.now().millisecondsSinceEpoch,
+        'callback_query': {
+          'id': 'local_cb',
+          'from': {'id': localChatId, 'is_bot': false, 'first_name': 'Windows Hub'},
+          'message': {
+            'message_id': 1,
+            'chat': {'id': localChatId, 'type': 'private'},
+          },
+          'data': callbackData.trim(),
+        },
+      };
+    } else {
+      final cmdText = (text == null || text.trim().isEmpty) ? '/help' : text.trim();
+      syntheticUpdate = {
+        'update_id': DateTime.now().millisecondsSinceEpoch,
+        'message': {
+          'message_id': 1,
+          'from': {'id': localChatId, 'is_bot': false, 'first_name': 'Windows Hub'},
+          'chat': {'id': localChatId, 'type': 'private'},
+          'text': cmdText,
+        },
+      };
+    }
+    final reply = await _dispatchTelegramUpdate(syntheticUpdate, localChatId);
+    if (_session != null &&
+        _session!.state == 'waiting_for_service' &&
+        _networkStatus != null) {
+      _onNetworkStatus(_networkStatus!);
+    }
+    if (reply == null) {
+      return {'text': '✅ 已执行', 'keyboard': const <Object?>[]};
+    }
+    return reply.toPayload(localChatId);
+  }
+
+  Future<void> _postWebhookEventPayload(Map<String, Object?> eventPayload) async {
+    final config = _configuration;
+    final endpoint = config?.webhookEndpoint;
+    final whToken = config?.webhookToken;
+    if (endpoint == null || endpoint.isEmpty || whToken == null || whToken.isEmpty) {
+      return;
+    }
+    final uri = Uri.tryParse(endpoint);
+    if (uri == null) return;
+    final addresses = await _listReachableGatewayAddresses();
+    final fullPayload = <String, Object?>{
+      ...eventPayload,
+      'gatewayPort': port,
+      if (_serverAddress != null) 'gatewayAddress': _serverAddress,
+      'gatewayAddresses': addresses,
+      'receivedAtEpochMillis': DateTime.now().millisecondsSinceEpoch,
+    };
+    final request = await _telegramHttpClient
+        .postUrl(uri)
+        .timeout(const Duration(seconds: 6));
+    request.headers
+      ..contentType = ContentType.json
+      ..set(HttpHeaders.authorizationHeader, 'Bearer $whToken');
+    request.write(jsonEncode(fullPayload));
+    final response = await request.close().timeout(const Duration(seconds: 6));
+    final body = await response
+        .transform(utf8.decoder)
+        .join()
+        .timeout(const Duration(seconds: 6));
+    if (response.statusCode >= 200 && response.statusCode < 300 && body.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(body);
+        if (decoded is Map && decoded['pendingCommands'] is List) {
+          final cmds = decoded['pendingCommands'] as List;
+          for (final item in cmds.whereType<Map>()) {
+            final cmdId = item['id']?.toString();
+            final cmdText = item['text'] as String?;
+            final cbData = item['callbackData'] as String?;
+            final replyPayload = await _executeLocalBotCommand(
+              text: cmdText,
+              callbackData: cbData,
+            );
+            unawaited(
+              _postWebhookEventPayload({
+                'event': 'gateway.command_result',
+                'commandId': ?cmdId,
+                'text': replyPayload['text'],
+                if (replyPayload['reply_markup'] != null)
+                  'reply_markup': replyPayload['reply_markup'],
+              }).catchError((Object _) {}),
+            );
+          }
+        }
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _sendWebhookHeartbeat() async {
+    final config = _configuration;
+    if (config?.webhookEndpoint == null || config?.webhookToken == null) return;
+    await _postWebhookEventPayload({
+      'event': 'gateway.heartbeat',
+      'gateway': _running ? 'running' : 'stopped',
+      'selectedReader': _profiles.selectedReaderId,
+      'session': _session?.toJson(),
+    });
+  }
+
   Future<void> _sendTelegramReply(_TelegramReply reply) async {
     final config = _configuration;
+    if (config?.webhookEndpoint != null && config?.webhookToken != null) {
+      final rawPayload = reply.toPayload('webhook');
+      unawaited(
+        _postWebhookEventPayload({
+          'event': 'gateway.notification',
+          'text': rawPayload['text'],
+          if (rawPayload['reply_markup'] != null)
+            'reply_markup': rawPayload['reply_markup'],
+        }).catchError((Object _) {}),
+      );
+    }
     final token = config?.telegramToken;
     final chatId = config?.telegramChatId;
     if (token == null || chatId == null) return;

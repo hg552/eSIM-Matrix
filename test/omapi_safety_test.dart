@@ -336,4 +336,54 @@ void main() {
       await adapter.disconnect();
     },
   );
+
+  group('isTransientProfileSwitchError', () {
+    test('treats a dropped APDU channel as retryable', () {
+      // The OMAPI plugin reports channel loss as a raw PlatformException, which
+      // used to fall outside every retry path and surface as control_error.
+      for (final code in transientOmapiPlatformCodes) {
+        expect(
+          isTransientProfileSwitchError(PlatformException(code: code)),
+          isTrue,
+          reason: code,
+        );
+      }
+    });
+
+    test('keeps ARA-M and argument failures out of the retry path', () {
+      for (final code in const [
+        'SECURITY_EXCEPTION',
+        'READER_NOT_FOUND',
+        'INVALID_ARGUMENT',
+        'UNSUPPORTED',
+      ]) {
+        expect(
+          isTransientProfileSwitchError(PlatformException(code: code)),
+          isFalse,
+          reason: code,
+        );
+      }
+    });
+
+    test('a corrupted session is never retried automatically', () {
+      expect(
+        isTransientProfileSwitchError(
+          PlatformException(code: omapiSessionCorruptedCode),
+        ),
+        isFalse,
+      );
+    });
+
+    test('an explicit card refusal is not retried', () {
+      expect(
+        isTransientProfileSwitchError(
+          AppException(
+            AppErrorCode.ERROR_OMAPI_TRANSMIT_FAILED,
+            message: 'ENABLE_FAILED: 6A88',
+          ),
+        ),
+        isFalse,
+      );
+    });
+  });
 }

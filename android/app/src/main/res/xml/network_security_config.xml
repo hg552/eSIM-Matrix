@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Platform HTTP clients (WebView, HttpURLConnection) must not speak cleartext.
+
+  The SMS webhook still has to reach a LAN or adb-reverse endpoint over plain
+  HTTP, because those addresses have no certificate. That one path writes its
+  own HTTP request over a raw socket (SmsRelayWebhookClient.postPlainHttp),
+  which the platform policy does not cover, and SmsRelayEndpointValidator
+  restricts it to loopback, RFC1918 and the Tailscale range.
+
+  Keeping this file at "deny" means an http page loaded in the in-app browser
+  cannot be injected by a network attacker, and no other native HTTP call can
+  silently downgrade.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>
