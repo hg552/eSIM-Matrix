@@ -23,8 +23,12 @@
     --warning-soft: #fffbeb;
     --danger: #dc2626;
     --danger-soft: #fef2f2;
-    --radius: 12px;
-    --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
+    --radius: 14px;
+    --radius-sm: 10px;
+    /* Apple's shadows are wide, soft and low-contrast: depth comes from the
+       spread, not from a dark edge. Two layers, the second one tight. */
+    --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 4px 12px -2px rgba(16, 24, 40, 0.06);
+    --shadow-lift: 0 2px 4px rgba(16, 24, 40, 0.05), 0 12px 28px -6px rgba(16, 24, 40, 0.12);
 
     /* Springs from WWDC23 "Animate with springs": mass = 1,
        stiffness = (2pi/duration)^2, damping ratio = 1 - bounce.
@@ -61,17 +65,27 @@
     --danger: #f87171;
     --danger-soft: #2a1414;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-lift: 0 2px 6px rgba(0, 0, 0, 0.35), 0 14px 32px -8px rgba(0, 0, 0, 0.55);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
   body {
-    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    /* The platform UI font first, so Windows renders Segoe UI Variable and
+       macOS renders SF, matching the system chrome around the window. */
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text",
+                 "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
     background: var(--bg);
     color: var(--fg);
     font-size: 14px;
     line-height: 1.55;
     display: flex;
     min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  /* Numerals in tables and metrics must not jitter as values change. */
+  .summary-value, .otp-code, .mono, .nav-count, .row-value {
+    font-variant-numeric: tabular-nums;
   }
 
   /* ---------- sidebar ---------- */
@@ -165,12 +179,7 @@
 
   /* Cards lift on hover; the shadow lags the transform so the lift reads as
      depth rather than a glow. */
-  .summary:hover, .device-card:hover {
-    box-shadow: 0 4px 14px rgba(16, 24, 40, 0.09), 0 1px 3px rgba(16, 24, 40, 0.06);
-  }
-  body.dark .summary:hover, body.dark .device-card:hover {
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
-  }
+  .summary:hover, .device-card:hover { box-shadow: var(--shadow-lift); }
 
   /* List rows arrive one after another when a list is rebuilt. */
   .list-item { animation: spring-rise var(--spring-snappy-ms) var(--spring-snappy) both; }
@@ -203,8 +212,8 @@
   }
 
   .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
-  .page-title { font-size: 20px; font-weight: 700; letter-spacing: .2px; }
-  .page-sub { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+  .page-title { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+  .page-sub { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
 
   .card {
     background: var(--surface); border: 1px solid var(--border);
@@ -212,7 +221,7 @@
     padding: 16px 18px; margin-bottom: 14px;
   }
   .card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
-  .card-title { font-size: 14px; font-weight: 650; display: flex; align-items: center; gap: 7px; }
+  .card-title { font-size: 14px; font-weight: 650; letter-spacing: -0.01em; display: flex; align-items: center; gap: 7px; }
 
   .notice {
     background: var(--warning-soft); border: 1px solid #fde68a;
@@ -226,9 +235,9 @@
     background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
     padding: 14px 16px; box-shadow: var(--shadow);
   }
-  .summary-label { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-  .summary-value { font-size: 22px; font-weight: 700; line-height: 1.2; }
-  .summary-value.small { font-size: 15px; }
+  .summary-label { font-size: 12px; color: var(--muted); margin-bottom: 4px; letter-spacing: -0.005em; }
+  .summary-value { font-size: 25px; font-weight: 700; line-height: 1.15; letter-spacing: -0.03em; }
+  .summary-value.small { font-size: 15px; letter-spacing: -0.01em; }
 
   .device-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 14px; }
   .device-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px 18px; }
