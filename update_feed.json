@@ -2,6 +2,18 @@
   "android": {
     "multi": [
       {
+        "version": "1.4.7",
+        "build": 147,
+        "url": "https://github.com/hg552/eSIM-Matrix/releases/tag/v1.4.7",
+        "download_url": "https://github.com/hg552/eSIM-Matrix/releases/download/v1.4.7/eSIM-Matrix-v1.4.7.apk",
+        "changelog": "🆕 eSIM-Matrix 1.4.7（build 147）\n\n• 虚拟定位与代理各有一个独立控制台，不再依赖写卡：底部新增「虚拟定位」「代理」两个标签页，管理页顶栏也有入口。虚拟定位可以看注入状态、生效通道、双通道权限，选模板或手填经纬度，一键注入/停止；代理可以配控制器、选策略组、看节点延迟、单点或全部测速、直接切节点。\n• 虚拟定位可以远程操作了：新增 GET/POST/DELETE /api/v1/location 与 Telegram /location、/location_stop，Web 面板也加了定位卡片。注入失败会如实返回 409，不再假装成功。\n• 注入不再随时消失：新增前台服务，通知栏显示当前虚拟位置并可直接停止。此前进程被系统回收后定位会静默失效，而界面还写着「正在注入」。\n• 代理节点列表改为只显示当前策略组的成员：此前会把 PASS、REJECT-DROP 这类策略节点和组外节点一起列出来，点了会被控制器拒绝。\n• 短信转发页精简：删掉与代理控制台重复的输入框和测试按钮，开关改为即时保存（原来改了不点保存等于没改），历史记录、远程下卡、切卡自动化三张卡片默认折叠。\n• 修掉三处会误导人的缺陷：注入在没有任何测试 Provider 注册成功时仍报成功；Shizuku 模式每秒 fork 一次 cmd 进程；本地构建脚本在构建成功后仍因 Gradle 警告退出。",
+        "signatures": [
+          "C47350C7BA682B34A3E584A0D58463EA42B1AD73",
+          "D1C0F48B370E74D4EA4770ED4C3CD70A3198D31F",
+          "65D0571854AFEC519A90F92D7C5D8CF8148DA373"
+        ]
+      },
+      {
         "version": "1.4.6",
         "build": 146,
         "url": "https://github.com/hg552/eSIM-Matrix/releases/tag/v1.4.6",
