@@ -5,6 +5,7 @@ import 'package:nlpa2/services/network_status_service.dart';
 import 'package:nlpa2/services/remote_gateway_service.dart';
 import 'package:nlpa2/services/remote_profile_controller.dart';
 import 'package:nlpa2/services/sms_relay_service.dart';
+import 'package:nlpa2/services/vowifi_platform_service.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -660,6 +661,69 @@ class MockProfileControl implements RemoteProfileControl {
   @override
   Future<bool> accelerateNetworkSearch() async {
     accelerateCalls++;
+    return true;
+  }
+
+  // The gateway exposes VoWiFi routes; this mock answers them so the route
+  // tests exercise the HTTP layer rather than a null controller.
+  VowifiStatus? vowifi = const VowifiStatus(
+    available: true,
+    subscriptionId: 1,
+    enabled: false,
+    mode: VowifiCallingMode.wifiOnly,
+    roamingEnabled: false,
+    roamingMode: VowifiCallingMode.wifiOnly,
+  );
+
+  @override
+  Future<VowifiStatus?> vowifiStatus() async => vowifi;
+
+  @override
+  Future<VowifiStatus?> setVowifiEnabled(bool enabled) async {
+    final current = vowifi;
+    if (current == null) return null;
+    return vowifi = VowifiStatus(
+      available: current.available,
+      subscriptionId: current.subscriptionId,
+      enabled: enabled,
+      mode: current.mode,
+      roamingEnabled: current.roamingEnabled,
+      roamingMode: current.roamingMode,
+    );
+  }
+
+  @override
+  Future<VowifiStatus?> setVowifiMode(VowifiCallingMode mode) async {
+    final current = vowifi;
+    if (current == null) return null;
+    return vowifi = VowifiStatus(
+      available: current.available,
+      subscriptionId: current.subscriptionId,
+      enabled: current.enabled,
+      mode: mode,
+      roamingEnabled: current.roamingEnabled,
+      roamingMode: current.roamingMode,
+    );
+  }
+
+  @override
+  Future<VowifiStatus?> setVowifiRoamingEnabled(bool enabled) async {
+    final current = vowifi;
+    if (current == null) return null;
+    return vowifi = VowifiStatus(
+      available: current.available,
+      subscriptionId: current.subscriptionId,
+      enabled: current.enabled,
+      mode: current.mode,
+      roamingEnabled: enabled,
+      roamingMode: current.roamingMode,
+    );
+  }
+
+  int reloadCalls = 0;
+  @override
+  Future<bool> reloadVowifi() async {
+    reloadCalls++;
     return true;
   }
 

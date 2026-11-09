@@ -6,12 +6,20 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../l10n/app_localizations.dart';
 import '../services/network_status_service.dart';
+import '../services/remote_profile_controller.dart';
 import '../settings/app_settings.dart';
 import '../widgets/glass/glass_surface.dart';
 import '../widgets/styled_header_scaffold.dart';
+import '../widgets/vowifi_control_card.dart';
 
 class NetworkStatusPage extends StatefulWidget {
-  const NetworkStatusPage({super.key});
+  const NetworkStatusPage({super.key, this.controller});
+
+  /// The profile control the VoWiFi card drives.
+  ///
+  /// Optional so the page still works in tests and in any build where the
+  /// gateway has not been constructed; the card is simply omitted then.
+  final RemoteProfileControl? controller;
 
   @override
   State<NetworkStatusPage> createState() => _NetworkStatusPageState();
@@ -417,6 +425,8 @@ class _NetworkStatusPageState extends State<NetworkStatusPage>
               for (final subscription in _subscriptions)
                 _buildSubscriptionCard(l10n, subscription),
             ],
+            if (widget.controller != null)
+              VowifiControlCard(controller: widget.controller!),
             if (_supported && _permissionGranted) ...[
               const SizedBox(height: 8),
               Padding(

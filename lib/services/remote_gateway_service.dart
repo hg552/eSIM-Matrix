@@ -16,6 +16,7 @@ import 'update_service.dart';
 import 'remote_profile_controller.dart';
 import 'sms_relay_service.dart';
 import 'network_status_service.dart';
+import 'vowifi_platform_service.dart';
 import 'telegram_registry.dart';
 import '../settings/app_settings.dart';
 import 'cellular_data_guardian.dart';
@@ -154,6 +155,13 @@ class RemoteGatewayService {
 
   final SmsRelayService _smsRelay;
   final RemoteProfileControl _profiles;
+
+  /// The card control the gateway drives.
+  ///
+  /// The network page needs the same instance the REST API uses, or a switch
+  /// made in the UI would target a different subscription than one made over
+  /// HTTP. Exposing the field keeps a single owner.
+  RemoteProfileControl get profiles => _profiles;
 
   /// Tests bind the REST listener to loopback; production always derives the
   /// address from the Tailscale interface so the API never lands on mobile data.
@@ -1975,6 +1983,43 @@ class RemoteGatewayService {
       } else if (request.method == 'POST' && path == '/api/v1/network/kick') {
         final ok = await _profiles.accelerateNetworkSearch();
         await _writeJson(request.response, HttpStatus.ok, {'status': 'kicked', 'success': ok});
+      } else if (request.method == 'GET' && path == '/api/v1/vowifi') {
+        final status = await _profiles.vowifiStatus();
+        await _writeJson(request.response, HttpStatus.ok, {
+          'available': status?.available ?? false,
+          'enabled': status?.enabled ?? false,
+          'mode': status?.mode.value,
+          'roamingEnabled': status?.roamingEnabled ?? false,
+          'roamingMode': status?.roamingMode.value,
+          'error': status?.error,
+        });
+      } else if (request.method == 'POST' && path == '/api/v1/vowifi/enabled') {
+        final body = await _readJsonBody(request);
+        final enabled = body['enabled'];
+        if (enabled is! bool) throw const RemoteGatewayException('enabled_required');
+        final status = await _profiles.setVowifiEnabled(enabled);
+        await _writeJson(request.response, HttpStatus.ok, {
+          'success': status != null,
+          'enabled': status?.enabled ?? false,
+          'mode': status?.mode.value,
+        });
+      } else if (request.method == 'POST' && path == '/api/v1/vowifi/mode') {
+        final body = await _readJsonBody(request);
+        final raw = body['mode'];
+        if (raw is! num) throw const RemoteGatewayException('mode_required');
+        final mode = VowifiCallingMode.fromValue(raw.toInt());
+        if (mode == VowifiCallingMode.unknown) {
+          throw const RemoteGatewayException('mode_invalid');
+        }
+        final status = await _profiles.setVowifiMode(mode);
+        await _writeJson(request.response, HttpStatus.ok, {
+          'success': status != null,
+          'enabled': status?.enabled ?? false,
+          'mode': status?.mode.value,
+        });
+      } else if (request.method == 'POST' && path == '/api/v1/vowifi/reload') {
+        final ok = await _profiles.reloadVowifi();
+        await _writeJson(request.response, HttpStatus.ok, {'success': ok});
       } else if (request.method == 'POST' && path == '/api/v1/rename') {
         final body = await _readJsonBody(request);
         final profile = body['profile'];

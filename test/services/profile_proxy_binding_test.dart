@@ -7,6 +7,7 @@ import 'package:nlpa2/services/network_status_service.dart';
 import 'package:nlpa2/services/remote_gateway_service.dart';
 import 'package:nlpa2/services/remote_profile_controller.dart';
 import 'package:nlpa2/services/sms_relay_service.dart';
+import 'package:nlpa2/services/vowifi_platform_service.dart';
 import 'package:nlpa2/settings/app_settings.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -51,6 +52,16 @@ class _StubProfiles implements RemoteProfileControl {
       const RemoteReaderEntry(id: 'reader_0', name: 'SIM2', selected: true);
   @override
   Future<bool> accelerateNetworkSearch() async => true;
+  @override
+  Future<VowifiStatus?> vowifiStatus() async => null;
+  @override
+  Future<VowifiStatus?> setVowifiEnabled(bool enabled) async => null;
+  @override
+  Future<VowifiStatus?> setVowifiMode(VowifiCallingMode mode) async => null;
+  @override
+  Future<VowifiStatus?> setVowifiRoamingEnabled(bool enabled) async => null;
+  @override
+  Future<bool> reloadVowifi() async => false;
 }
 
 const List<String> _nodes = [

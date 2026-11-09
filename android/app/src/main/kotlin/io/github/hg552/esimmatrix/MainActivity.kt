@@ -14,6 +14,7 @@ class MainActivity : FlutterActivity() {
         flutterEngine.plugins.add(OmapiPlugin())
         flutterEngine.plugins.add(TelephonyPlugin())
         flutterEngine.plugins.add(NetworkStatusPlugin())
+        flutterEngine.plugins.add(VowifiPlugin())
         flutterEngine.plugins.add(SmsRelayPlugin())
         flutterEngine.plugins.add(CertificatePlugin())
         flutterEngine.plugins.add(QrtrPlugin())

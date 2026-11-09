@@ -98,6 +98,52 @@ class AppLocalizationsEs extends AppLocalizations {
       'dBm is the strongest valid cell reading Android reports. Voice registration does not guarantee SMS delivery.';
 
   @override
+  String get wfcTitle => 'Wi-Fi Calling';
+
+  @override
+  String get wfcSubtitle =>
+      'Controls the phone\'s own IMS switch, per subscription';
+
+  @override
+  String get wfcRootRequired =>
+      'Wi-Fi Calling needs root: the platform setters are signature-gated, so the subscription table is written directly.';
+
+  @override
+  String get wfcModeWifiOnly => 'Wi-Fi only';
+
+  @override
+  String get wfcModeCellularPreferred => 'Cellular preferred';
+
+  @override
+  String get wfcModeWifiPreferred => 'Wi-Fi preferred';
+
+  @override
+  String get wfcModeUnknown => 'Unknown';
+
+  @override
+  String get wfcEnabled => 'Enabled';
+
+  @override
+  String get wfcRoamingEnabled => 'Roaming';
+
+  @override
+  String get wfcReloadHint =>
+      'A running IMS stack keeps the old value until it re-reads it. Reloading cycles the radio once.';
+
+  @override
+  String get wfcReload => 'Reload IMS';
+
+  @override
+  String get wfcReloaded => 'IMS reloaded';
+
+  @override
+  String get wfcWriteFailed => 'The subscription table rejected the change.';
+
+  @override
+  String get wfcNoSubscription =>
+      'No subscription is available for this reader.';
+
+  @override
   String get smsRelayTab => 'SMS relay';
 
   @override

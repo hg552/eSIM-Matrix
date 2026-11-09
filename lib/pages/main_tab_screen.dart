@@ -118,7 +118,9 @@ class _MainTabScreenState extends State<MainTabScreen>
           label: l10n.networkStatusTab,
           icon: Icons.network_cell,
           activeIcon: Icons.network_cell,
-          pageBuilder: (_) => const NetworkStatusPage(),
+          pageBuilder: (_) => NetworkStatusPage(
+            controller: RemoteGatewayService.instance.profiles,
+          ),
         ),
       if (PlatformX.isAndroid)
         _MainTabEntry(

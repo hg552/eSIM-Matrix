@@ -8,6 +8,7 @@ import '../plugins/build_plugin_registry.dart';
 import '../services/network_status_service.dart';
 import '../services/notification_service.dart';
 import '../services/profile_metadata_service.dart';
+import '../services/vowifi_platform_service.dart';
 import '../settings/app_settings.dart';
 import '../utils/error_codes.dart';
 import '../utils/foreground_card_session.dart';
@@ -86,6 +87,11 @@ abstract interface class RemoteProfileControl {
   Future<RemoteReaderEntry> selectReader(String selector) async =>
       throw UnsupportedError('selectReader');
   Future<bool> accelerateNetworkSearch() async => false;
+  Future<VowifiStatus?> vowifiStatus() async => null;
+  Future<VowifiStatus?> setVowifiEnabled(bool enabled) async => null;
+  Future<VowifiStatus?> setVowifiMode(VowifiCallingMode mode) async => null;
+  Future<VowifiStatus?> setVowifiRoamingEnabled(bool enabled) async => null;
+  Future<bool> reloadVowifi() async => false;
 }
 class LpaRemoteProfileControl implements RemoteProfileControl {
   LpaRemoteProfileControl({CompositeAdapter? adapter})
@@ -99,6 +105,7 @@ class LpaRemoteProfileControl implements RemoteProfileControl {
   final CompositeAdapter _adapter;
   late final ProfileManager _manager;
   final NetworkStatusService _networkStatus = const NetworkStatusService();
+  final VowifiService _vowifi = const VowifiService();
   List<RemoteProfileEntry>? _cachedProfiles;
   RemoteCardResourceInfo? _cachedResourceInfo;
   String? _cachedReaderId;
@@ -115,12 +122,63 @@ class LpaRemoteProfileControl implements RemoteProfileControl {
 
   @override
   Future<void> refreshNetworkStatus() async {
-    await _networkStatus.refresh();
+    final update = await _networkStatus.refresh();
+    if (update != null) _lastSubscriptions = update.subscriptions;
   }
 
   @override
   Future<bool> accelerateNetworkSearch() =>
       _networkStatus.accelerateNetworkSearch();
+
+  @override
+  Future<VowifiStatus?> vowifiStatus() =>
+      _vowifi.status(subscriptionId: _vowifiSubscriptionId());
+
+  @override
+  Future<VowifiStatus?> setVowifiEnabled(bool enabled) {
+    final subId = _vowifiSubscriptionId();
+    if (subId == null) return Future<VowifiStatus?>.value(null);
+    return _vowifi.setEnabled(subscriptionId: subId, enabled: enabled);
+  }
+
+  @override
+  Future<VowifiStatus?> setVowifiMode(VowifiCallingMode mode) {
+    final subId = _vowifiSubscriptionId();
+    if (subId == null) return Future<VowifiStatus?>.value(null);
+    return _vowifi.setMode(subscriptionId: subId, mode: mode);
+  }
+
+  @override
+  Future<VowifiStatus?> setVowifiRoamingEnabled(bool enabled) {
+    final subId = _vowifiSubscriptionId();
+    if (subId == null) return Future<VowifiStatus?>.value(null);
+    return _vowifi.setRoamingEnabled(subscriptionId: subId, enabled: enabled);
+  }
+
+  @override
+  Future<bool> reloadVowifi() => _vowifi.reloadIms();
+
+  /// The subscription the selected reader is serving.
+  ///
+  /// VoWiFi is a per-subscription setting, so writing it against the wrong
+  /// subscription would silently configure the other SIM. The reader name
+  /// carries the slot (`omapi:SIM2`), and the slot maps to the active
+  /// subscription; when neither resolves there is no safe default, so the
+  /// caller gets null rather than a guess.
+  int? _vowifiSubscriptionId() {
+    final slot = networkSlotIndex;
+    if (slot != null) {
+      for (final subscription in _lastSubscriptions) {
+        if (subscription.slotIndex == slot) return subscription.subscriptionId;
+      }
+    }
+    return _lastSubscriptions.length == 1
+        ? _lastSubscriptions.single.subscriptionId
+        : null;
+  }
+
+  List<NetworkStatusSubscription> _lastSubscriptions =
+      const <NetworkStatusSubscription>[];
 
   @override
   Future<List<RemoteProfileEntry>> listProfiles() async {

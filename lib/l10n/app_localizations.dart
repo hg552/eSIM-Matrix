@@ -269,6 +269,90 @@ abstract class AppLocalizations {
   /// **'dBm is the strongest valid cell reading Android reports. Voice registration does not guarantee SMS delivery.'**
   String get networkStatusLimits;
 
+  /// No description provided for @wfcTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Wi-Fi Calling'**
+  String get wfcTitle;
+
+  /// No description provided for @wfcSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Controls the phone\'s own IMS switch, per subscription'**
+  String get wfcSubtitle;
+
+  /// No description provided for @wfcRootRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Wi-Fi Calling needs root: the platform setters are signature-gated, so the subscription table is written directly.'**
+  String get wfcRootRequired;
+
+  /// No description provided for @wfcModeWifiOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'Wi-Fi only'**
+  String get wfcModeWifiOnly;
+
+  /// No description provided for @wfcModeCellularPreferred.
+  ///
+  /// In en, this message translates to:
+  /// **'Cellular preferred'**
+  String get wfcModeCellularPreferred;
+
+  /// No description provided for @wfcModeWifiPreferred.
+  ///
+  /// In en, this message translates to:
+  /// **'Wi-Fi preferred'**
+  String get wfcModeWifiPreferred;
+
+  /// No description provided for @wfcModeUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'Unknown'**
+  String get wfcModeUnknown;
+
+  /// No description provided for @wfcEnabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Enabled'**
+  String get wfcEnabled;
+
+  /// No description provided for @wfcRoamingEnabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Roaming'**
+  String get wfcRoamingEnabled;
+
+  /// No description provided for @wfcReloadHint.
+  ///
+  /// In en, this message translates to:
+  /// **'A running IMS stack keeps the old value until it re-reads it. Reloading cycles the radio once.'**
+  String get wfcReloadHint;
+
+  /// No description provided for @wfcReload.
+  ///
+  /// In en, this message translates to:
+  /// **'Reload IMS'**
+  String get wfcReload;
+
+  /// No description provided for @wfcReloaded.
+  ///
+  /// In en, this message translates to:
+  /// **'IMS reloaded'**
+  String get wfcReloaded;
+
+  /// No description provided for @wfcWriteFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'The subscription table rejected the change.'**
+  String get wfcWriteFailed;
+
+  /// No description provided for @wfcNoSubscription.
+  ///
+  /// In en, this message translates to:
+  /// **'No subscription is available for this reader.'**
+  String get wfcNoSubscription;
+
   /// No description provided for @smsRelayTab.
   ///
   /// In en, this message translates to:

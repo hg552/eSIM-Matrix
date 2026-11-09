@@ -94,6 +94,48 @@ class AppLocalizationsZh extends AppLocalizations {
       'dBm 是 Android 报告的有效小区信号读数；语音已注册不代表短信一定能送达。';
 
   @override
+  String get wfcTitle => 'Wi-Fi 通话';
+
+  @override
+  String get wfcSubtitle => '按订阅控制手机自身的 IMS 开关';
+
+  @override
+  String get wfcRootRequired => 'Wi-Fi 通话需要 root：平台 setter 是签名级权限，因此这里直接写订阅表。';
+
+  @override
+  String get wfcModeWifiOnly => '仅 Wi-Fi';
+
+  @override
+  String get wfcModeCellularPreferred => '蜂窝优先';
+
+  @override
+  String get wfcModeWifiPreferred => 'Wi-Fi 优先';
+
+  @override
+  String get wfcModeUnknown => '未知';
+
+  @override
+  String get wfcEnabled => '已开启';
+
+  @override
+  String get wfcRoamingEnabled => '漫游';
+
+  @override
+  String get wfcReloadHint => '运行中的 IMS 栈会沿用旧值，直到它重新读取。重载会重启一次射频。';
+
+  @override
+  String get wfcReload => '重载 IMS';
+
+  @override
+  String get wfcReloaded => 'IMS 已重载';
+
+  @override
+  String get wfcWriteFailed => '订阅表拒绝了这次修改。';
+
+  @override
+  String get wfcNoSubscription => '当前读卡器没有可用的订阅。';
+
+  @override
   String get smsRelayTab => '短信转发';
 
   @override
