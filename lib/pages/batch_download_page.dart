@@ -352,7 +352,9 @@ class _BatchDownloadPageState extends State<BatchDownloadPage> {
     await widget.adapter.connect(widget.reader);
     final channel = await widget.profileManager.openSession();
     try {
-      setState(() => item.status = l10n.gettingChallenge);
+      if (mounted) {
+        setState(() => item.status = l10n.gettingChallenge);
+      }
       final challengeBytes = await widget.profileManager.getEuiccChallenge(
         useChannel: channel,
       );
@@ -377,7 +379,9 @@ class _BatchDownloadPageState extends State<BatchDownloadPage> {
       session.processEuiccInfo1(info1Bytes);
       session.processEuiccChallenge(challengeBytes);
 
-      setState(() => item.status = l10n.authenticatingWithSmdp);
+      if (mounted) {
+        setState(() => item.status = l10n.authenticatingWithSmdp);
+      }
       final initAuthReq = session.getInitiateAuthenticationRequest();
       final initAuthResp = await Es9PlusService().initiateAuthentication(
         smdpAddress: ac.smdpAddress,
@@ -398,7 +402,9 @@ class _BatchDownloadPageState extends State<BatchDownloadPage> {
         serverCert,
       );
 
-      setState(() => item.status = l10n.verifyingSignatures);
+      if (mounted) {
+        setState(() => item.status = l10n.verifyingSignatures);
+      }
       final authServerResp = await widget.profileManager.authenticateServer(
         serverSigned1: serverSigned1,
         serverSignature1: serverSignature1,
@@ -410,7 +416,9 @@ class _BatchDownloadPageState extends State<BatchDownloadPage> {
       authBefore = authServerResp;
       session.processAuthenticateServerResponse(authServerResp);
 
-      setState(() => item.status = l10n.retrievingMetadata);
+      if (mounted) {
+        setState(() => item.status = l10n.retrievingMetadata);
+      }
       final authClientReq = session.getAuthenticateClientRequest();
       final clientResp = await Es9PlusService().authenticateClient(
         smdpAddress: ac.smdpAddress,
@@ -478,7 +486,9 @@ class _BatchDownloadPageState extends State<BatchDownloadPage> {
         );
       }
 
-      setState(() => item.status = l10n.preparingEuicc);
+      if (mounted) {
+        setState(() => item.status = l10n.preparingEuicc);
+      }
       final settings = AppSettings();
       if (settings.notifProcessBeforeDownload &&
           settings.isAnyNotificationProcessingEnabled) {
@@ -512,7 +522,9 @@ class _BatchDownloadPageState extends State<BatchDownloadPage> {
         useChannel: channel,
       );
 
-      setState(() => item.status = l10n.fetchingProfilePackage);
+      if (mounted) {
+        setState(() => item.status = l10n.fetchingProfilePackage);
+      }
       final bppResp = await Es9PlusService().getBoundProfilePackage(
         smdpAddress: ac.smdpAddress,
         transactionId: txnId,
@@ -524,21 +536,27 @@ class _BatchDownloadPageState extends State<BatchDownloadPage> {
       }
 
       final bppBytes = base64Decode(bppResp['boundProfilePackage']);
-      setState(() {
-        item.status = l10n.installing(0, bppBytes.length);
-      });
+      if (mounted) {
+        setState(() {
+          item.status = l10n.installing(0, bppBytes.length);
+        });
+      }
 
       await widget.profileManager.loadBoundProfilePackage(
         bppBytes,
         useChannel: channel,
         onProgress: (sent, total) {
-          setState(() {
-            item.status = l10n.installing(sent, total);
-          });
+          if (mounted) {
+            setState(() {
+              item.status = l10n.installing(sent, total);
+            });
+          }
         },
       );
 
-      setState(() => item.status = l10n.finalizing);
+      if (mounted) {
+        setState(() => item.status = l10n.finalizing);
+      }
       if (settings.notifProcessAfterInstall &&
           settings.isAnyNotificationProcessingEnabled) {
         try {

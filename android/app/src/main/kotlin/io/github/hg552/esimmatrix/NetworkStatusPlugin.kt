@@ -99,7 +99,9 @@ class NetworkStatusPlugin :
     private var currentError: String? = null
     private val registrations = linkedMapOf<Int, CallbackRegistration>()
     private val snapshots = linkedMapOf<Int, SubscriptionSnapshot>()
-    private val kickExecutor = Executors.newSingleThreadExecutor()
+    private val kickExecutor = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "network-status-kick").apply { isDaemon = true }
+    }
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         appContext = binding.applicationContext
         methodChannel = MethodChannel(binding.binaryMessenger, METHOD_CHANNEL).also {

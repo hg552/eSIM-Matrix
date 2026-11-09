@@ -83,6 +83,15 @@ class MockLocationPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         channel = MethodChannel(binding.binaryMessenger, METHOD_CHANNEL).also {
             it.setMethodCallHandler(this)
         }
+        // If a previous process was killed while mocking, its test providers
+        // remain registered in LocationManagerService and hijack real GPS
+        // while the UI says "未注入". Clean them up on cold attach.
+        if (!isMocking.get()) {
+            val lm = appContext?.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+            if (lm != null) {
+                clearTestProviders(lm)
+            }
+        }
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
@@ -111,7 +120,24 @@ class MockLocationPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     val acc = (call.argument<Double>("accuracy") ?: 3.0).toFloat()
                     val alt = call.argument<Double>("altitude") ?: 15.0
                     currentLabel = call.argument<String>("label") ?: ""
-                    result.success(startMockLocationInternal(mode, lat, lng, acc, alt))
+                    if (mode == "shizuku") {
+                        shizukuExecutor.execute {
+                            grantMockViaShizuku()
+                            runShizukuCmd("cmd", "location", "providers", "add-test-provider", "gps")
+                            runShizukuCmd("cmd", "location", "providers", "set-test-provider-enabled", "gps", "true")
+                            runShizukuCmd("cmd", "location", "providers", "add-test-provider", "network")
+                            runShizukuCmd("cmd", "location", "providers", "set-test-provider-enabled", "network", "true")
+                            handler.post {
+                                try {
+                                    result.success(startMockLocationInternal(mode, lat, lng, acc, alt))
+                                } catch (e: Throwable) {
+                                    result.error("ERROR", e.message, null)
+                                }
+                            }
+                        }
+                    } else {
+                        result.success(startMockLocationInternal(mode, lat, lng, acc, alt))
+                    }
                 }
                 "stopMockLocation" -> {
                     result.success(stopMockLocationInternal())
@@ -223,18 +249,8 @@ class MockLocationPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         val context = appContext ?: return false
         val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return false
 
-        if (mode == "shizuku") {
-            shizukuExecutor.execute {
-                // First attempt to grant mock permission via Shizuku silently if not already granted
-                grantMockViaShizuku()
-                // Also register test providers via shizuku process for system-wide fused coverage
-                runShizukuCmd("cmd", "location", "providers", "add-test-provider", "gps")
-                runShizukuCmd("cmd", "location", "providers", "set-test-provider-enabled", "gps", "true")
-                runShizukuCmd("cmd", "location", "providers", "add-test-provider", "network")
-                runShizukuCmd("cmd", "location", "providers", "set-test-provider-enabled", "network", "true")
-            }
-        }
-
+        // For shizuku mode, grantMockViaShizuku() and cmd location provider
+        // registration already completed on shizukuExecutor before this runs.
         // Setup Android LocationManager test providers
         setupTestProviders(lm)
 
@@ -328,14 +344,32 @@ class MockLocationPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
 
         if (activeMode == "shizuku") {
-            val now = System.currentTimeMillis()
-            if (now - lastShizukuPushAt >= SHIZUKU_PUSH_INTERVAL_MS) {
-                lastShizukuPushAt = now
+            val nowMs = System.currentTimeMillis()
+            if (nowMs - lastShizukuPushAt >= SHIZUKU_PUSH_INTERVAL_MS) {
+                lastShizukuPushAt = nowMs
                 runShizukuCmdAsync(
                     "cmd", "location", "providers", "set-test-provider-location",
                     "gps", "--location", "$currentLatitude,$currentLongitude",
                     "--accuracy", "$currentAccuracy"
                 )
+                runShizukuCmdAsync(
+                    "cmd", "location", "providers", "set-test-provider-location",
+                    "network", "--location", "$currentLatitude,$currentLongitude",
+                    "--accuracy", "$currentAccuracy"
+                )
+            }
+        }
+    }
+
+    private fun clearTestProviders(lm: LocationManager) {
+        for (provider in PROVIDERS) {
+            try {
+                lm.setTestProviderEnabled(provider, false)
+            } catch (_: Throwable) {}
+            try {
+                lm.removeTestProvider(provider)
+            } catch (e: Throwable) {
+                Log.v(TAG, "removeTestProvider failed for $provider: ${e.message}")
             }
         }
     }
@@ -348,14 +382,7 @@ class MockLocationPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         val lm = context?.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
 
         if (lm != null) {
-            for (provider in activeProviders) {
-                try {
-                    lm.setTestProviderEnabled(provider, false)
-                    lm.removeTestProvider(provider)
-                } catch (e: Throwable) {
-                    Log.v(TAG, "removeTestProvider failed for $provider: ${e.message}")
-                }
-            }
+            clearTestProviders(lm)
         }
         activeProviders.clear()
 

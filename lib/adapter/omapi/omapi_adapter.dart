@@ -696,6 +696,16 @@ class OmapiAdapter extends BaseAdapter {
         return resultMap;
       } catch (e) {
         if (isOmapiSessionCorruptedError(e)) rethrow;
+        final initialAraDenied = e is PlatformException &&
+            (e.code == 'AccessControlException' ||
+                e.message == 'no APDU access allowed');
+        if (initialAraDenied) {
+          throw AppException(
+            AppErrorCode.ERROR_OMAPI_PERMISSION_DENIED,
+            message: 'ARA-M permissions not allowed',
+            originalError: e,
+          );
+        }
         // If first attempt fails, try heavy cleanup and retry once.
         log.warning(
           'Initial openChannel for $aidHex failed ($e). Retrying after cleanup...',

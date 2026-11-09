@@ -149,6 +149,11 @@ class AdbBridgeAdapter extends BaseAdapter {
           : localChannelId;
 
       if (_connections.containsKey(exposedChannelNumber)) {
+        try {
+          await AdbBridgeService.closeLogicalChannel(
+            connectionId: connectionId,
+          );
+        } catch (_) {}
         throw CardBusyException(
           'ADB bridge channel number collision for $exposedChannelNumber',
         );

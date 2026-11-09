@@ -104,11 +104,11 @@ class _LocationPickerDialogState extends State<LocationPickerDialog> {
     final lat = double.tryParse(latStr);
     final lng = double.tryParse(lngStr);
 
-    if (lat == null || lat < -90.0 || lat > 90.0) {
+    if (lat == null || !lat.isFinite || lat < -90.0 || lat > 90.0) {
       setState(() => _manualError = '纬度必须为 -90.0 到 90.0 之间的数值');
       return;
     }
-    if (lng == null || lng < -180.0 || lng > 180.0) {
+    if (lng == null || !lng.isFinite || lng < -180.0 || lng > 180.0) {
       setState(() => _manualError = '经度必须为 -180.0 到 180.0 之间的数值');
       return;
     }

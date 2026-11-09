@@ -386,7 +386,14 @@ class LocationMappingResolver {
         final parts = customCoordStr.split(',');
         final lat = double.tryParse(parts[0].trim());
         final lng = double.tryParse(parts[1].trim());
-        if (lat != null && lng != null) {
+        if (lat != null &&
+            lng != null &&
+            lat.isFinite &&
+            lng.isFinite &&
+            lat >= -90.0 &&
+            lat <= 90.0 &&
+            lng >= -180.0 &&
+            lng <= 180.0) {
           final label = parts.length > 2 ? parts[2].trim() : 'Custom';
           return LocationMatchResult(
             coordinate: LocationCoordinate(

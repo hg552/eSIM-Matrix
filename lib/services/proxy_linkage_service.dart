@@ -383,6 +383,7 @@ class ProxyLinkageService {
       final res = await req.close().timeout(_timeout);
       // Clash external controller returns 204 No Content on success
       if (res.statusCode == HttpStatus.noContent || res.statusCode == HttpStatus.ok) {
+        await res.drain<void>().catchError((Object _) {});
         _log.info('Proxy group [$groupName] switched: $prevNode -> $nodeName');
         return ProxySwitchResult(
           success: true,

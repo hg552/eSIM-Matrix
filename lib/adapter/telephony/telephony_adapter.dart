@@ -362,6 +362,7 @@ class _TelephonyChannel extends BaseChannel {
         try {
           await TelephonyAdapter._channel.invokeMethod('cleanupAllChannels', {
             'slotIndex': _slotIndex,
+            'portIndex': _portIndex,
           });
 
           final Map<dynamic, dynamic> retryResult = await TelephonyAdapter

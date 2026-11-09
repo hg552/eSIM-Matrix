@@ -42,6 +42,11 @@ class CellularDataGuardianPlugin : FlutterPlugin, MethodChannel.MethodCallHandle
         }
     }
 
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val executor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "cellular-data-guard").apply { isDaemon = true }
+    }
+
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         channel?.setMethodCallHandler(null)
         channel = null
@@ -49,38 +54,47 @@ class CellularDataGuardianPlugin : FlutterPlugin, MethodChannel.MethodCallHandle
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
-        try {
-            when (call.method) {
-                "capabilities" -> result.success(capabilities())
-                "getStatus" -> result.success(statusSnapshot())
-                "setDataEnabled" -> {
-                    val subscriptionId = requireSubId(call)
-                    val enabled = call.argument<Boolean>("enabled") ?: false
-                    result.success(setDataEnabled(subscriptionId, enabled))
+        val method = call.method
+        executor.execute {
+            try {
+                val value: Any? = when (method) {
+                    "capabilities" -> capabilities()
+                    "getStatus" -> statusSnapshot()
+                    "setDataEnabled" -> {
+                        val subscriptionId = requireSubId(call)
+                        val enabled = call.argument<Boolean>("enabled") ?: false
+                        setDataEnabled(subscriptionId, enabled)
+                    }
+                    "setRoamingEnabled" -> {
+                        val subscriptionId = requireSubId(call)
+                        val enabled = call.argument<Boolean>("enabled") ?: false
+                        setRoamingEnabled(subscriptionId, enabled)
+                    }
+                    "applyLockdown" -> {
+                        val subscriptionId = requireSubId(call)
+                        applyLockdown(subscriptionId)
+                    }
+                    "restore" -> {
+                        val subscriptionId = requireSubId(call)
+                        val dataEnabled = call.argument<Boolean>("dataEnabled")
+                        val roamingEnabled = call.argument<Boolean>("roamingEnabled")
+                        restore(subscriptionId, dataEnabled, roamingEnabled)
+                    }
+                    else -> {
+                        mainHandler.post { result.notImplemented() }
+                        return@execute
+                    }
                 }
-                "setRoamingEnabled" -> {
-                    val subscriptionId = requireSubId(call)
-                    val enabled = call.argument<Boolean>("enabled") ?: false
-                    result.success(setRoamingEnabled(subscriptionId, enabled))
+                mainHandler.post { result.success(value) }
+            } catch (error: SecurityException) {
+                mainHandler.post { result.error("permission_denied", error.message, null) }
+            } catch (error: Throwable) {
+                val root = rootCause(error)
+                Log.w(TAG, "data guard call $method failed", root)
+                mainHandler.post {
+                    result.error("data_guard_failed", root.message ?: root.javaClass.simpleName, null)
                 }
-                "applyLockdown" -> {
-                    val subscriptionId = requireSubId(call)
-                    result.success(applyLockdown(subscriptionId))
-                }
-                "restore" -> {
-                    val subscriptionId = requireSubId(call)
-                    val dataEnabled = call.argument<Boolean>("dataEnabled")
-                    val roamingEnabled = call.argument<Boolean>("roamingEnabled")
-                    result.success(restore(subscriptionId, dataEnabled, roamingEnabled))
-                }
-                else -> result.notImplemented()
             }
-        } catch (error: SecurityException) {
-            result.error("permission_denied", error.message, null)
-        } catch (error: Throwable) {
-            val root = rootCause(error)
-            Log.w(TAG, "data guard call ${call.method} failed", root)
-            result.error("data_guard_failed", root.message ?: root.javaClass.simpleName, null)
         }
     }
 

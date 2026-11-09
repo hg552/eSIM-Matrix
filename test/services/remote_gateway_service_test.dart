@@ -405,6 +405,137 @@ void main() {
       expect(payload, isNotNull);
       expect('${payload!['text']}', contains('已停止虚拟定位'));
     });
+
+    test('dual-SIM slot 0 inService does not trigger false ready while slot 1 is resetting', () async {
+      mockProfiles.slotIndexOverride = 1;
+      await service.switchProfile('8901000000000000002');
+      mockProfiles.emitNetwork(
+        const NetworkStatusUpdate(
+          error: null,
+          subscriptions: [
+            NetworkStatusSubscription(
+              subscriptionId: 1,
+              slotIndex: 0,
+              displayName: 'Physical SIM 1',
+              carrierName: 'China Telecom',
+              serviceState: 0,
+              roaming: false,
+              signalDbm: -75,
+              signalLevel: 4,
+              error: null,
+            ),
+          ],
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+      final statusWhileResetting = await service.status();
+      expect((statusWhileResetting['session'] as Map)['state'], 'waiting_for_service');
+
+      mockProfiles.emitNetwork(
+        const NetworkStatusUpdate(
+          error: null,
+          subscriptions: [
+            NetworkStatusSubscription(
+              subscriptionId: 1,
+              slotIndex: 0,
+              displayName: 'Physical SIM 1',
+              carrierName: 'China Telecom',
+              serviceState: 0,
+              roaming: false,
+              signalDbm: -75,
+              signalLevel: 4,
+              error: null,
+            ),
+            NetworkStatusSubscription(
+              subscriptionId: 2,
+              slotIndex: 1,
+              displayName: 'eSIM Slot 2',
+              carrierName: 'Club Sim',
+              serviceState: 0,
+              roaming: true,
+              signalDbm: -80,
+              signalLevel: 3,
+              error: null,
+            ),
+          ],
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+      final statusWhenReady = await service.status();
+      expect((statusWhenReady['session'] as Map)['state'], 'ready');
+    });
+
+    test('automatic fallback retries after a transient enableProfile failure', () async {
+      await service.stop();
+      service = RemoteGatewayService(
+        smsRelay: const FakeSmsRelay(),
+        profiles: mockProfiles,
+        autoRevertRetryBackoffs: const [Duration(milliseconds: 25)],
+      );
+      await service.start();
+      await service.setDefaultProfile();
+
+      await service.switchProfile(
+        '8901000000000000002',
+        duration: const Duration(milliseconds: 20),
+      );
+      mockProfiles.failNextEnable = true;
+
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      final status = await service.status();
+      expect(status['session'], isNull);
+      expect(
+        mockProfiles.profiles.singleWhere((p) => p.enabled).iccid,
+        '8901000000000000001',
+      );
+    });
+
+    test('stale switching session on disk is cleared on restart when target was not enabled', () async {
+      await service.stop();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        'remote_gateway.session.v1',
+        '{"state":"switching","targetIccid":"8901000000000000002",'
+        '"targetAlias":"Test Inactive (+1)","defaultIccid":"8901000000000000001",'
+        '"defaultAlias":"Default eSIM (+86)","readerId":"reader_0","deadlineEpochMillis":0}',
+      );
+      service = RemoteGatewayService(
+        smsRelay: const FakeSmsRelay(),
+        profiles: mockProfiles,
+      );
+      await service.start();
+
+      final status = await service.status();
+      expect(status['session'], isNull);
+
+      final res = await service.switchProfile('8901000000000000002');
+      expect(res['state'], 'waiting_for_service');
+    });
+
+    test('confirmDeleteProfile invalidates token after 3 wrong attempts', () async {
+      final req = await service.requestDeleteProfile('8901000000000000002');
+      final token = req['token'] as String;
+
+      for (var i = 0; i < 3; i++) {
+        await expectLater(
+          service.confirmDeleteProfile('000000'),
+          throwsA(isA<RemoteGatewayException>().having(
+            (e) => e.code,
+            'code',
+            'invalid_delete_token',
+          )),
+        );
+      }
+
+      await expectLater(
+        service.confirmDeleteProfile(token),
+        throwsA(isA<RemoteGatewayException>().having(
+          (e) => e.code,
+          'code',
+          'delete_token_expired',
+        )),
+      );
+    });
   });
 }
 

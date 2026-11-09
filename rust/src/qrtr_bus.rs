@@ -134,10 +134,11 @@ fn send(fd: i32, node: u32, port: u32, datagram: &[u8]) -> io::Result<()> {
 /// time.
 fn receive(fd: i32, timeout: Duration) -> io::Result<Option<(u32, u32, Vec<u8>)>> {
     let deadline = Instant::now() + timeout;
+    let mut first_poll = true;
 
     loop {
         let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
+        if remaining.is_zero() && !first_poll {
             return Ok(None);
         }
 
@@ -147,9 +148,13 @@ fn receive(fd: i32, timeout: Duration) -> io::Result<Option<(u32, u32, Vec<u8>)>
             revents: 0,
         };
 
-        let milliseconds = remaining.as_millis().min(libc::c_int::MAX as u128) as libc::c_int;
-        let ready = unsafe { libc::poll(&mut poll, 1, milliseconds.max(1)) };
-
+        let milliseconds = if remaining.is_zero() {
+            0
+        } else {
+            (remaining.as_millis().min(libc::c_int::MAX as u128) as libc::c_int).max(1)
+        };
+        first_poll = false;
+        let ready = unsafe { libc::poll(&mut poll, 1, milliseconds) };
         if ready < 0 {
             let error = io::Error::last_os_error();
             if error.kind() == io::ErrorKind::Interrupted {
@@ -196,8 +201,10 @@ fn receive(fd: i32, timeout: Duration) -> io::Result<Option<(u32, u32, Vec<u8>)>
 
 /// Close a socket this process opened.
 fn close(fd: i32) {
-    // SAFETY: the descriptor came from `open` above and is not used again.
-    drop(unsafe { OwnedFd::from_raw_fd(fd) });
+    if fd >= 0 {
+        // SAFETY: the descriptor came from `open` above and is not used again.
+        drop(unsafe { OwnedFd::from_raw_fd(fd) });
+    }
 }
 
 /// Throw a Java exception, so a failing call is not a silent zero.

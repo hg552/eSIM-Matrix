@@ -63,11 +63,11 @@ class _ProxyNodePickerDialogState extends State<ProxyNodePickerDialog> {
   }
 
   Future<void> _loadNodes() async {
+    final client = ProxyLinkageService(
+      controllerUrl: widget.settings.proxyControllerUrl,
+      secret: widget.settings.proxySecret,
+    );
     try {
-      final client = ProxyLinkageService(
-        controllerUrl: widget.settings.proxyControllerUrl,
-        secret: widget.settings.proxySecret,
-      );
       final group = await client.getGroup(widget.settings.proxyTargetGroup);
       if (group == null || group.all.isEmpty) {
         throw StateError('controller_unavailable');
@@ -83,6 +83,8 @@ class _ProxyNodePickerDialogState extends State<ProxyNodePickerDialog> {
         _loadFailed = true;
         _loading = false;
       });
+    } finally {
+      client.close();
     }
   }
 

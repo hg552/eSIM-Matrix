@@ -541,11 +541,7 @@ class TelephonyPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     }
 
     private fun runOnUiThread(action: () -> Unit) {
-        context?.let {
-            val mainHandler = android.os.Handler(it.mainLooper)
-            mainHandler.post { action() }
-        }
-                ?: action()
+        android.os.Handler(android.os.Looper.getMainLooper()).post(action)
     }
 
     private fun handleListSlots(result: Result) {

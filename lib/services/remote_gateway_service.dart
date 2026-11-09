@@ -124,14 +124,22 @@ class RemoteGatewayService {
     SmsRelayService smsRelay = const SmsRelayService(),
     RemoteProfileControl? profiles,
     @visibleForTesting InternetAddress? bindAddress,
+    @visibleForTesting List<Duration>? autoRevertRetryBackoffs,
   }) : _smsRelay = smsRelay,
        _profiles = profiles ?? LpaRemoteProfileControl(),
-       _bindAddressOverride = bindAddress;
+       _bindAddressOverride = bindAddress,
+       _autoRevertRetryBackoffs =
+           autoRevertRetryBackoffs ?? _defaultAutoRevertRetryBackoffs;
 
   static final RemoteGatewayService instance = RemoteGatewayService();
   static const int port = 8787;
   static const Duration sessionDuration = Duration(minutes: 5);
   static const Duration switchCooldown = Duration(seconds: 6);
+  static const List<Duration> _defaultAutoRevertRetryBackoffs = <Duration>[
+    Duration(seconds: 15),
+    Duration(seconds: 30),
+    Duration(seconds: 60),
+  ];
   static const String speedtestActivationCode = 'LPA:1\$rsp.truphone.com\$QRF-SPEEDTEST';
   static const String _sessionKey = 'remote_gateway.session.v1';
   static const String _defaultKey = 'remote_gateway.default.v1';
@@ -146,6 +154,7 @@ class RemoteGatewayService {
   /// Tests bind the REST listener to loopback; production always derives the
   /// address from the Tailscale interface so the API never lands on mobile data.
   final InternetAddress? _bindAddressOverride;
+  final List<Duration> _autoRevertRetryBackoffs;
   HttpClient _telegramHttpClient = _createTelegramHttpClient();
   int _telegramPollGeneration = 0;
 
@@ -177,6 +186,7 @@ class RemoteGatewayService {
   final CellularDataGuardian _dataGuard = CellularDataGuardian();
   ProxySnapshot? _proxySnapshot;
   String? _lastLinkedProxyNode;
+  int _linkageGeneration = 0;
   DataGuardResult? _lastGuardResult;
   final MockLocationService _mockLocationService = const MockLocationService();
   final LocationMappingResolver _locationResolver = const LocationMappingResolver();
@@ -619,7 +629,7 @@ class RemoteGatewayService {
       throw const RemoteGatewayException('cannot_delete_default_profile');
     }
 
-    final token = (1000 + Random().nextInt(9000)).toString();
+    final token = (100000 + Random.secure().nextInt(900000)).toString();
     _pendingDeletion = _PendingDeletion(
       token: token,
       iccid: target.iccid,
@@ -647,7 +657,11 @@ class RemoteGatewayService {
       throw const RemoteGatewayException('delete_token_expired');
     }
 
-    if (pending.token != cleanToken) {
+    if (!_constantTimeEquals(pending.token, cleanToken)) {
+      pending.failedAttempts++;
+      if (pending.failedAttempts >= 3) {
+        _pendingDeletion = null;
+      }
       throw const RemoteGatewayException('invalid_delete_token');
     }
 
@@ -756,8 +770,9 @@ class RemoteGatewayService {
     await _saveSession(_session);
     _basebandKickTriggered = false;
     _lastLinkedProxyNode = null;
+    final linkageGen = ++_linkageGeneration;
     if (AppSettings().proxyLinkageEnabled || AppSettings().mockLocationLinkageEnabled) {
-      unawaited(_triggerProxySwitch(target).catchError((Object e) {
+      unawaited(_triggerProxySwitch(target, generation: linkageGen).catchError((Object e) {
         _log.warning('Proxy linkage switch failed: $e');
       }));
     }
@@ -768,6 +783,10 @@ class RemoteGatewayService {
       await _applyDataGuard(preferredSlot: _profiles.networkSlotIndex);
       await _profiles.enableProfile(target.iccid);
     } catch (error) {
+      // Invalidate any in-flight proxy/location switch so a slow network call
+      // cannot finish after the restore below and leave the phone on the
+      // target profile's node/coordinates.
+      ++_linkageGeneration;
       // The guard may already have switched data off for the target slot; a
       // failed switch must not leave the phone with data disabled and no
       // session to restore it later.
@@ -873,6 +892,7 @@ class RemoteGatewayService {
     _session = null;
     _readyNotificationSent = false;
     await _saveSession(null);
+    ++_linkageGeneration;
     final restoredProxy = await _triggerProxyRestore(
       targetDefaultIccid: targetDefaultIccid,
       targetDefaultAlias: targetDefaultAlias,
@@ -912,7 +932,10 @@ class RemoteGatewayService {
     final result = {'state': 'reverted', 'profile': targetDefaultAlias};
     return result;
   }
-  Future<void> _triggerProxySwitch(RemoteProfileEntry target) async {
+  Future<void> _triggerProxySwitch(
+    RemoteProfileEntry target, {
+    required int generation,
+  }) async {
     final settings = AppSettings();
     if (settings.proxyLinkageEnabled) {
       final group = settings.proxyTargetGroup;
@@ -923,16 +946,28 @@ class RemoteGatewayService {
       try {
         // Keep the pre-switch node so _revert can put it back.
         if (_proxySnapshot == null || _proxySnapshot!.group != group) {
-          _proxySnapshot = await _proxyLinkage.snapshot(group);
+          final snap = await _proxyLinkage.snapshot(group);
+          if (generation != _linkageGeneration) return;
+          _proxySnapshot = snap;
         }
-        await applyProxyForProfile(iccid: target.iccid, alias: target.alias);
+        if (generation != _linkageGeneration) return;
+        await applyProxyForProfile(
+          iccid: target.iccid,
+          alias: target.alias,
+          expectedGeneration: generation,
+        );
       } catch (e) {
         _log.warning('Proxy linkage switch failed: $e');
       }
     }
+    if (generation != _linkageGeneration) return;
     if (settings.mockLocationLinkageEnabled) {
       try {
-        await applyLocationForProfile(iccid: target.iccid, alias: target.alias);
+        await applyLocationForProfile(
+          iccid: target.iccid,
+          alias: target.alias,
+          expectedGeneration: generation,
+        );
       } catch (e) {
         _log.warning('Mock location switch failed: $e');
       }
@@ -948,6 +983,7 @@ class RemoteGatewayService {
   Future<ProxySwitchResult?> applyProxyForProfile({
     required String iccid,
     String? alias,
+    int? expectedGeneration,
   }) async {
     final settings = AppSettings();
     if (!settings.proxyLinkageEnabled) return null;
@@ -958,6 +994,9 @@ class RemoteGatewayService {
     );
     try {
       final groupInfo = await _proxyLinkage.getGroup(group);
+      if (expectedGeneration != null && expectedGeneration != _linkageGeneration) {
+        return null;
+      }
       if (groupInfo == null) {
         _log.warning('Proxy linkage: Group "$group" not found');
         return null;
@@ -980,14 +1019,17 @@ class RemoteGatewayService {
         );
       }
       if (!match.matched || match.nodeName == null) {
-        _log.info('Proxy linkage: no node for $iccid: ${match.reason}');
+        _log.info('Proxy linkage: no node for *${_suffix(iccid)}: ${match.reason}');
+        return null;
+      }
+      if (expectedGeneration != null && expectedGeneration != _linkageGeneration) {
         return null;
       }
       final result = await _proxyLinkage.selectNode(group, match.nodeName!);
       if (result.success) {
         _lastLinkedProxyNode = match.nodeName;
         _log.info(
-          'Proxy linkage: switched to [${match.nodeName}] for $iccid '
+          'Proxy linkage: switched to [${match.nodeName}] for *${_suffix(iccid)} '
           '(${match.reason})',
         );
       }
@@ -1003,6 +1045,7 @@ class RemoteGatewayService {
     required String iccid,
     String? alias,
     String? mcc,
+    int? expectedGeneration,
   }) async {
     final settings = AppSettings();
     if (!settings.mockLocationLinkageEnabled) return false;
@@ -1014,7 +1057,10 @@ class RemoteGatewayService {
         customRules: settings.mockLocationCustomRules,
       );
       if (!match.matched || match.coordinate == null) {
-        _log.info('Mock location: no coordinate matched for $iccid');
+        _log.info('Mock location: no coordinate matched for *${_suffix(iccid)}');
+        return false;
+      }
+      if (expectedGeneration != null && expectedGeneration != _linkageGeneration) {
         return false;
       }
       final coord = match.coordinate!;
@@ -1028,7 +1074,7 @@ class RemoteGatewayService {
         _lastMockLocation = coord;
         _log.info(
           'Mock location: injected [${coord.cityName}] (${coord.latitude}, ${coord.longitude}) '
-          'for $iccid (mode=${settings.mockLocationMode}, confidence=${match.confidence})',
+          'for *${_suffix(iccid)} (mode=${settings.mockLocationMode}, confidence=${match.confidence})',
         );
       }
       return success;
@@ -1146,8 +1192,8 @@ class RemoteGatewayService {
         if (res.success) {
           restoredName = _proxySnapshot!.node;
           _log.info('Proxy Linkage: Restored original node to [$restoredName]');
+          _proxySnapshot = null;
         }
-        _proxySnapshot = null;
       } else if (targetDefaultAlias != null) {
         final groupInfo = await _proxyLinkage.getGroup(group);
         if (groupInfo != null) {
@@ -1282,22 +1328,12 @@ class RemoteGatewayService {
     if (subscriptions.isEmpty) return null;
     final slotIndex = _profiles.networkSlotIndex;
     if (slotIndex != null) {
-      final exact = subscriptions
+      return subscriptions
           .where((item) => item.slotIndex == slotIndex)
           .firstOrNull;
-      if (exact != null) return exact;
     }
     if (subscriptions.length == 1) return subscriptions.single;
-    final slot2InService = subscriptions
-        .where((item) => item.slotIndex == 1 && item.voiceRegistrationState == VoiceRegistrationState.inService)
-        .firstOrNull;
-    if (slot2InService != null) return slot2InService;
-    final anyInService = subscriptions
-        .where((item) => item.voiceRegistrationState == VoiceRegistrationState.inService)
-        .firstOrNull;
-    if (anyInService != null) return anyInService;
-    return subscriptions.where((item) => item.slotIndex == 1).firstOrNull ??
-        subscriptions.first;
+    return subscriptions.where((item) => item.slotIndex == 1).firstOrNull;
   }
 
   static bool _isPlaceholderCarrier(String? carrier) {
@@ -1396,6 +1432,25 @@ class RemoteGatewayService {
         await _saveSession(_session);
       }
     }
+    // A process killed mid-switch leaves `state: switching` on disk. Without
+    // recovering it here, every subsequent switch is refused with
+    // `switch_in_progress` forever.
+    if (_session != null && _session!.state == 'switching') {
+      bool targetEnabled = false;
+      try {
+        final profiles = await _profiles.listProfiles();
+        targetEnabled = profiles.any(
+          (p) => p.iccid == _session!.targetIccid && p.enabled,
+        );
+      } catch (_) {}
+      if (targetEnabled || _session!.deadlineEpochMillis > 0) {
+        _session = _session!.copyWith(state: 'waiting_for_service');
+        await _saveSession(_session);
+      } else {
+        _session = null;
+        await _saveSession(null);
+      }
+    }
     final session = _session;
     _readyNotificationSent = session?.state == 'ready';
     if (session != null && session.state == 'waiting_for_service') {
@@ -1419,7 +1474,7 @@ class RemoteGatewayService {
     _scheduleLocalFallback(deadline);
   }
 
-  void _scheduleLocalFallback(DateTime deadline) {
+  void _scheduleLocalFallback(DateTime deadline, {int retryIndex = 0}) {
     _revertTimer?.cancel();
     final delay = deadline.difference(DateTime.now());
     _revertTimer = Timer(delay.isNegative ? Duration.zero : delay, () {
@@ -1427,7 +1482,39 @@ class RemoteGatewayService {
         try {
           await _revert(auto: true);
         } catch (error) {
-          _log.warning('Automatic profile fallback failed (${_errorCode(error)})');
+          final code = _errorCode(error);
+          _log.warning(
+            'Automatic profile fallback failed ($code, '
+            'attempt ${retryIndex + 1}/${_autoRevertRetryBackoffs.length + 1})',
+          );
+          if (retryIndex < _autoRevertRetryBackoffs.length && _running) {
+            final nextDeadline = DateTime.now().add(
+              _autoRevertRetryBackoffs[retryIndex],
+            );
+            _scheduleLocalFallback(nextDeadline, retryIndex: retryIndex + 1);
+            return;
+          }
+          final session = _session;
+          final targetAlias = session?.targetAlias ?? '临时卡';
+          final defaultAlias = session?.defaultAlias ?? '默认主卡';
+          unawaited(
+            _sendTelegramReply(
+              _TelegramReply(
+                '🚨 自动切回默认主卡失败！\n'
+                '已连续尝试 ${_autoRevertRetryBackoffs.length + 1} 次仍无法从【$targetAlias】'
+                '切回【$defaultAlias】（错误：$code）。\n'
+                '手机当前仍停留在临时卡上，请立即点击下方按钮或检查读卡器状态！',
+                keyboard: const [
+                  [
+                    _TelegramButton('🔄 立即重试切回主卡', 'cmd:back'),
+                  ],
+                  [
+                    _TelegramButton('📡 查看状态', 'cmd:status'),
+                  ],
+                ],
+              ),
+            ).catchError((Object _) {}),
+          );
         }
       }));
     });
@@ -1915,7 +2002,10 @@ class RemoteGatewayService {
         final body = await _readJsonBody(request);
         final latitude = (body['latitude'] as num?)?.toDouble();
         final longitude = (body['longitude'] as num?)?.toDouble();
-        if (latitude == null || longitude == null) {
+        if (latitude == null ||
+            longitude == null ||
+            !latitude.isFinite ||
+            !longitude.isFinite) {
           throw const RemoteGatewayException('coordinates_required');
         }
         if (latitude < -90 || latitude > 90) {
@@ -2031,7 +2121,13 @@ class RemoteGatewayService {
 
   Future<Map<String, Object?>> _readJsonBody(HttpRequest request) async {
     final bytes = <int>[];
-    await for (final chunk in request) {
+    await for (final chunk in request.timeout(
+      const Duration(seconds: 10),
+      onTimeout: (sink) {
+        sink.addError(const RemoteGatewayException('request_timeout'));
+        sink.close();
+      },
+    )) {
       if (bytes.length + chunk.length > 8192) {
         throw const RemoteGatewayException('request_too_large');
       }
@@ -2789,7 +2885,7 @@ class RemoteGatewayService {
     }
     final lat = double.tryParse(parts[0]);
     final lng = double.tryParse(parts[1]);
-    if (lat == null || lng == null) {
+    if (lat == null || lng == null || !lat.isFinite || !lng.isFinite) {
       return const _TelegramReply('⚠️ 经纬度必须是数字，例如 /location 22.3193 114.1694');
     }
     if (lat < -90 || lat > 90) {
@@ -4264,7 +4360,7 @@ class _RemoteSession {
 }
 
 class _PendingDeletion {
-  const _PendingDeletion({
+  _PendingDeletion({
     required this.token,
     required this.iccid,
     required this.alias,
@@ -4275,6 +4371,7 @@ class _PendingDeletion {
   final String iccid;
   final String alias;
   final DateTime expiresAt;
+  int failedAttempts = 0;
 
   bool get isExpired => DateTime.now().isAfter(expiresAt);
 }

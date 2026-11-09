@@ -3263,6 +3263,7 @@ class _ProfilesScreenState extends State<ProfilesScreen>
     );
 
     if (secondConfirmed != true) return;
+    if (!mounted) return;
 
     final reader = _selectedReader;
     if (reader == null) return;
@@ -3278,8 +3279,10 @@ class _ProfilesScreenState extends State<ProfilesScreen>
         await _adapter.connect(reader);
         final channel = await _manager.openSession();
         try {
+          if (p.enabled) {
+            await _manager.disableProfile(p.rawIccid, useChannel: channel);
+          }
           await _manager.deleteProfile(p.rawIccid, useChannel: channel);
-
           if (mounted && _selectedReader?.id == reader.id) {
             setState(() {
               _operationLoadingMessage = AppLocalizations.of(
@@ -3702,7 +3705,7 @@ class _ProfilesScreenState extends State<ProfilesScreen>
       );
     }
 
-    if (changed == true) {
+    if (changed == true && mounted) {
       await _listProfiles();
     }
   }

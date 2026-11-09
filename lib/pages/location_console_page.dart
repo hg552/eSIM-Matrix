@@ -181,13 +181,13 @@ class _LocationConsolePageState extends State<LocationConsolePage> {
     String? latErr;
     String? lngErr;
 
-    if (lat == null) {
+    if (lat == null || !lat.isFinite) {
       latErr = '请输入有效纬度 (-90 ~ 90)';
     } else if (lat < -90.0 || lat > 90.0) {
       latErr = '纬度范围必须在 -90 到 90 之间';
     }
 
-    if (lng == null) {
+    if (lng == null || !lng.isFinite) {
       lngErr = '请输入有效经度 (-180 ~ 180)';
     } else if (lng < -180.0 || lng > 180.0) {
       lngErr = '经度范围必须在 -180 到 180 之间';
