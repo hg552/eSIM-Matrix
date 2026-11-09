@@ -57,10 +57,17 @@ void main() {
       );
       await tester.tap(find.text('open'));
       await tester.pump();
-      // The picker talks to a real loopback socket, which needs runAsync.
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 400)),
-      );
+      // The picker talks to a real loopback socket, which needs runAsync. A
+      // fixed delay is not enough: a closed port takes ~2 s to refuse on
+      // Windows (SYN retries) and microseconds on Linux, so wait for the state
+      // the caller is about to assert on instead of guessing.
+      for (var i = 0; i < 80; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 100)),
+        );
+        await tester.pump();
+        if (find.byType(CircularProgressIndicator).evaluate().isEmpty) break;
+      }
       await tester.pump();
     }
 

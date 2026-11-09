@@ -364,6 +364,47 @@ void main() {
       expect(kickPayload!['text'], contains('已向基带下发快速重搜与射频复位指令'));
       expect(mockProfiles.accelerateCalls, greaterThanOrEqualTo(1));
     });
+
+    Future<Map<String, Object?>?> sendText(String text) {
+      return service.handleTelegramUpdateForTesting({
+        'update_id': 9992,
+        'message': {
+          'message_id': 9992,
+          'date': 1700000000,
+          'chat': {'id': 10000001, 'type': 'private'},
+          'from': {'id': 10000001, 'is_bot': false},
+          'text': text,
+        },
+      }, '10000001');
+    }
+
+    test('telegram /location reports state without touching the GPS layer',
+        () async {
+      final payload = await sendText('/location');
+      expect(payload, isNotNull);
+      final text = '${payload!['text']}';
+      expect(text, contains('虚拟定位'));
+      expect(text, contains('未注入'));
+      expect(text, contains('/location 22.3193 114.1694'));
+    });
+
+    test('telegram /location rejects a non-numeric coordinate', () async {
+      final payload = await sendText('/location 香港 尖沙咀');
+      expect(payload, isNotNull);
+      expect('${payload!['text']}', contains('必须是数字'));
+    });
+
+    test('telegram /location rejects an out-of-range coordinate', () async {
+      final payload = await sendText('/location 120 114');
+      expect(payload, isNotNull);
+      expect('${payload!['text']}', contains('纬度必须在 -90 到 90 之间'));
+    });
+
+    test('telegram /location_stop clears the injection', () async {
+      final payload = await sendText('/location_stop');
+      expect(payload, isNotNull);
+      expect('${payload!['text']}', contains('已停止虚拟定位'));
+    });
   });
 }
 

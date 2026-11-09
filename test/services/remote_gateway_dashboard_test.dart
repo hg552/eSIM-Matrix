@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nlpa2/services/network_status_service.dart';
 import 'package:nlpa2/services/remote_gateway_service.dart';
@@ -155,6 +156,140 @@ void main() {
       expect((result.body! as Map)['error'], 'subscription_not_found');
     });
 
+    Future<({int status, Object? body})> delete(String path) async {
+      final request = await client.deleteUrl(
+        Uri.parse('http://127.0.0.1:${RemoteGatewayService.port}$path'),
+      );
+      request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $_token');
+      final response = await request.close();
+      final text = await response.transform(utf8.decoder).join();
+      return (
+        status: response.statusCode,
+        body: text.isEmpty ? null : jsonDecode(text),
+      );
+    }
+
+    void answerMockLocation(Map<String, Object?> Function() status) {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+        const MethodChannel('ee.nekoko.mock_location'),
+        (call) async => switch (call.method) {
+          'getStatus' => status(),
+          'startMockLocation' || 'stopMockLocation' => true,
+          _ => null,
+        },
+      );
+      addTearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(
+          const MethodChannel('ee.nekoko.mock_location'),
+          null,
+        );
+      });
+    }
+
+    Map<String, Object?> idleLocation() => <String, Object?>{
+          'isMocking': false,
+          'mode': 'system',
+          'latitude': 0.0,
+          'longitude': 0.0,
+          'accuracy': 0.0,
+          'isMockApp': true,
+          'isShizukuAvailable': false,
+          'providers': <String>[],
+        };
+
+    test('location endpoint reports the injection state', () async {
+      answerMockLocation(idleLocation);
+      final response = await get('/api/v1/location');
+      expect(response.statusCode, HttpStatus.ok);
+      final body = jsonDecode(await response.transform(utf8.decoder).join()) as Map;
+      expect(body['injecting'], isFalse);
+      expect(body['mode'], 'system');
+      expect(body['isMockApp'], isTrue);
+      expect(body['providers'], isEmpty);
+    });
+
+    test('location injection requires coordinates', () async {
+      final result = await post('/api/v1/location', payload: {'label': '某地'});
+      expect(result.status, HttpStatus.conflict);
+      expect((result.body! as Map)['error'], 'coordinates_required');
+    });
+
+    test('location injection rejects an out-of-range latitude', () async {
+      final result = await post(
+        '/api/v1/location',
+        payload: {'latitude': 91, 'longitude': 0},
+      );
+      expect(result.status, HttpStatus.conflict);
+      expect((result.body! as Map)['error'], 'latitude_out_of_range');
+    });
+
+    test('location injection reports the native refusal instead of success',
+        () async {
+      // No mock app permission: the plugin registers no test provider and
+      // answers false, which must surface as a failure, not a 200.
+      answerMockLocation(idleLocation);
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+        const MethodChannel('ee.nekoko.mock_location'),
+        (call) async => switch (call.method) {
+          'getStatus' => idleLocation(),
+          'startMockLocation' => false,
+          _ => null,
+        },
+      );
+      final result = await post(
+        '/api/v1/location',
+        payload: {'latitude': 22.3193, 'longitude': 114.1694},
+      );
+      expect(result.status, HttpStatus.conflict);
+      expect((result.body! as Map)['success'], isFalse);
+      expect((result.body! as Map)['error'], 'injection_failed');
+    });
+
+    test('location injection succeeds and shows up in the dashboard status',
+        () async {
+      answerMockLocation(() => <String, Object?>{
+            'isMocking': true,
+            'mode': 'system',
+            'latitude': 22.3193,
+            'longitude': 114.1694,
+            'accuracy': 3.0,
+            'isMockApp': true,
+            'isShizukuAvailable': false,
+            'providers': <String>['gps', 'network'],
+          });
+      final result = await post(
+        '/api/v1/location',
+        payload: {
+          'latitude': 22.3193,
+          'longitude': 114.1694,
+          'label': '香港尖沙咀',
+        },
+      );
+      expect(result.status, HttpStatus.ok);
+      final body = result.body! as Map;
+      expect(body['success'], isTrue);
+      expect(body['injecting'], isTrue);
+      expect(body['label'], '香港尖沙咀');
+
+      final dashboard = jsonDecode(
+        await (await get('/api/v1/dashboard')).transform(utf8.decoder).join(),
+      ) as Map;
+      final location = (dashboard['status'] as Map)['location'] as Map;
+      expect(location['injecting'], isTrue);
+      expect(location['providers'], ['gps', 'network']);
+    });
+
+    test('deleting the location stops the injection', () async {
+      answerMockLocation(idleLocation);
+      final result = await delete('/api/v1/location');
+      expect(result.status, HttpStatus.ok);
+      expect((result.body! as Map)['success'], isTrue);
+      expect((result.body! as Map)['injecting'], isFalse);
+    });
+
     Map<String, Object?> textCommand(String name, [String argument = '']) {
       final text = argument.isEmpty ? '/$name' : '/$name $argument';
       return {
@@ -203,6 +338,33 @@ void main() {
       expect(text, contains('配置入口'));
       // No Clash controller runs in the test host: it must say disconnected.
       expect(text, contains('未连接'));
+    });
+
+    test('status summary names the virtual location state', () async {
+      answerMockLocation(() => <String, Object?>{
+            'isMocking': true,
+            'mode': 'system',
+            'latitude': 22.3193,
+            'longitude': 114.1694,
+            'accuracy': 3.0,
+            'isMockApp': true,
+            'isShizukuAvailable': false,
+            'providers': <String>['gps'],
+          });
+      await post(
+        '/api/v1/location',
+        payload: {'latitude': 22.3193, 'longitude': 114.1694, 'label': '香港尖沙咀'},
+      );
+
+      final payload = await service.handleTelegramUpdateForTesting(
+        textCommand('status'),
+        '10000001',
+      );
+      final text = '${payload!['text']}';
+      expect(text, contains('虚拟定位'));
+      expect(text, contains('正在注入'));
+      expect(text, contains('香港尖沙咀'));
+      expect(text, contains('22.3193'));
     });
 
     test('tunnel command surfaces the Cloudflare channel with a masked id', () async {

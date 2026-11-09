@@ -375,6 +375,9 @@ class RemoteGatewayService {
         'lastLinkedNode': _lastLinkedProxyNode,
         'snapshotNode': _proxySnapshot?.node,
       },
+      'location': await locationStatus().catchError(
+        (Object _) => <String, Object?>{'injecting': false},
+      ),
       'dataGuard': {
         'enabled': AppSettings().dataGuardEnabled,
         'restoreOnRevert': AppSettings().dataGuardRestoreOnRevert,
@@ -1085,6 +1088,44 @@ class RemoteGatewayService {
       _log.warning('Stop mock location failed: $e');
       return false;
     }
+  }
+
+  /// One snapshot of the virtual-location state, for the HTTP API, the web
+  /// dashboard and Telegram.
+  ///
+  /// The native side is the authority on whether the injection is live: the
+  /// Dart fields only remember what was last requested.
+  Future<Map<String, Object?>> locationStatus() async {
+    final settings = AppSettings();
+    MockLocationStatus status;
+    try {
+      status = await _mockLocationService.getStatus();
+    } catch (_) {
+      status = const MockLocationStatus(
+        isMocking: false,
+        mode: 'system',
+        latitude: 0,
+        longitude: 0,
+        accuracy: 0,
+        isMockApp: false,
+        isShizukuAvailable: false,
+      );
+    }
+    final last = _lastMockLocation;
+    return {
+      'injecting': status.isMocking,
+      'mode': status.mode,
+      'latitude': status.isMocking ? status.latitude : last?.latitude,
+      'longitude': status.isMocking ? status.longitude : last?.longitude,
+      'accuracy': status.accuracy,
+      'label': last?.cityName,
+      'providers': status.providers,
+      'isMockApp': status.isMockApp,
+      'isShizukuAvailable': status.isShizukuAvailable,
+      'linkageEnabled': settings.mockLocationLinkageEnabled,
+      'autoRestore': settings.mockLocationAutoRestore,
+      'lastRule': settings.lastMockLocationRule,
+    };
   }
 
   Future<String?> _triggerProxyRestore({
@@ -1868,6 +1909,44 @@ class RemoteGatewayService {
         if (node is! String) throw const RemoteGatewayException('node_required');
         final res = await _proxyLinkage.selectNode(group, node);
         await _writeJson(request.response, HttpStatus.ok, res.toJson());
+      } else if (request.method == 'GET' && path == '/api/v1/location') {
+        await _writeJson(request.response, HttpStatus.ok, await locationStatus());
+      } else if (request.method == 'POST' && path == '/api/v1/location') {
+        final body = await _readJsonBody(request);
+        final latitude = (body['latitude'] as num?)?.toDouble();
+        final longitude = (body['longitude'] as num?)?.toDouble();
+        if (latitude == null || longitude == null) {
+          throw const RemoteGatewayException('coordinates_required');
+        }
+        if (latitude < -90 || latitude > 90) {
+          throw const RemoteGatewayException('latitude_out_of_range');
+        }
+        if (longitude < -180 || longitude > 180) {
+          throw const RemoteGatewayException('longitude_out_of_range');
+        }
+        final label = (body['label'] as String?)?.trim();
+        final mode = body['mode'] as String?;
+        final ok = await applyManualLocation(
+          latitude: latitude,
+          longitude: longitude,
+          label: label == null || label.isEmpty ? '远程指定位置' : label,
+          mode: mode,
+        );
+        await _writeJson(
+          request.response,
+          ok ? HttpStatus.ok : HttpStatus.conflict,
+          {
+            'success': ok,
+            if (!ok) 'error': 'injection_failed',
+            ...await locationStatus(),
+          },
+        );
+      } else if (request.method == 'DELETE' && path == '/api/v1/location') {
+        final ok = await stopMockLocation();
+        await _writeJson(request.response, HttpStatus.ok, {
+          'success': ok,
+          ...await locationStatus(),
+        });
       } else if (request.method == 'GET' && path == '/api/v1/dashboard') {
         await _writeJson(request.response, HttpStatus.ok, await _dashboardPayload());
       } else if (request.method == 'GET' && path == '/api/v1/sms/history') {
@@ -2048,6 +2127,8 @@ class RemoteGatewayService {
           {'command': 'download', 'description': '📥 远程下卡或直接发送二维码图片'},
           {'command': 'delete', 'description': '🗑️ 安全二步删卡 (例: /delete 2)'},
           {'command': 'retry_sms', 'description': '🔄 一键补发未送达短信'},
+          {'command': 'location', 'description': '📍 查看或注入虚拟定位 (例: /location 22.3193 114.1694)'},
+          {'command': 'location_stop', 'description': '⚪ 停止虚拟定位，恢复真实 GPS'},
           {'command': 'announce', 'description': '📣 向所有已登记会话发布公告'},
           {'command': 'help', 'description': '🤖 打开交互式主控台'},
         ],
@@ -2154,6 +2235,8 @@ class RemoteGatewayService {
     if (data == 'cmd:download_test') toast = '🚀 开始下载 Speedtest 公开测试 eSIM...';
     if (data == 'cmd:back') toast = '🏠 正在切回默认主卡...';
     if (data == 'cmd:default') toast = '📌 正在绑定默认主卡...';
+    if (data == 'cmd:location') toast = '📍 正在读取虚拟定位状态...';
+    if (data == 'cmd:location_stop') toast = '⚪ 正在停止虚拟定位...';
     if (data.startsWith('use:')) toast = '🔄 正在下发持久切卡指令...';
     if (data.startsWith('use_temp:')) toast = '⏱️ 正在切换为 5 分钟临时接码模式...';
     if (data.startsWith('ka_set:')) toast = '🛡️ 正在保存定时保号规则...';
@@ -2265,7 +2348,7 @@ class RemoteGatewayService {
         ? ''
         : trimmedText.substring(firstNewline + 1).trim();
     final command = RegExp(
-      r'^/(start|help|menu|list|status|use|use_temp|back|default|rename|keepalive|keepalive_now|readers|reader|retry_sms|download|download_test|delete|delete_confirm|delete_cancel|announce|guard|guard_toggle|guard_now|proxy|proxy_toggle|proxy_group|proxy_node|tunnel|kick)(?:@[A-Za-z0-9_]+)?(?:\s+(.*))?$',
+      r'^/(start|help|menu|list|status|use|use_temp|back|default|rename|keepalive|keepalive_now|readers|reader|retry_sms|download|download_test|delete|delete_confirm|delete_cancel|announce|guard|guard_toggle|guard_now|proxy|proxy_toggle|proxy_group|proxy_node|location|location_stop|tunnel|kick)(?:@[A-Za-z0-9_]+)?(?:\s+(.*))?$',
       caseSensitive: false,
     ).firstMatch(commandLine);
     if (command == null) return null;
@@ -2409,6 +2492,7 @@ class RemoteGatewayService {
       _TelegramButton('🌐 代理联动', 'cmd:proxy'),
     ],
     [
+      _TelegramButton('📍 虚拟定位', 'cmd:location'),
       _TelegramButton('📡 接码通道状态', 'cmd:tunnel'),
     ],
   ];
@@ -2641,6 +2725,109 @@ class RemoteGatewayService {
     }
     return '⚠️ 未能关闭数据：'
         '${result.error ?? '当前构建没有强制能力，请手动在系统设置里关闭数据漫游'}。';
+  }
+
+  /// `/location` shows the state; `/location <lat> <lng> [名称]` or
+  /// `/location <lat>,<lng>[,<名称>]` injects.
+  ///
+  /// The console is the place to browse templates; this is for the case the
+  /// console cannot serve — a phone you are not holding.
+  Future<_TelegramReply> _buildLocationReply(String argument) async {
+    final settings = AppSettings();
+    if (argument.isEmpty) {
+      final st = await locationStatus();
+      final injecting = st['injecting'] == true;
+      final lat = st['latitude'];
+      final lng = st['longitude'];
+      final label = st['label'];
+      final providers = (st['providers'] as List<Object?>?) ?? const [];
+      final lines = <String>[
+        '📍 虚拟定位',
+        '',
+        '状态：${injecting ? '🟢 正在注入' : '⚪ 未注入'}',
+        if (injecting && lat is num && lng is num)
+          '坐标：${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}'
+              '${label is String && label.isNotEmpty ? '（$label）' : ''}',
+        '通道：${providers.isEmpty ? '无（未注册测试 Provider）' : providers.join(' / ')}',
+        '模式：${st['mode']}',
+        '系统模拟位置：${st['isMockApp'] == true ? '✅ 已授权' : '❌ 未授权'}',
+        'Shizuku：${st['isShizukuAvailable'] == true ? '✅ 可用' : '❌ 不可用'}',
+        '切卡自动注入：${settings.mockLocationLinkageEnabled ? '🟢 开' : '⚪ 关'}',
+        '',
+        '用法：',
+        '· /location 22.3193 114.1694 香港尖沙咀',
+        '· /location 22.3193,114.1694',
+        '· /location_stop 停止注入',
+        '',
+        '模板与权限在 App「虚拟定位」页调整。',
+      ];
+      return _TelegramReply(
+        lines.join('\n'),
+        keyboard: [
+          [
+            _TelegramButton(
+              injecting ? '⚪ 停止注入' : '📍 刷新状态',
+              injecting ? 'cmd:location_stop' : 'cmd:location',
+            ),
+            _TelegramButton('📡 查看基带状态', 'cmd:status'),
+          ],
+        ],
+      );
+    }
+
+    // Accept both "lat lng name" and "lat,lng,name".
+    final parts = argument
+        .replaceAll(',', ' ')
+        .split(RegExp(r'\s+'))
+        .where((p) => p.trim().isNotEmpty)
+        .toList();
+    if (parts.length < 2) {
+      return const _TelegramReply(
+        '💡 用法：/location <纬度> <经度> [地点名称]\n'
+        '例：/location 22.3193 114.1694 香港尖沙咀',
+      );
+    }
+    final lat = double.tryParse(parts[0]);
+    final lng = double.tryParse(parts[1]);
+    if (lat == null || lng == null) {
+      return const _TelegramReply('⚠️ 经纬度必须是数字，例如 /location 22.3193 114.1694');
+    }
+    if (lat < -90 || lat > 90) {
+      return const _TelegramReply('⚠️ 纬度必须在 -90 到 90 之间。');
+    }
+    if (lng < -180 || lng > 180) {
+      return const _TelegramReply('⚠️ 经度必须在 -180 到 180 之间。');
+    }
+    final label = parts.length > 2 ? parts.sublist(2).join(' ') : '远程指定位置';
+    final ok = await applyManualLocation(
+      latitude: lat,
+      longitude: lng,
+      label: label,
+    );
+    if (!ok) {
+      return const _TelegramReply(
+        '❌ 注入失败：系统没有授予模拟位置权限，也没有可用的 Shizuku。\n'
+        '请到「开发者选项 → 选择模拟位置信息应用」选择本应用，或启动并授权 Shizuku。',
+        keyboard: [
+          [
+            _TelegramButton('📍 查看定位状态', 'cmd:location'),
+          ],
+        ],
+      );
+    }
+    await settings.setLastMockLocationRule('$lat, $lng, $label');
+    return _TelegramReply(
+      '✅ 已注入虚拟定位\n\n'
+      '地点：$label\n'
+      '坐标：${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}\n'
+      '模式：${settings.mockLocationMode}',
+      keyboard: const [
+        [
+          _TelegramButton('⚪ 停止注入', 'cmd:location_stop'),
+          _TelegramButton('📍 查看定位状态', 'cmd:location'),
+        ],
+      ],
+    );
   }
 
   Future<_TelegramReply> _buildProxyReply({String? header}) async {
@@ -3102,6 +3289,19 @@ class RemoteGatewayService {
           );
         case 'proxy_node':
           return await _switchProxyNode(argument.trim());
+        case 'location':
+          return await _buildLocationReply(argument.trim());
+        case 'location_stop':
+          await stopMockLocation();
+          return _TelegramReply(
+            '⚪ 已停止虚拟定位，系统 GPS 恢复为真实位置。',
+            keyboard: const [
+              [
+                _TelegramButton('📍 查看定位状态', 'cmd:location'),
+                _TelegramButton('📡 查看基带状态', 'cmd:status'),
+              ],
+            ],
+          );
         case 'tunnel':
           return await _buildTunnelReply();
         case 'announce':
@@ -3385,6 +3585,21 @@ class RemoteGatewayService {
         lines.add('\n🌐 代理联动：⚪ 未启用');
       }
     }
+    if (value['location'] is Map) {
+      final location = value['location'] as Map;
+      if (location['injecting'] == true) {
+        final lat = location['latitude'];
+        final lng = location['longitude'];
+        final label = location['label'];
+        final where = label is String && label.isNotEmpty ? '【$label】' : '';
+        final coords = lat is num && lng is num
+            ? ' (${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)})'
+            : '';
+        lines.add('\n📍 虚拟定位：🟢 正在注入$where$coords');
+      } else {
+        lines.add('\n📍 虚拟定位：⚪ 未注入');
+      }
+    }
     if (value['dataGuard'] is Map) {
       final guard = value['dataGuard'] as Map;
       if (guard['enabled'] == true) {
@@ -3653,6 +3868,7 @@ label{display:block;font-size:.76rem;color:var(--muted);margin:10px 0 6px}
   <span id="gwPill" class="pill">连接中…</span>
   <span id="guardPill" class="pill hide">流量卫士</span>
   <span id="proxyPill" class="pill hide">代理</span>
+  <span id="locPill" class="pill hide">定位</span>
   <span style="flex:1"></span>
   <button id="refresh">刷新</button>
 </header>
@@ -3670,6 +3886,7 @@ label{display:block;font-size:.76rem;color:var(--muted);margin:10px 0 6px}
     <div class="card"><h2>基带与设备</h2><div id="deviceBox"></div></div>
     <div class="card"><h2>流量卫士</h2><div id="guardBox"></div></div>
     <div class="card"><h2>代理联动</h2><div id="proxyBox"></div></div>
+    <div class="card"><h2>虚拟定位</h2><div id="locationBox"></div></div>
   </div>
 
   <div class="card" style="margin-top:14px">
@@ -3712,11 +3929,12 @@ function fmtEpoch(ms){if(!ms)return '—';const d=new Date(ms);const p=n=>String
 function fmtRemain(sec){if(sec==null)return null;const s=Math.max(0,sec|0);const m=Math.floor(s/60);return m+'分'+String(s%60).padStart(2,'0')+'秒'}
 
 function render(){
-  const d=S.data||{},st=d.status||{},session=st.session,network=st.network,device=st.device,card=st.card,proxy=st.proxy,guard=st.dataGuard;
+  const d=S.data||{},st=d.status||{},session=st.session,network=st.network,device=st.device,card=st.card,proxy=st.proxy,guard=st.dataGuard,loc=st.location;
   $('#gwPill').textContent=st.gateway==='running'?'网关运行中':'网关已停止';
   $('#gwPill').className='pill '+(st.gateway==='running'?'ok':'bad');
   if(guard){$('#guardPill').classList.remove('hide');$('#guardPill').textContent=guard.enabled?(guard.enforced?'流量卫士 · 已锁定':'流量卫士 · 待触发'):'流量卫士 · 关闭';$('#guardPill').className='pill '+(guard.enabled?(guard.enforced?'ok':'warn'):'')}
   if(proxy){$('#proxyPill').classList.remove('hide');$('#proxyPill').textContent='代理 · '+(proxy.enabled?(proxy.currentNode||'已启用'):'关闭');$('#proxyPill').className='pill '+(proxy.enabled?'ok':'')}
+  if(loc){$('#locPill').classList.remove('hide');$('#locPill').textContent='定位 · '+(loc.injecting?(loc.label||'注入中'):'关闭');$('#locPill').className='pill '+(loc.injecting?'ok':'')}
 
   // session
   const sb=[];
@@ -3787,6 +4005,28 @@ function render(){
   pb.push('<div class="row"><button data-act="proxySave" class="primary">保存并启用</button><button data-act="proxyTest">测试连接</button></div>');
   $('#proxyBox').innerHTML=pb.join('');
 
+  // location
+  const lb=[];
+  if(loc){
+    lb.push('<div class="kv"><span>注入状态</span><b>'+(loc.injecting?'🟢 正在注入':'⚪ 未注入')+'</b></div>');
+    if(loc.injecting&&loc.latitude!=null&&loc.longitude!=null){
+      lb.push('<div class="kv"><span>坐标</span><b class="mono">'+(+loc.latitude).toFixed(5)+', '+(+loc.longitude).toFixed(5)+'</b></div>');
+    }
+    if(loc.label)lb.push('<div class="kv"><span>地点</span><b>'+esc(loc.label)+'</b></div>');
+    const prov=(loc.providers&&loc.providers.length)?loc.providers.join(' / '):'无（未注册测试 Provider）';
+    lb.push('<div class="kv"><span>生效通道</span><b>'+esc(prov)+'</b></div>');
+    lb.push('<div class="kv"><span>权限</span><b>'+(loc.isMockApp?'系统 ✅':'系统 ❌')+' · '+(loc.isShizukuAvailable?'Shizuku ✅':'Shizuku ❌')+'</b></div>');
+    lb.push('<div class="kv"><span>切卡自动注入</span><b>'+(loc.linkageEnabled?'🟢 开':'⚪ 关')+'</b></div>');
+    lb.push('<div class="row"><button data-act="locStop" '+(loc.injecting?'':'disabled')+'>停止定位</button></div>');
+  }else{
+    lb.push('<div class="muted">暂无定位状态。</div>');
+  }
+  lb.push('<label for="locLat">纬度</label><input id="locLat" inputmode="decimal" placeholder="22.3193">');
+  lb.push('<label for="locLng">经度</label><input id="locLng" inputmode="decimal" placeholder="114.1694">');
+  lb.push('<label for="locName">地点名称（可选）</label><input id="locName" placeholder="香港尖沙咀">');
+  lb.push('<div class="row"><button data-act="locApply" class="primary">注入此坐标</button></div>');
+  $('#locationBox').innerHTML=lb.join('');
+
   // profiles
   const profiles=d.profiles||[];
   $('#profilesBox').innerHTML=profiles.length?profiles.map((p,i)=>{
@@ -3854,6 +4094,17 @@ document.addEventListener('click',async ev=>{
     if($('#pSecret').value)body.secret=$('#pSecret').value;
     await api('/api/v1/proxy/config','POST',body);S.proxyCfg=body;return body;
   },'代理联动已保存并启用');
+  if(act==='locApply')return (async()=>{
+    const lat=parseFloat($('#locLat').value),lng=parseFloat($('#locLng').value);
+    if(!isFinite(lat)||!isFinite(lng)){toast('请填写有效的经纬度',true);return}
+    btn.disabled=true;
+    try{
+      const r=await api('/api/v1/location','POST',{latitude:lat,longitude:lng,label:$('#locName').value||undefined});
+      toast(r.success?'已注入虚拟定位':'注入失败：请检查模拟位置权限',!r.success);
+      await refresh(true);
+    }catch(e){toast(e.message,true)}finally{btn.disabled=false}
+  })();
+  if(act==='locStop')return run(()=>api('/api/v1/location','DELETE',{}),'已停止虚拟定位');
   if(act==='copyOtp'){
     const otp=btn.dataset.otp||'';
     try{await navigator.clipboard.writeText(otp);toast('验证码 '+otp+' 已复制')}catch(_){toast('验证码：'+otp)}
