@@ -16,8 +16,15 @@ param(
     [switch]$SkipSign,
     [string]$FlutterRoot = 'C:\dev\flutter',
     [string]$JdkRoot = 'C:\Program Files\Eclipse Adoptium\jdk-17.0.21.9-hotspot',
-    [string]$AndroidSdk = "$env:LOCALAPPDATA\Android\Sdk"
+    [string]$AndroidSdk = "$env:LOCALAPPDATA\Android\Sdk",
+    # android-arm64 ships to phones; android-x64 is what the x86_64 redroid
+    # sandbox can actually run (its native bridge refuses libflutter.so).
+    [ValidateSet('android-arm64', 'android-x64')]
+    [string]$TargetPlatform = 'android-arm64'
 )
+
+$abiDir = if ($TargetPlatform -eq 'android-x64') { 'x86_64' } else { 'arm64-v8a' }
+$abiSuffix = if ($TargetPlatform -eq 'android-x64') { '-x64' } else { '' }
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
@@ -55,11 +62,11 @@ set ANDROID_SDK_ROOT=$AndroidSdk
 set ANDROID_NDK_HOME=$($env:ANDROID_NDK_HOME)
 set PATH=%JAVA_HOME%\bin;$env:USERPROFILE\.cargo\bin;%PATH%
 cd /d $repo
-call "$FlutterRoot\bin\flutter.bat" build apk --release --flavor m --target-platform android-arm64 --no-pub --dart-define=APP_VARIANT=multi --dart-define=APP_DISPLAY_NAME=eSIM-Matrix --dart-define=APP_UPDATE_FEED_URL=https://raw.githubusercontent.com/hg552/eSIM-Matrix/main/update_feed.json
+call "$FlutterRoot\bin\flutter.bat" build apk --release --flavor m --target-platform $TargetPlatform --no-pub --dart-define=APP_VARIANT=multi --dart-define=APP_DISPLAY_NAME=eSIM-Matrix --dart-define=APP_UPDATE_FEED_URL=https://raw.githubusercontent.com/hg552/eSIM-Matrix/main/update_feed.json
 exit /b %ERRORLEVEL%
 "@ | Set-Content -Path $wrapper -Encoding ASCII
 
-Write-Host "==> flutter build apk (multi, arm64, v$version)" -ForegroundColor Cyan
+Write-Host "==> flutter build apk (multi, $TargetPlatform, v$version)" -ForegroundColor Cyan
 # Gradle prints ordinary warnings (a deprecated Gradle version, ICU plural
 # warnings from the ARB files) on stderr. With ErrorActionPreference=Stop,
 # PowerShell turns the first such line into a terminating NativeCommandError and
@@ -80,8 +87,8 @@ if (-not (Test-Path $unsigned)) { throw "missing $unsigned" }
 # runtime. Refuse to hand out such a build.
 $entries = & 'C:\Windows\System32\tar.exe' -tf $unsigned
 if ($LASTEXITCODE -ne 0) { throw 'could not list the built APK' }
-if (-not ($entries | Select-String -SimpleMatch 'lib/arm64-v8a/librust_lib_nlpa2.so')) {
-    throw 'the APK has no lib/arm64-v8a/librust_lib_nlpa2.so: the Rust build failed (see the cargokit output above)'
+if (-not ($entries | Select-String -SimpleMatch "lib/$abiDir/librust_lib_nlpa2.so")) {
+    throw "the APK has no lib/$abiDir/librust_lib_nlpa2.so: the Rust build failed (see the cargokit output above)"
 }
 
 if ($SkipSign) {
@@ -90,7 +97,7 @@ if ($SkipSign) {
 }
 
 New-Item -ItemType Directory -Force -Path 'dist' | Out-Null
-$out = "dist\eSIM-Matrix-v$version.apk"
+$out = "dist\eSIM-Matrix-v$version$abiSuffix.apk"
 
 # Same three certificates as the published builds, so this installs over them.
 $apksigner = Get-ChildItem "$AndroidSdk\build-tools" -Directory |
